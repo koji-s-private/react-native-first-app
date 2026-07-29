@@ -157,4 +157,38 @@ describe('HomeScreen', () => {
 
     expect(saveButton?.props.accessibilityState?.disabled).toBe(false);
   });
+
+  it('shows the empty state when stored data is corrupted (invalid JSON)', async () => {
+    jest.spyOn(AsyncStorage, 'getItem').mockResolvedValueOnce('not valid json');
+
+    render(<HomeScreen />);
+
+    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(STORAGE_KEY));
+    expect(await screen.findByText(EMPTY_STATE_MESSAGE)).toBeTruthy();
+  });
+
+  it('rolls back entries and draft and shows an error message when AsyncStorage.setItem fails', async () => {
+    const storedEntries = [
+      { id: 'old', text: '過去の日記', createdAt: '2024-01-01T00:00:00.000Z' },
+    ];
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+    jest.clearAllMocks();
+
+    render(<HomeScreen />);
+    await screen.findByText('過去の日記');
+
+    jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
+
+    const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+    fireEvent.changeText(input, '今日の日記');
+    fireEvent.press(screen.getByText('保存'));
+
+    expect(
+      await screen.findByText('保存に失敗しました。もう一度お試しください。')
+    ).toBeTruthy();
+
+    expect(screen.queryByText('今日の日記')).toBeNull();
+    expect(input.props.value).toBe('今日の日記');
+    expect(screen.getByText('過去の日記')).toBeTruthy();
+  });
 });
