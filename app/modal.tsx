@@ -8,6 +8,10 @@ export default function ModalScreen() {
   return (
     <ThemedView style={styles.container}>
       <ThemedText type="title">This is a modal</ThemedText>
+      <ThemedText style={styles.description}>
+        Swipe down, use your device&apos;s back gesture or button, or tap the
+        link below to close this modal.
+      </ThemedText>
       <Link href="/" dismissTo style={styles.link}>
         <ThemedText type="link">Go to home screen</ThemedText>
       </Link>
@@ -21,6 +25,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
+  },
+  description: {
+    marginTop: 10,
+    textAlign: 'center',
   },
   link: {
     marginTop: 15,
