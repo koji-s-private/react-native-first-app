@@ -47,3 +47,10 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
 - **reviewer が LGTM を出した場合のみ**、PM(呼び出し元)がその場で `gh pr merge --squash --delete-branch` を実行し、人間の事前承認なしで main に自動マージする
 - reviewer が LGTM を出さなかった場合は絶対にマージしない。Projectsのステータスを `Under Review` のままにし、人間の判断を待つ(`Done` にしない)
 - この自動マージ運用はコストを増やさない前提(Publicリポジトリ + Pro契約のOAuthトークンの範囲内)で成立している。挙動が信頼できると分かるまでは、まず小さいBACKLOG項目で様子を見ること
+
+## スコープ外の発見事項の扱い
+- coder / qa-engineer / reviewer が作業中に今回のIssueと無関係な問題(バグ、技術的負債、改善点)に気づいた場合、
+  その場では直さずPMへの報告に「スコープ外の発見事項」として含める
+- PMはそれを新しいIssueとして作成し、`found-in-review` ラベルを付けてProjectに追加する(Statusは `Todo`)
+- **`ai-auto-dev` ラベルは付けない**。AIが自分の見つけた問題を連鎖的に自動着手し続ける暴走を防ぐため、
+  内容を人間が確認してから手動で `ai-auto-dev` を追加する運用とする

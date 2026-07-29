@@ -41,3 +41,12 @@ app-example
 # generated native folders
 /ios
 /android
+
+# グローバルgitignoreで .claude ディレクトリ自体が除外される環境があるため、
+# チーム共有すべきファイルだけ明示的に再include する
+# (settings.local.json は個人設定のため引き続き除外)
+!.claude/
+!.claude/agents/
+!.claude/agents/*.md
+!.claude/settings.json
+.claude/settings.local.json

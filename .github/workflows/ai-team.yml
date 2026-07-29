@@ -77,6 +77,15 @@ jobs:
             11. ターン数の都合などでLGTMに到達できずに終了する場合は、絶対にマージしないこと。
                 PRにこれまでの経緯を要約したコメントを残し、Status は Under Review のままにして人間の判断を待つ
                 (In Progress や Todo に戻さない。PRが開いたまま止まっていることが分かるようにする)
+            12. coder / qa-engineer / reviewer のいずれかの報告に「スコープ外の発見事項」が
+                含まれていた場合、それぞれについて以下を行う(なければ何もしなくてよい):
+                a. `gh issue create --title "<簡潔なタイトル>" --body "<発見内容。どのサブエージェントが何の作業中に気づいたか、元Issue #${{ github.event.issue.number }} へのリンクを含める>"` で新しいIssueを作成する
+                b. `gh issue edit <新Issue番号> --add-label found-in-review` でラベルを付与する
+                   (`ai-auto-dev` は絶対に付けないこと。自動着手させず、人間が内容を見てから
+                   手動でラベルを追加する運用にする)
+                c. `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <新Issueのurl>`
+                   でProjectに追加する(Statusは既定の Todo のままでよい)
+                d. `gh issue comment ${{ github.event.issue.number }} --body "関連Issueとして #<新Issue番号> を作成しました"`
 
             各サブエージェントは Task tool 経由で呼び出してください。
             reviewer の LGTM なしでのマージは、テストが全て通っていたとしても禁止です。
