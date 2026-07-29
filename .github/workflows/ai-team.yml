@@ -59,4 +59,4 @@ jobs:
             各サブエージェントは Task tool 経由で呼び出してください。
             reviewer の LGTM なしでのマージは、テストが全て通っていたとしても禁止です。
           claude_args: |
-            --max-turns 40
+            --max-turns 40 --allowedTools "Bash,Read,Write,Edit,Grep,Glob,Task"

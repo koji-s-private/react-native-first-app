@@ -63,4 +63,4 @@ jobs:
             1リポジトリの状態を荒らさないよう、1回の実行で作成するIssueは最大5件までとしてください。
             それを超える未着手項目がある場合は、古い(ファイル内で上にある)ものから優先してください。
           claude_args: |
-            --max-turns 20
+            --max-turns 20 --allowedTools "Bash,Read,Write,Edit,Grep,Glob"
