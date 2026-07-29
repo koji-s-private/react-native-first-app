@@ -15,10 +15,18 @@ jest.mock('expo-router', () => {
     Menu: typeof PassThrough;
     MenuAction: () => null;
   };
+  function LinkPreview() {
+    return null;
+  }
+
+  function LinkMenuAction() {
+    return null;
+  }
+
   Link.Trigger = PassThrough;
-  Link.Preview = () => null;
+  Link.Preview = LinkPreview;
   Link.Menu = PassThrough;
-  Link.MenuAction = () => null;
+  Link.MenuAction = LinkMenuAction;
 
   return { Link };
 });
