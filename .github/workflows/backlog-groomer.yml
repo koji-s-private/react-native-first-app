@@ -16,7 +16,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 concurrency:
@@ -28,6 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+      PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
+      PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
     steps:
       - uses: actions/checkout@v4
 
@@ -45,12 +47,15 @@ jobs:
                同じ内容のIssueがすでに存在しないか確認する(タイトルが完全一致でなくても、
                明らかに同じ内容なら重複とみなしてスキップする)
             2. 重複がなければ `gh issue create --title "<簡潔なタイトル>" --body "<BACKLOG.mdの元の記述と、実装時に満たすべき受け入れ条件を箇条書きで>"`
-               でIssueを作成する
-            3. 作成したIssueに対して、Issue作成とは別のコマンドとして
+               でIssueを作成する(作成されたIssueのURLが出力される)
+            3. 作成したIssueを Project に追加する
+               `gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <issueのURL>`
+               (Statusは自動的にデフォルトの Todo になる。ここでは変更不要)
+            4. Issueに対して、作成とは別のコマンドとして
                `gh issue edit <issue番号> --add-label ai-auto-dev` を実行し、ラベルを付与する
                (作成と同時に --label で付与しない。ラベル付与イベントとして確実に検知させるため、
-               必ず作成後の別コマンドで付与すること)
-            4. Issue化できた項目は、BACKLOG.md 内でその行を `- [x]` に書き換えてコミット・プッシュする
+               必ず作成後の別コマンドで付与すること。これがPMエージェントを起動するトリガーになる)
+            5. Issue化できた項目は、BACKLOG.md 内でその行を `- [x]` に書き換えてコミット・プッシュする
                (コミットメッセージは `chore: mark backlog item as tracked (#<issue番号>)`)
 
             1リポジトリの状態を荒らさないよう、1回の実行で作成するIssueは最大5件までとしてください。

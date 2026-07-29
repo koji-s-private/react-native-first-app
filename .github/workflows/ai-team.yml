@@ -19,6 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+      PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
+      PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+      PROJECT_ID: ${{ vars.PROJECT_ID }}
+      STATUS_FIELD_ID: ${{ vars.STATUS_FIELD_ID }}
+      STATUS_IN_PROGRESS_ID: ${{ vars.STATUS_IN_PROGRESS_ID }}
+      STATUS_DONE_ID: ${{ vars.STATUS_DONE_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -30,19 +36,24 @@ jobs:
             あなたはこのチームのPM/リードエンジニアです。
             Issue #${{ github.event.issue.number }} を分析し、以下を順番に行ってください。
 
-            1. 要件を明確化し、実装タスクに分解する
-            2. coder サブエージェントに実装とブランチ作成を依頼する
-            3. qa-engineer サブエージェントにテスト作成・実行を依頼する
-            4. テストが失敗した場合は coder に修正を依頼し、3に戻る(通るまで繰り返す)
-            5. テストが通ったら reviewer サブエージェントにレビューを依頼する
-            6. reviewer が LGTM を出したら、`Closes #${{ github.event.issue.number }}` を含めてPRを作成する
+            0. `gh project item-list $PROJECT_NUMBER --owner $PROJECT_OWNER --format json` で
+               この Issue に対応する Project item を探し、ITEM_ID を控える
+               (backlog-groomer が作成した Issue は既に Project に追加済みのはず。
+               見つからない場合は `gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <issue-url>` で追加する)
+            1. 上記 ITEM_ID を使い、Status を In Progress に更新する
+               `gh project item-edit --project-id $PROJECT_ID --field-id $STATUS_FIELD_ID --id <ITEM_ID> --single-select-option-id $STATUS_IN_PROGRESS_ID`
+            2. 要件を明確化し、実装タスクに分解する
+            3. coder サブエージェントに実装とブランチ作成を依頼する
+            4. qa-engineer サブエージェントにテスト作成・実行を依頼する
+            5. テストが失敗した場合は coder に修正を依頼し、4に戻る(通るまで繰り返す)
+            6. テストが通ったら reviewer サブエージェントにレビューを依頼する
+            7. reviewer が LGTM を出したら、`Closes #${{ github.event.issue.number }}` を含めてPRを作成する
                (`gh pr create --title ... --body ...`)
-            7. reviewer が LGTM を出した場合のみ、続けて
-               `gh pr merge --squash --delete-branch <PR番号>` を実行しそのままmainへ自動マージする。
-               reviewer が LGTM を出さなかった場合は絶対にマージしないこと。
-               PRのコメントに reviewer からの指摘を貼り付け、Projectsのステータスを In Review のまま人間の判断を待つ
-            8. マージが完了したら、CLAUDE.md の手順に従い Projectsのステータスを Done に更新する
-               (マージしなかった場合は 7 の通り In Review のままにする)
+            8. reviewer が LGTM を出した場合のみ、続けて
+               `gh pr merge --squash --delete-branch <PR番号>` を実行しそのままmainへ自動マージし、
+               Status を Done に更新する(1と同じ `gh project item-edit` コマンドで option id を $STATUS_DONE_ID に変える)
+            9. reviewer が LGTM を出さなかった場合は絶対にマージしないこと。
+               PRのコメントに reviewer からの指摘を貼り付け、Status は In Progress のままにして人間の判断を待つ
 
             各サブエージェントは Task tool 経由で呼び出してください。
             reviewer の LGTM なしでのマージは、テストが全て通っていたとしても禁止です。
