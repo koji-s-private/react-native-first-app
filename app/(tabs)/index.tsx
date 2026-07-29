@@ -1,105 +1,184 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  TextInput,
+} from 'react-native';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { useThemeColor } from '@/hooks/use-theme-color';
+
+const STORAGE_KEY = 'diary-entries';
+
+type DiaryEntry = {
+  id: string;
+  text: string;
+  createdAt: string;
+};
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedText style={styles.introText}>
-        This is a starter app built with Expo and React Native. Follow the steps below to start
-        customizing it.
-      </ThemedText>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const [entries, setEntries] = useState<DiaryEntry[]>([]);
+  const [draft, setDraft] = useState('');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const textColor = useThemeColor({}, 'text');
+  const tintColor = useThemeColor({}, 'tint');
+  const backgroundColor = useThemeColor({}, 'background');
+  const iconColor = useThemeColor({}, 'icon');
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
+  useEffect(() => {
+    (async () => {
+      try {
+        const stored = await AsyncStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          setEntries(JSON.parse(stored) as DiaryEntry[]);
+        }
+      } catch {
+        // ストレージが壊れている・スキーマ不整合の場合は空の状態から始める
+        setEntries([]);
+      }
+    })();
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    const trimmed = draft.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    const newEntry: DiaryEntry = {
+      id: Date.now().toString(),
+      text: trimmed,
+      createdAt: new Date().toISOString(),
+    };
+    const previousEntries = entries;
+    const previousDraft = draft;
+    const nextEntries = [newEntry, ...entries];
+
+    setEntries(nextEntries);
+    setDraft('');
+    setSaveError(null);
+
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextEntries));
+    } catch {
+      // 永続化に失敗した場合は保存前の状態に戻し、ユーザーにエラーを伝える
+      setEntries(previousEntries);
+      setDraft(previousDraft);
+      setSaveError('保存に失敗しました。もう一度お試しください。');
+    }
+  }, [draft, entries]);
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ThemedView style={styles.container}>
+        <ThemedText type="title" style={styles.title}>
+          日記
         </ThemedText>
+
+        <ThemedView style={styles.composer}>
+          <TextInput
+            style={[styles.input, { color: textColor, borderColor: tintColor }]}
+            placeholder="今日の出来事や気持ちを書いてみましょう"
+            placeholderTextColor={iconColor}
+            value={draft}
+            onChangeText={setDraft}
+            multiline
+          />
+          <Pressable
+            style={[styles.saveButton, { backgroundColor: tintColor }]}
+            onPress={handleSave}
+            disabled={!draft.trim()}>
+            <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
+              保存
+            </ThemedText>
+          </Pressable>
+          {saveError ? (
+            <ThemedText style={styles.errorText}>{saveError}</ThemedText>
+          ) : null}
+        </ThemedView>
+
+        {entries.length === 0 ? (
+          <ThemedView style={styles.emptyState}>
+            <ThemedText>まだ日記がありません。最初の日記を書いてみましょう。</ThemedText>
+          </ThemedView>
+        ) : (
+          <FlatList
+            style={styles.list}
+            data={entries}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <ThemedView style={[styles.entry, { borderBottomColor: iconColor }]}>
+                <ThemedText style={styles.entryDate}>
+                  {new Date(item.createdAt).toLocaleString()}
+                </ThemedText>
+                <ThemedText>{item.text}</ThemedText>
+              </ThemedView>
+            )}
+          />
+        )}
       </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
+  flex: {
+    flex: 1,
+  },
+  container: {
+    flex: 1,
+    padding: 16,
+    gap: 16,
+  },
+  title: {
+    marginTop: 8,
+  },
+  composer: {
+    gap: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    minHeight: 80,
+    textAlignVertical: 'top',
+    fontSize: 16,
+  },
+  saveButton: {
+    alignSelf: 'flex-end',
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  saveButtonText: {
+    fontWeight: '600',
+  },
+  errorText: {
+    color: '#d32f2f',
+    fontSize: 14,
+  },
+  emptyState: {
+    flex: 1,
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'center',
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  list: {
+    flex: 1,
   },
-  introText: {
-    marginBottom: 8,
+  entry: {
+    gap: 4,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  entryDate: {
+    fontSize: 12,
+    opacity: 0.6,
   },
 });
