@@ -24,14 +24,22 @@ type DiaryEntry = {
 export default function HomeScreen() {
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
   const [draft, setDraft] = useState('');
+  const [saveError, setSaveError] = useState<string | null>(null);
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
+  const backgroundColor = useThemeColor({}, 'background');
+  const iconColor = useThemeColor({}, 'icon');
 
   useEffect(() => {
     (async () => {
-      const stored = await AsyncStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        setEntries(JSON.parse(stored) as DiaryEntry[]);
+      try {
+        const stored = await AsyncStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          setEntries(JSON.parse(stored) as DiaryEntry[]);
+        }
+      } catch {
+        // ストレージが壊れている・スキーマ不整合の場合は空の状態から始める
+        setEntries([]);
       }
     })();
   }, []);
@@ -47,11 +55,22 @@ export default function HomeScreen() {
       text: trimmed,
       createdAt: new Date().toISOString(),
     };
+    const previousEntries = entries;
+    const previousDraft = draft;
     const nextEntries = [newEntry, ...entries];
 
     setEntries(nextEntries);
     setDraft('');
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextEntries));
+    setSaveError(null);
+
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextEntries));
+    } catch {
+      // 永続化に失敗した場合は保存前の状態に戻し、ユーザーにエラーを伝える
+      setEntries(previousEntries);
+      setDraft(previousDraft);
+      setSaveError('保存に失敗しました。もう一度お試しください。');
+    }
   }, [draft, entries]);
 
   return (
@@ -67,7 +86,7 @@ export default function HomeScreen() {
           <TextInput
             style={[styles.input, { color: textColor, borderColor: tintColor }]}
             placeholder="今日の出来事や気持ちを書いてみましょう"
-            placeholderTextColor="#687076"
+            placeholderTextColor={iconColor}
             value={draft}
             onChangeText={setDraft}
             multiline
@@ -76,8 +95,13 @@ export default function HomeScreen() {
             style={[styles.saveButton, { backgroundColor: tintColor }]}
             onPress={handleSave}
             disabled={!draft.trim()}>
-            <ThemedText style={styles.saveButtonText}>保存</ThemedText>
+            <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
+              保存
+            </ThemedText>
           </Pressable>
+          {saveError ? (
+            <ThemedText style={styles.errorText}>{saveError}</ThemedText>
+          ) : null}
         </ThemedView>
 
         {entries.length === 0 ? (
@@ -90,7 +114,7 @@ export default function HomeScreen() {
             data={entries}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
-              <ThemedView style={styles.entry}>
+              <ThemedView style={[styles.entry, { borderBottomColor: iconColor }]}>
                 <ThemedText style={styles.entryDate}>
                   {new Date(item.createdAt).toLocaleString()}
                 </ThemedText>
@@ -134,7 +158,11 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   saveButtonText: {
-    color: '#fff',
+    fontWeight: '600',
+  },
+  errorText: {
+    color: '#d32f2f',
+    fontSize: 14,
   },
   emptyState: {
     flex: 1,
@@ -148,7 +176,6 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#687076',
   },
   entryDate: {
     fontSize: 12,
