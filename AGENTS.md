@@ -41,12 +41,19 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
 - 3者の作業が完了し、テストが通ってからPRを作成する
 - ワークフロー本体は [.github/workflows/ai-team.yml](.github/workflows/ai-team.yml) を参照
 
-## Issue自動作成とマージ方針
-- [BACKLOG.md](BACKLOG.md) の未着手項目は [.github/workflows/backlog-groomer.yml](.github/workflows/backlog-groomer.yml) が定期的に読み取り、重複がなければ Issue を自動作成し `ai-auto-dev` ラベルを付与する
+## プロダクト方針とIssue自動作成
+- 常設の[📍 プロダクトロードマップ Issue](https://github.com/koji-s-private/react-native-first-app/issues/7)(`roadmap-thread` ラベル)に
+  人間が機能追加・改善・方針転換をコメントで書き込む運用にしている(BACKLOG.mdは廃止)
+- [.github/workflows/roadmap-groomer.yml](.github/workflows/roadmap-groomer.yml) が
+  ロードマップIssueへの新規コメントをトリガーに起動し、要望を次のいずれかに振り分ける
+  - 新規の要望 → 新しいIssueを作成し `ai-auto-dev` ラベルを付与(即自動着手)
+  - 既存Issueへの方針変更 → 該当Issueにコメント追記、または未着手なら本文を更新
+  - 既存Issueの取り下げ → 該当Issueをクローズ
+  - アクション不要な内容(雑談・確認質問など) → 何もしない
 - `ai-auto-dev` ラベルが付いた Issue は ai-team.yml を自動起動し、coder → qa-engineer → reviewer の順で処理される
 - **reviewer が LGTM を出した場合のみ**、PM(呼び出し元)がその場で `gh pr merge --squash --delete-branch` を実行し、人間の事前承認なしで main に自動マージする
 - reviewer が LGTM を出さなかった場合は絶対にマージしない。Projectsのステータスを `Under Review` のままにし、人間の判断を待つ(`Done` にしない)
-- この自動マージ運用はコストを増やさない前提(Publicリポジトリ + Pro契約のOAuthトークンの範囲内)で成立している。挙動が信頼できると分かるまでは、まず小さいBACKLOG項目で様子を見ること
+- この自動マージ運用はコストを増やさない前提(Publicリポジトリ + Pro契約のOAuthトークンの範囲内)で成立している。挙動が信頼できると分かるまでは、まず小さい要望で様子を見ること
 
 ## スコープ外の発見事項の扱い
 - coder / qa-engineer / reviewer が作業中に今回のIssueと無関係な問題(バグ、技術的負債、改善点)に気づいた場合、

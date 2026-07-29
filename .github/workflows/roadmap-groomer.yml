@@ -1,0 +1,84 @@
+name: Roadmap Comment Groomer
+
+# 常設の「プロダクトロードマップ」Issue(roadmap-threadラベル)への
+# 新規コメントをトリガーに、要望を新規Issue化 / 既存Issueへの反映 / クローズ を行う。
+# BACKLOG.mdによる定期取り込みの代わりに、コメントベースでリアルタイムに反応する。
+#
+# 無料運用メモ:
+# - Publicリポジトリなので Actions 実行時間は無料(無制限)
+# - Claude Code の利用は Pro契約の枠内(CLAUDE_CODE_OAUTH_TOKEN、追加課金なし)
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: roadmap-groomer
+  cancel-in-progress: false
+
+jobs:
+  groom-roadmap:
+    if: >
+      contains(github.event.issue.labels.*.name, 'roadmap-thread') &&
+      github.event.comment.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    env:
+      # gh project 系コマンドは claude-code-action の内部トークン(claude[bot])では
+      # Organization配下のProjectを操作できないため、専用トークンを別名で持たせて明示的に使う
+      PROJECTS_GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+      PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
+      PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run roadmap groomer agent
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: "claude"
+          prompt: |
+            あなたはこのプロダクトのロードマップ担当です。
+            Issue #${{ github.event.issue.number }}(プロダクトロードマップ、常設スレッド)に
+            新しいコメントが投稿されました。このIssue自体はタスクではないので、
+            クローズしたり `ai-auto-dev` ラベルを付けたりしないでください。
+
+            最新コメント(今回のトリガー):
+            """
+            ${{ github.event.comment.body }}
+            """
+
+            1. `gh issue view ${{ github.event.issue.number }} --comments` でスレッド全体の文脈を確認する
+            2. `gh issue list --state open` で既存のオープンIssue一覧を確認する
+            3. 最新コメントの内容を踏まえて、含まれる要望それぞれについて以下のいずれかで対応する
+               (1コメントに複数の要望が含まれる場合は個別に判断・処理すること):
+
+               a. 新しい機能追加・改善の要望
+                  → 実装に足る粒度まで要件・受け入れ条件を整理した上で
+                    `gh issue create --title "<簡潔なタイトル>" --body "<要件・受け入れ条件>"` で新しいIssueを作成
+                  → 作成とは別コマンドで `gh issue edit <新Issue番号> --add-label ai-auto-dev` を実行してラベルを付与
+                    (作成と同時に --label で付与しないこと。ラベル付与イベントとして確実に検知させるため)
+                  → 続けて `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <新IssueのURL>`
+                    でProjectに追加する(Statusは既定のTodoのままでよい)
+
+               b. 既存のオープンIssue(未着手または対応中)に対する方針変更・修正指示
+                  → 該当Issueに `gh issue comment <該当Issue番号> --body "..."` で変更内容を追記する
+                  → まだ実装に着手していないと判断できる場合は、`gh issue edit <該当Issue番号> --body "..."` で
+                    本文自体を新しい要件に更新してもよい
+
+               c. 既存Issueのキャンセル・不要になった指示
+                  → `gh issue close <該当Issue番号> --comment "コメントの指示により不要と判断したためクローズします"`
+
+               d. 単なる雑談・確認質問など、具体的なアクションが不要な内容
+                  → 何も作成・変更しない
+
+            4. 対応内容(何を作成/更新/クローズしたか、または何もしなかったか)を簡潔に要約し、
+               `gh issue comment ${{ github.event.issue.number }} --body "..."` でロードマップIssue自体に返信する
+
+            迷う場合は、新規Issue作成よりもロードマップIssueへの確認コメントを優先してください。
+          claude_args: |
+            --max-turns 40 --allowedTools "Bash,Read,Grep,Glob"
