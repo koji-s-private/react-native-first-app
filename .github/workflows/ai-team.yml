@@ -25,6 +25,7 @@ jobs:
       PROJECT_ID: ${{ vars.PROJECT_ID }}
       STATUS_FIELD_ID: ${{ vars.STATUS_FIELD_ID }}
       STATUS_IN_PROGRESS_ID: ${{ vars.STATUS_IN_PROGRESS_ID }}
+      STATUS_UNDER_REVIEW_ID: ${{ vars.STATUS_UNDER_REVIEW_ID }}
       STATUS_DONE_ID: ${{ vars.STATUS_DONE_ID }}
     steps:
       - uses: actions/checkout@v4
@@ -38,26 +39,34 @@ jobs:
             あなたはこのチームのPM/リードエンジニアです。
             Issue #${{ github.event.issue.number }} を分析し、以下を順番に行ってください。
 
+            以下、Project Status の更新は毎回このコマンドの `--single-select-option-id` だけを
+            差し替えて実行してください:
+            `gh project item-edit --project-id $PROJECT_ID --field-id $STATUS_FIELD_ID --id <ITEM_ID> --single-select-option-id <option-id>`
+
             0. `gh project item-list $PROJECT_NUMBER --owner $PROJECT_OWNER --format json` で
                この Issue に対応する Project item を探し、ITEM_ID を控える
                (backlog-groomer が作成した Issue は既に Project に追加済みのはず。
                見つからない場合は `gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <issue-url>` で追加する)
-            1. 上記 ITEM_ID を使い、Status を In Progress に更新する
-               `gh project item-edit --project-id $PROJECT_ID --field-id $STATUS_FIELD_ID --id <ITEM_ID> --single-select-option-id $STATUS_IN_PROGRESS_ID`
+            1. Status を In Progress ($STATUS_IN_PROGRESS_ID) に更新する
             2. 要件を明確化し、実装タスクに分解する
             3. coder サブエージェントに実装とブランチ作成を依頼する
             4. qa-engineer サブエージェントにテスト作成・実行を依頼する
-            5. テストが失敗した場合は coder に修正を依頼し、4に戻る(通るまで繰り返す)
-            6. テストが通ったら reviewer サブエージェントにレビューを依頼する
-            7. reviewer が LGTM を出したら、`Closes #${{ github.event.issue.number }}` を含めてPRを作成する
-               (`gh pr create --title ... --body ...`)
-            8. reviewer が LGTM を出した場合のみ、続けて
-               `gh pr merge --squash --delete-branch <PR番号>` を実行しそのままmainへ自動マージし、
-               Status を Done に更新する(1と同じ `gh project item-edit` コマンドで option id を $STATUS_DONE_ID に変える)
-            9. reviewer が LGTM を出さなかった場合は絶対にマージしないこと。
-               PRのコメントに reviewer からの指摘を貼り付け、Status は In Progress のままにして人間の判断を待つ
+            5. テストが失敗した場合は coder に修正を依頼し、4に戻る(通るまで繰り返す。この間は In Progress のまま)
+            6. テストが通ったら、ブランチを `git push -u origin <branch>` でリモートに反映し、
+               `Closes #${{ github.event.issue.number }}` を含めてPRを作成する(`gh pr create --title ... --body ...`)
+            7. PRを作成したら、Status を Under Review ($STATUS_UNDER_REVIEW_ID) に更新する
+            8. reviewer サブエージェントにレビューを依頼する
+            9. reviewer が修正を要求した場合は、coder に修正を依頼し、修正後の変更を
+               同じブランチにコミットして `git push` で反映してから、再度 reviewer にレビューを依頼する。
+               このループの間、Status は Under Review のままにする
+            10. reviewer が LGTM を出した場合のみ、続けて
+                `gh pr merge --squash --delete-branch <PR番号>` を実行しそのままmainへ自動マージし、
+                Status を Done ($STATUS_DONE_ID) に更新する
+            11. ターン数の都合などでLGTMに到達できずに終了する場合は、絶対にマージしないこと。
+                PRにこれまでの経緯を要約したコメントを残し、Status は Under Review のままにして人間の判断を待つ
+                (In Progress や Todo に戻さない。PRが開いたまま止まっていることが分かるようにする)
 
             各サブエージェントは Task tool 経由で呼び出してください。
             reviewer の LGTM なしでのマージは、テストが全て通っていたとしても禁止です。
           claude_args: |
-            --max-turns 40 --allowedTools "Bash,Read,Write,Edit,Grep,Glob,Task"
+            --max-turns 60 --allowedTools "Bash,Read,Write,Edit,Grep,Glob,Task"
