@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { Image } from 'expo-image';
 import { Platform, StyleSheet } from 'react-native';
 
@@ -10,6 +11,8 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Fonts } from '@/constants/theme';
 
 export default function TabTwoScreen() {
+  const appVersion = Constants.expoConfig?.version;
+
   return (
     <ParallaxScrollView
       headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}
@@ -93,6 +96,14 @@ export default function TabTwoScreen() {
             </ThemedText>
           ),
         })}
+      </Collapsible>
+      <Collapsible title="App version">
+        <ThemedText>
+          This app is currently on version{' '}
+          <ThemedText type="defaultSemiBold">{appVersion}</ThemedText>, as defined by{' '}
+          <ThemedText type="defaultSemiBold">expo.version</ThemedText> in{' '}
+          <ThemedText type="defaultSemiBold">app.json</ThemedText>.
+        </ThemedText>
       </Collapsible>
     </ParallaxScrollView>
   );
