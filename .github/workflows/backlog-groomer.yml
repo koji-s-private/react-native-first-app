@@ -1,0 +1,59 @@
+name: Backlog Groomer (Auto Issue Creation)
+
+# BACKLOG.md の未チェック項目を読み、既存Issueと重複しないものだけを
+# GitHub Issueとして自動作成し `ai-auto-dev` ラベルを付ける。
+# ラベル付与が ai-team.yml (PM Orchestrator) のトリガーになる。
+#
+# 無料運用メモ:
+# - Publicリポジトリなので Actions 実行時間は無料(無制限)
+# - Claude Code の利用は Pro契約の枠内(CLAUDE_CODE_OAUTH_TOKEN、追加課金なし)
+# - Proプランには5時間ローリングウィンドウ等の利用上限があるため、
+#   頻度を上げすぎると通常の対話利用と枠を食い合う点に注意
+
+on:
+  schedule:
+    - cron: "0 21 * * *" # 毎日 JST 6:00(UTC 21:00)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: backlog-groomer
+  cancel-in-progress: false
+
+jobs:
+  groom-backlog:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run backlog groomer agent
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            あなたはこのリポジトリのバックログ整理担当です。BACKLOG.md を読み、
+            `- [ ]` で始まる(まだチェックが付いていない)未着手項目を確認してください。
+
+            各未着手項目について、以下の手順で処理してください。
+
+            1. `gh issue list --state all --search "in:title <項目の要約>"` などで、
+               同じ内容のIssueがすでに存在しないか確認する(タイトルが完全一致でなくても、
+               明らかに同じ内容なら重複とみなしてスキップする)
+            2. 重複がなければ `gh issue create --title "<簡潔なタイトル>" --body "<BACKLOG.mdの元の記述と、実装時に満たすべき受け入れ条件を箇条書きで>"`
+               でIssueを作成する
+            3. 作成したIssueに対して、Issue作成とは別のコマンドとして
+               `gh issue edit <issue番号> --add-label ai-auto-dev` を実行し、ラベルを付与する
+               (作成と同時に --label で付与しない。ラベル付与イベントとして確実に検知させるため、
+               必ず作成後の別コマンドで付与すること)
+            4. Issue化できた項目は、BACKLOG.md 内でその行を `- [x]` に書き換えてコミット・プッシュする
+               (コミットメッセージは `chore: mark backlog item as tracked (#<issue番号>)`)
+
+            1リポジトリの状態を荒らさないよう、1回の実行で作成するIssueは最大5件までとしてください。
+            それを超える未着手項目がある場合は、古い(ファイル内で上にある)ものから優先してください。
+          claude_args: |
+            --max-turns 20
