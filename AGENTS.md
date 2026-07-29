@@ -21,14 +21,17 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
   `STATUS_TODO_ID`, `STATUS_IN_PROGRESS_ID`, `STATUS_UNDER_REVIEW_ID`, `STATUS_DONE_ID`)は
   GitHub Actionsのリポジトリ変数(`vars.*`)として登録済みで、各ワークフローの `env:` に渡している。
   エージェントは環境変数として直接参照できるので、都度 `gh project field-list` などで調べ直す必要はない
-- ステータス更新コマンド(ITEM_ID は `gh project item-list $PROJECT_NUMBER --owner $PROJECT_OWNER --format json` で取得)
+- ステータス更新コマンド(ITEM_ID は `gh project item-list` で取得)
   ```bash
-  gh project item-edit --project-id $PROJECT_ID --field-id $STATUS_FIELD_ID \
+  GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-edit --project-id $PROJECT_ID --field-id $STATUS_FIELD_ID \
     --id <ITEM_ID> --single-select-option-id $STATUS_IN_PROGRESS_ID
   ```
 - 作業開始時は `In Progress`、PR作成後は `Under Review`(reviewerとの修正ループ中もそのまま)、マージ完了後は `Done` に更新する
 - LGTMに至らず終了した場合も `In Progress` や `Todo` には戻さず `Under Review` のまま止め、人間が気づけるようにする
-- これらの操作には環境変数 `GH_TOKEN`(PROJECTS_TOKEN)を使うこと。デフォルトの `GITHUB_TOKEN` では Projects は操作できない
+- **重要**: `claude-code-action` はセッション内で `GH_TOKEN`/`GITHUB_TOKEN` を自身のGitHub Appインストールトークン(`claude[bot]`)で上書きする。
+  このbotトークンはIssue/PR操作はできるが、Organization配下のProjectsには権限がないため、
+  `gh project` で始まるコマンドは必ず `GH_TOKEN=$PROJECTS_GH_TOKEN` を先頭に付けて、専用トークンに明示的に差し替えて実行すること
+  (逆に issue/PR 操作は素の `gh` のままでよい)
 
 ## 役割分担
 - GitHub Actions上のセッション(このガイドラインを読んでいる側)はPM/リードエンジニア役。実装そのものは行わず、Task tool 経由で以下のサブエージェントに委任すること

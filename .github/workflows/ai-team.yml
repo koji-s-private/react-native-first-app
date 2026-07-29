@@ -19,7 +19,12 @@ jobs:
     if: github.event.label.name == 'ai-auto-dev'
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+      # 注意: claude-code-action は内部で GH_TOKEN/GITHUB_TOKEN を
+      # 自身のGitHub Appインストールトークン(claude[bot])で上書きするため、
+      # ここに直接 GH_TOKEN を設定しても Bash ツール内では効かない。
+      # 別名で持たせ、gh project 系コマンドを叩くときだけ明示的に
+      # `GH_TOKEN=$PROJECTS_GH_TOKEN gh project ...` のように前置して使う。
+      PROJECTS_GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
       PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
       PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
       PROJECT_ID: ${{ vars.PROJECT_ID }}
@@ -35,19 +40,25 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: "claude"
-          show_full_output: true
           prompt: |
             あなたはこのチームのPM/リードエンジニアです。
             Issue #${{ github.event.issue.number }} を分析し、以下を順番に行ってください。
 
+            重要: `gh project` で始まるコマンド(item-list, item-add, item-edit など)は
+            必ず先頭に `GH_TOKEN=$PROJECTS_GH_TOKEN` を付けて実行すること。
+            (通常のGH_TOKENはこのセッション用のbotトークンで、Organization配下の
+            Projectを読み書きする権限がないため、専用のPROJECTS_GH_TOKENに
+            明示的に差し替える必要がある)
+            例: `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-list $PROJECT_NUMBER --owner $PROJECT_OWNER --format json`
+
             以下、Project Status の更新は毎回このコマンドの `--single-select-option-id` だけを
             差し替えて実行してください:
-            `gh project item-edit --project-id $PROJECT_ID --field-id $STATUS_FIELD_ID --id <ITEM_ID> --single-select-option-id <option-id>`
+            `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-edit --project-id $PROJECT_ID --field-id $STATUS_FIELD_ID --id <ITEM_ID> --single-select-option-id <option-id>`
 
-            0. `gh project item-list $PROJECT_NUMBER --owner $PROJECT_OWNER --format json` で
+            0. `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-list $PROJECT_NUMBER --owner $PROJECT_OWNER --format json` で
                この Issue に対応する Project item を探し、ITEM_ID を控える
                (backlog-groomer が作成した Issue は既に Project に追加済みのはず。
-               見つからない場合は `gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <issue-url>` で追加する)
+               見つからない場合は `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <issue-url>` で追加する)
             1. Status を In Progress ($STATUS_IN_PROGRESS_ID) に更新する
             2. 要件を明確化し、実装タスクに分解する
             3. coder サブエージェントに実装とブランチ作成を依頼する

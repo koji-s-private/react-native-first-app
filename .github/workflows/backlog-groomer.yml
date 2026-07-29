@@ -28,7 +28,12 @@ jobs:
   groom-backlog:
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+      # 注意: claude-code-action は内部で GH_TOKEN/GITHUB_TOKEN を
+      # 自身のGitHub Appインストールトークン(claude[bot])で上書きするため、
+      # ここに直接 GH_TOKEN を設定しても Bash ツール内では効かない。
+      # 別名で持たせ、gh project 系コマンドを叩くときだけ明示的に
+      # `GH_TOKEN=$PROJECTS_GH_TOKEN gh project ...` のように前置して使う。
+      PROJECTS_GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
       PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
       PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
     steps:
@@ -49,8 +54,9 @@ jobs:
                明らかに同じ内容なら重複とみなしてスキップする)
             2. 重複がなければ `gh issue create --title "<簡潔なタイトル>" --body "<BACKLOG.mdの元の記述と、実装時に満たすべき受け入れ条件を箇条書きで>"`
                でIssueを作成する(作成されたIssueのURLが出力される)
-            3. 作成したIssueを Project に追加する
-               `gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <issueのURL>`
+            3. 作成したIssueを Project に追加する。`gh project` コマンドは通常のGH_TOKENでは
+               Organization配下のProjectを操作できないため、必ず先頭に `GH_TOKEN=$PROJECTS_GH_TOKEN` を付けること
+               `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <issueのURL>`
                (Statusは自動的にデフォルトの Todo になる。ここでは変更不要)
             4. Issueに対して、作成とは別のコマンドとして
                `gh issue edit <issue番号> --add-label ai-auto-dev` を実行し、ラベルを付与する
