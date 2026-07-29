@@ -21,6 +21,10 @@ export default function HomeScreen() {
         <ThemedText type="title">Welcome!</ThemedText>
         <HelloWave />
       </ThemedView>
+      <ThemedText style={styles.introText}>
+        This is a starter app built with Expo and React Native. Follow the steps below to start
+        customizing it.
+      </ThemedText>
       <ThemedView style={styles.stepContainer}>
         <ThemedText type="subtitle">Step 1: Try it</ThemedText>
         <ThemedText>
@@ -86,6 +90,9 @@ const styles = StyleSheet.create({
   },
   stepContainer: {
     gap: 8,
+    marginBottom: 8,
+  },
+  introText: {
     marginBottom: 8,
   },
   reactLogo: {
