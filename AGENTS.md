@@ -12,6 +12,7 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
 ## コード品質
 - 実装を変更したら対応するテストを `tests/` に必ず追加・更新する
 - テストが通らない状態でPRを作成しない
+- 新規に追加・変更するコードのコメントは日本語で記載する
 
 ## GitHub Projects 運用
 - Project board: [koji-s-private/react-native-first-app AI Team](https://github.com/orgs/koji-s-private/projects/4)(Projects v2)
