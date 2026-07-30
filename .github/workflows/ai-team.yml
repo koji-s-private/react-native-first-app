@@ -112,7 +112,13 @@ jobs:
                 このとき、直前まで設定していた Status(In Progress または Under Review)は
                 変更せずそのままにする(Todo や Done には絶対に変更しない)。
 
-            各サブエージェントは Task tool 経由で呼び出してください。
+            各サブエージェントは Task tool 経由で呼び出してください。その際は必ず
+            `run_in_background: false` を指定し、同期的に(結果が返るまで待って)実行すること。
+            もし呼び出した際に「Async agent launched successfully / バックグラウンドで実行中」
+            といった応答が返ってきた場合、それは誤ってバックグラウンド実行になってしまった合図です。
+            このセッションは1回限りのプロセスなので、後で結果を確認することはできず、そのまま
+            セッションを終了すると実行中のサブエージェントの作業は失われます。「完了を待ちます」と
+            発言するだけで実際には何もツールを呼ばずにターンを終了することは絶対にしないこと。
             reviewer の LGTM なしでのマージは、テストが全て通っていたとしても禁止です。
           claude_args: |
             --max-turns 60 --allowedTools "Bash,Read,Write,Edit,Grep,Glob,Task"
