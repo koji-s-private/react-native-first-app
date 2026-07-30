@@ -1,0 +1,69 @@
+name: Daily Health Check (Ticket Creation)
+
+# 毎日9:00 JST(=0:00 UTC)にリポジトリ全体をスキャンし、バグ・改善点・リファクタ候補・
+# UX提案をIssue化する。広く浅い定期健診担当。実装は行わない(それは ai-team.yml の担当)。
+#
+# 役割分担:
+# - roadmap-groomer.yml: オーナーがロードマップIssueにコメントした要望を起点にIssue化する(狭く深い、人間発信)
+# - ai-team.yml: 選んだ1件のIssueを実装する過程で偶然見つけたスコープ外の問題だけを
+#   found-in-reviewラベルでIssue化する(狭く深い、実装中の偶発的発見)
+# - このワークフロー: リポジトリ全体を能動的にスキャンする、広く浅い定期健診(自発的発見)
+# 起票するIssueが上記いずれとも重複しないよう、既存Open Issue一覧との重複チェックを必須とする。
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+jobs:
+  create-tickets:
+    runs-on: ubuntu-latest
+    env:
+      PROJECTS_GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+      PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
+      PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run daily health check agent
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: "claude"
+          prompt: |
+            あなたはこのリポジトリ(Expo/React Native製アプリ)の定期メンテナンス担当エージェントです。
+            以下の手順で実行してください。
+
+            1. リポジトリのコードを確認してください。特に `app/`, `components/`, `hooks/`, `constants/` 配下を中心に見てください。
+               Expoのバージョンが変わっている可能性があるため、実装上の指摘をする際は
+               AGENTS.md冒頭の案内(https://docs.expo.dev/versions/v54.0.0/)を踏まえること。
+            2. バグ、改善点、技術的負債、リファクタ候補(潜在的な問題や設計上の懸念を含む)を探してください。
+            3. 加えて、アプリのUI/UXを中心に、より使いやすくするための新機能・改善案(エンハンス)も検討してください。
+               例: 操作性向上、アクセシビリティ、レスポンシブ対応、エラー時の見せ方、ローディング体験など。
+               実装難易度やユーザーへの影響度も簡潔に評価してください。
+            4. `gh issue list --state open` で既存のOpen Issueを確認し、内容が重複するものは新規作成しないでください。
+               (roadmap-groomer.ymlがオーナーの要望から作成したIssue、ai-team.ymlが実装中に見つけた
+               found-in-reviewラベルのIssueとも重複しないこと。)
+               **既存Issueのラベル・本文・タイトルを変更・削除することは絶対にしないでください(あなたの役割は新規Issueの作成のみです)。**
+            5. 新たに見つかった問題・改善点・UI/UXエンハンス案ごとに、以下の形式で `gh issue create` を実行してIssueを作成してください。
+               - タイトル: 簡潔な1行(UI/UXの新機能提案の場合は先頭に「[UX提案]」を付ける)
+               - 本文: 「## 概要」「## 背景」「## やること」の3節構成(UX提案の場合は「## 期待される体験の向上」を加える)
+               - ラベル(`--label`で複数指定可):
+                 - 新機能・改善提案の場合は `enhancement` を付ける
+                 - 重要度に応じて優先度ラベル `now`(すぐ対応すべき)/ `next`(次に対応)/ `later`(将来的)のいずれか1つを必ず付ける。
+                   UI/UX提案は基本的に `next` または `later` とする(自発的な提案が無条件で最優先の `now` になり
+                   自動実装に直行することを避けるため)
+            6. 何も新たに見つからなければ、Issueは作成せず、その旨だけ簡潔に報告してください
+               (無駄なIssueを作らないこと。UX提案もやりすぎず、1回に1〜2件程度に絞る)。
+            7. 最後に、今回作成した(またはしなかった)Issueの一覧とその理由(どのラベルを設定したか含む)を日本語でレポートしてください。
+
+            ## 補足(GitHub Project連携について)
+            - 作成したIssueをProjectボードに追加する操作は不要です。リポジトリ側のGitHub Projects
+              「Auto-add to project」ワークフローが、新規Issueを自動でボードに追加します。
+          claude_args: |
+            --max-turns 30 --allowedTools "Bash,Read,Grep,Glob"

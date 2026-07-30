@@ -1,18 +1,27 @@
 name: AI Team Orchestrator
 
+# 指定されたIssue番号1件について、coder → qa-engineer → reviewer のループで実装し、PRを作成する。
+# reviewer は実際のGitHub PRレビュー(gh pr review --approve/--request-changes)を投稿し、
+# coder はそれを読んで同一PR内で修正する(llm-practiceリポジトリと同じ実PRレビュー運用)。
+#
+# 対象Issueの選定自体は ai-team-scheduler.yml が1日1回、LLMを使わない決定的なロジックで行い、
+# 選定結果をこのworkflow_dispatchの issue_number 入力として渡す(直接この workflow を選定目的で
+# 手動実行する場合は、対応したいIssue番号を明示的に指定すること)。
+# こうしてトリガー発火時点でIssue番号が確定しているため、run-name にIssue番号を出せる。
+#
 # NOTE: anthropics/claude-code-action の入力仕様(claude_code_oauth_token など)は
 # バージョンによって変わることがあるため、実際に動かす前に以下で最新の入力仕様を確認すること。
 # https://github.com/anthropics/claude-code-action
 
 on:
-  issues:
-    types: [labeled]
   workflow_dispatch:
     inputs:
       issue_number:
-        description: '実装対象のIssue番号(オーナーが任意のタイミングで手動実行する用)'
+        description: "実装対象のIssue番号"
         required: true
         type: number
+
+run-name: "AI Team Orchestrator: Issue #${{ inputs.issue_number }}"
 
 permissions:
   contents: write
@@ -21,12 +30,11 @@ permissions:
   id-token: write
 
 concurrency:
-  group: ai-team-${{ github.event.inputs.issue_number || github.event.issue.number }}
+  group: ai-team-${{ inputs.issue_number }}
   cancel-in-progress: false
 
 jobs:
   pm-orchestrate:
-    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'ai-auto-dev'
     runs-on: ubuntu-latest
     env:
       # 注意: claude-code-action は内部で GH_TOKEN/GITHUB_TOKEN を
@@ -45,10 +53,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve target issue number
-        id: resolve
-        run: echo "issue_number=${{ github.event.inputs.issue_number || github.event.issue.number }}" >> "$GITHUB_OUTPUT"
-
       - name: Run PM (lead) agent
         uses: anthropics/claude-code-action@v1
         with:
@@ -56,59 +60,70 @@ jobs:
           allowed_bots: "claude"
           show_full_output: true
           prompt: |
-            あなたはこのチームのPM/リードエンジニアです。
-            Issue #${{ steps.resolve.outputs.issue_number }} を分析し、以下を順番に行ってください。
+            あなたはこのチームのPM/リードエンジニアです。今回対応するIssueは #${{ inputs.issue_number }} です。
+            (Issueの選定自体は ai-team-scheduler.yml が既に済ませているので、選び直す必要はありません)
+            以下の手順で実行してください。
 
             重要: `gh project` で始まるコマンド(item-list, item-add, item-edit など)は
             必ず先頭に `GH_TOKEN=$PROJECTS_GH_TOKEN` を付けて実行すること。
             (通常のGH_TOKENはこのセッション用のbotトークンで、Organization配下の
             Projectを読み書きする権限がないため、専用のPROJECTS_GH_TOKENに
-            明示的に差し替える必要がある)
-            例: `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-list $PROJECT_NUMBER --owner $PROJECT_OWNER --format json`
+            明示的に差し替える必要がある。issue/PR操作は素の `gh` のままでよい)
 
-            以下、Project Status の更新は毎回このコマンドの `--single-select-option-id` だけを
-            差し替えて実行してください:
+            Status更新は毎回このコマンドの `--single-select-option-id` だけを差し替えて実行する:
             `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-edit --project-id $PROJECT_ID --field-id $STATUS_FIELD_ID --id <ITEM_ID> --single-select-option-id <option-id>`
+
+            ## 実装
 
             0. `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-list $PROJECT_NUMBER --owner $PROJECT_OWNER --format json` で
                この Issue に対応する Project item を探し、ITEM_ID を控える
-               (backlog-groomer が作成した Issue は既に Project に追加済みのはず。
-               見つからない場合は `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <issue-url>` で追加する)
-            1. Status を In Progress ($STATUS_IN_PROGRESS_ID) に更新する
-            2. 要件を明確化し、実装タスクに分解する
-            3. coder サブエージェントに実装とブランチ作成を依頼する
+               (見つからない場合は `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <issue-url>` で追加する)。
+            1. Status を In Progress ($STATUS_IN_PROGRESS_ID) に更新する。
+            2. 要件を明確化し、実装タスクに分解する。
+            3. `coder` サブエージェントに実装とブランチ作成を依頼する。
                完了報告を受けたら、`git fetch origin && git branch -r` で対象ブランチが
                実際にリモートへ作成されているか必ず確認する(サブエージェントの報告を鵜呑みにしない)。
                確認できない場合は先に進まず、13の手順に従って状況をIssueにコメントしてから終了する。
-            4. qa-engineer サブエージェントにテスト作成・実行を依頼する
-            5. テストが失敗した場合は coder に修正を依頼し、4に戻る(通るまで繰り返す。この間は In Progress のまま)
+            4. `qa-engineer` サブエージェントにテスト作成・実行を依頼する。
+            5. テストが失敗した場合は `coder` に修正を依頼し、4に戻る(通るまで繰り返す。この間は In Progress のまま)。
             6. テストが通ったら、ブランチを `git push -u origin <branch>` でリモートに反映し、
-               `Closes #${{ steps.resolve.outputs.issue_number }}` を含めてPRを作成する(`gh pr create --title ... --body ...`)
-            7. PRを作成したら、Status を Under Review ($STATUS_UNDER_REVIEW_ID) に更新する
-            8. reviewer サブエージェントにレビューを依頼する
-            9. reviewer が修正を要求した場合は、coder に修正を依頼し、修正後の変更を
-               同じブランチにコミットして `git push` で反映してから、再度 reviewer にレビューを依頼する。
-               このループの間、Status は Under Review のままにする
-            10. reviewer が LGTM を出した場合のみ、続けて
+               `Closes #${{ inputs.issue_number }}` を含めてPRを作成する(`gh pr create --title ... --body ...`)。
+               作成後 `gh pr view --json number --jq '.number'` でPR番号を控える(以降reviewer/coderに伝える)。
+            7. PRを作成したら、Status を Under Review ($STATUS_UNDER_REVIEW_ID) に更新する。
+
+            ## 実レビュー(reviewer)
+
+            8. `reviewer` サブエージェントに、控えたPR番号を伝えてレビューを依頼する。reviewerは
+               `gh pr review` で実際にGitHub上へapprove/request changesを投稿する(PMへのテキスト報告だけで終わらせない)。
+            9. reviewerがrequest changesを出した場合は、`coder` にPR番号を伝えて修正を依頼する。coderは
+               `gh pr view <PR番号> --json reviews,comments` 等で実際のレビュー内容を確認した上で同じブランチ上で
+               修正し、`git push` で反映する。反映後、再度 `reviewer` に同じPR番号でレビューを依頼する
+               (このループの間、Statusは Under Review のまま)。
+            10. reviewerが実際にAPPROVEを投稿したかどうかは、口頭報告ではなく
+                `gh pr view <PR番号> --json reviews --jq '.reviews[-1].state'` が `APPROVED` であることで確認する。
+                APPROVEDが確認できた場合のみ、PR本文に「## 動作確認(エビデンス)」セクションを追記し、
+                qa-engineerが報告した実際のテスト出力をそのまま貼る。続けて
                 `gh pr merge --squash --delete-branch <PR番号>` を実行しそのままmainへ自動マージし、
-                Status を Done ($STATUS_DONE_ID) に更新する
-            11. ターン数の都合などでLGTMに到達できずに終了する場合は、絶対にマージしないこと。
+                Status を Done ($STATUS_DONE_ID) に更新する。
+            11. ターン数の都合などでAPPROVEDに到達できずに終了する場合は、絶対にマージしないこと。
                 PRにこれまでの経緯を要約したコメントを残し、Status は Under Review のままにして人間の判断を待つ
-                (In Progress や Todo に戻さない。PRが開いたまま止まっていることが分かるようにする)
-            12. coder / qa-engineer / reviewer のいずれかの報告に「スコープ外の発見事項」が
+                (In Progress や Todo に戻さない。PRが開いたまま止まっていることが分かるようにする)。
+            12. coder / qa-engineer の報告、および `gh pr view <PR番号> --json reviews --jq '.reviews[].body'` で
+                確認できるreviewerの実際のレビュー本文中の「スコープ外の発見事項」に、範囲外の問題が
                 含まれていた場合、それぞれについて以下を行う(なければ何もしなくてよい):
-                a. `gh issue create --title "<簡潔なタイトル>" --body "<発見内容。どのサブエージェントが何の作業中に気づいたか、元Issue #${{ steps.resolve.outputs.issue_number }} へのリンクを含める>"` で新しいIssueを作成する
-                b. `gh issue edit <新Issue番号> --add-label found-in-review` でラベルを付与する
-                   (`ai-auto-dev` は絶対に付けないこと。自動着手させず、人間が内容を見てから
-                   手動でラベルを追加する運用にする)
-                c. `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <新Issueのurl>`
-                   でProjectに追加する(Statusは既定の Todo のままでよい)
-                d. `gh issue comment ${{ steps.resolve.outputs.issue_number }} --body "関連Issueとして #<新Issue番号> を作成しました"`
-            13. 完了条件(PR作成・reviewerのLGTM・マージ、または11の「Under Reviewで待機」)に
+                a. `gh issue list --state open` で確認し、既存Issueと内容が重複する場合は新規作成しない。
+                b. 重複がなければ `gh issue create --title "<簡潔なタイトル>" --body "<発見内容。どのサブエージェントが何の作業中に気づいたか、元Issue #${{ inputs.issue_number }} へのリンクを含める>"` で起票する。
+                c. `gh issue edit <新Issue番号> --add-label found-in-review` でラベルを付与する。
+                   優先度ラベルは `next` を基本とする(緊急性が本当に高い場合のみ `now`)。
+                   `now` を付けた場合、次回の ai-team-scheduler.yml 実行で自動的に選定対象になる点に留意する。
+                d. `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <新IssueのURL>`
+                   でProjectに追加する(Statusは既定のTodoのままでよい)。
+                e. `gh issue comment ${{ inputs.issue_number }} --body "関連Issueとして #<新Issue番号> を作成しました"`
+            13. 完了条件(PR作成・reviewerのAPPROVE・マージ、または11の「Under Reviewで待機」)に
                 到達しないまま、このセッションを終了せざるを得ない場合(ターン数の制約、
                 サブエージェントからの応答異常、ツール実行エラー、3の確認でブランチが
                 見つからなかった、など理由を問わない)、終了する前に必ず次を実行すること:
-                `gh issue comment ${{ steps.resolve.outputs.issue_number }} --body "<ここまでの作業状況・どの手順まで進んだか・中断した理由(推測でよい)・人間が確認すべき点>"`
+                `gh issue comment ${{ inputs.issue_number }} --body "<ここまでの作業状況・どの手順まで進んだか・中断した理由(推測でよい)・人間が確認すべき点>"`
                 このとき、直前まで設定していた Status(In Progress または Under Review)は
                 変更せずそのままにする(Todo や Done には絶対に変更しない)。
 
@@ -119,6 +134,6 @@ jobs:
             このセッションは1回限りのプロセスなので、後で結果を確認することはできず、そのまま
             セッションを終了すると実行中のサブエージェントの作業は失われます。「完了を待ちます」と
             発言するだけで実際には何もツールを呼ばずにターンを終了することは絶対にしないこと。
-            reviewer の LGTM なしでのマージは、テストが全て通っていたとしても禁止です。
+            reviewer の実際のAPPROVEなしでのマージは、テストが全て通っていたとしても禁止です。
           claude_args: |
             --max-turns 60 --allowedTools "Bash,Read,Write,Edit,Grep,Glob,Task"

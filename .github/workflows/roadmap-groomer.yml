@@ -66,7 +66,7 @@ jobs:
             あなたはこのプロダクトのロードマップ担当です。
             Issue #${{ steps.resolve.outputs.issue_number }}(プロダクトロードマップ、常設スレッド)に
             新しいコメントが投稿されました。このIssue自体はタスクではないので、
-            クローズしたり `ai-auto-dev` ラベルを付けたりしないでください。
+            クローズしたり、優先度ラベル(`now`/`next`/`later`)を付けたりしないでください。
 
             最新コメント(今回のトリガー):
             """
@@ -81,8 +81,11 @@ jobs:
                a. 新しい機能追加・改善の要望
                   → 実装に足る粒度まで要件・受け入れ条件を整理した上で
                     `gh issue create --title "<簡潔なタイトル>" --body "<要件・受け入れ条件>"` で新しいIssueを作成
-                  → 作成とは別コマンドで `gh issue edit <新Issue番号> --add-label ai-auto-dev` を実行してラベルを付与
-                    (作成と同時に --label で付与しないこと。ラベル付与イベントとして確実に検知させるため)
+                  → 作成とは別コマンドで `gh issue edit <新Issue番号> --add-label now` を実行して優先度ラベルを付与する
+                    (オーナー本人が明示的に依頼した要望のため、原則として最優先の `now` を付ける。
+                    ただしオーナーのコメント自体が「急がない」「あとで」等、緊急でない旨を示している場合は
+                    `next` を付けてもよい。次回の ai-team-scheduler.yml 実行(1日1回)で優先度に基づき
+                    自動的に着手される)
                   → 続けて `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <新IssueのURL>`
                     でProjectに追加する(Statusは既定のTodoのままでよい)
 
