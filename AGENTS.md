@@ -38,38 +38,50 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
 - GitHub Actions上のセッション(このガイドラインを読んでいる側)はPM/リードエンジニア役。実装そのものは行わず、Task tool 経由で以下のサブエージェントに委任すること
   - `coder`: 実装・ブランチ作成・PR作成([.claude/agents/coder.md](.claude/agents/coder.md))
   - `qa-engineer`: テスト作成・実行([.claude/agents/qa-engineer.md](.claude/agents/qa-engineer.md))
-  - `reviewer`: 静的解析・セキュリティ観点でのレビュー、コード変更は行わない([.claude/agents/reviewer.md](.claude/agents/reviewer.md))
+  - `reviewer`: 静的解析・セキュリティ観点でのレビュー、コード変更は行わない。判定結果は実際のGitHub PRレビュー(`gh pr review --approve`/`--request-changes`)として投稿する([.claude/agents/reviewer.md](.claude/agents/reviewer.md))
 - 3者の作業が完了し、テストが通ってからPRを作成する
 - ワークフロー本体は [.github/workflows/ai-team.yml](.github/workflows/ai-team.yml) を参照
+
+## Issue選定と実装着手(1日1回・優先度ベース)
+- 優先度ラベル `now`(すぐ着手)/ `next`(次に着手)/ `later`(将来的)のいずれかが付いたOpen Issueが選定対象。
+  実装対象を決める具体的なロジックは [.github/scripts/select_next_issue.py](.github/scripts/select_next_issue.py) を参照
+  (`now`ラベル付きIssueのうち、Open PRで既に参照されておらず、Statusが `In Progress`/`Under Review` のまま
+  放置されていないものを番号昇順で1件選ぶ。放置されたものは自動的に `Todo` へ差し戻す自己修復も行う)
+- [.github/workflows/ai-team-scheduler.yml](.github/workflows/ai-team-scheduler.yml) が毎日1回(10:00 JST)、
+  上記ロジックで1件だけ選び、[.github/workflows/ai-team.yml](.github/workflows/ai-team.yml) を
+  `workflow_dispatch` で起動する。ai-team.yml自体はIssueラベルには反応せず、指定されたIssue番号1件だけを処理する
+- found-in-review ラベルのIssue(下記参照)も、優先度ラベルさえ付いていれば通常のIssueと全く同じ選定ロジックの対象になる
 
 ## プロダクト方針とIssue自動作成
 - 常設の[📍 プロダクトロードマップ Issue](https://github.com/koji-s-private/react-native-first-app/issues/7)(`roadmap-thread` ラベル)に
   人間が機能追加・改善・方針転換をコメントで書き込む運用にしている(BACKLOG.mdは廃止)
 - [.github/workflows/roadmap-groomer.yml](.github/workflows/roadmap-groomer.yml) が
   ロードマップIssueへの新規コメントをトリガーに起動し、要望を次のいずれかに振り分ける
-  - 新規の要望 → 新しいIssueを作成し `ai-auto-dev` ラベルを付与(即自動着手)
+  - 新規の要望 → 新しいIssueを作成し優先度ラベル(オーナー本人の明示的な依頼のため原則 `now`)を付与
   - 既存Issueへの方針変更 → 該当Issueにコメント追記、または未着手なら本文を更新
   - 既存Issueの取り下げ → 該当Issueをクローズ
   - アクション不要な内容(雑談・確認質問など) → 何もしない
-- `ai-auto-dev` ラベルが付いた Issue は ai-team.yml を自動起動し、coder → qa-engineer → reviewer の順で処理される
-- ai-team.yml / roadmap-groomer.yml はどちらも `workflow_dispatch` に対応しており、GitHub Actionsタブから
-  オーナーが任意のタイミングで手動実行することもできる(ai-team.ymlはIssue番号を指定、roadmap-groomerは
-  要望文をそのまま入力する)。ラベル付与/コメント投稿による自動着手はこれまで通り併存する
-- **reviewer が LGTM を出した場合のみ**、PM(呼び出し元)がその場で `gh pr merge --squash --delete-branch` を実行し、人間の事前承認なしで main に自動マージする
-- reviewer が LGTM を出さなかった場合は絶対にマージしない。Projectsのステータスを `Under Review` のままにし、人間の判断を待つ(`Done` にしない)
-- 完了条件(PR作成・LGTM・マージ、またはUnder Reviewでの待機)に到達しないままセッションが終了する場合、
+- [.github/workflows/daily-health-check.yml](.github/workflows/daily-health-check.yml) が毎日1回(9:00 JST)、
+  リポジトリ全体を能動的にスキャンし、バグ・改善点・リファクタ候補・UX提案を優先度ラベル付きでIssue化する
+  (広く浅い定期健診。roadmap-groomerやfound-in-reviewが起票したIssueとの重複はチェックする)
+- ai-team.yml / ai-team-scheduler.yml / roadmap-groomer.yml / daily-health-check.yml はすべて `workflow_dispatch`
+  に対応しており、GitHub Actionsタブからオーナーが任意のタイミングで手動実行することもできる
+  (ai-team.ymlはIssue番号を指定、roadmap-groomerは要望文をそのまま入力する)
+- **reviewer が実際にAPPROVEを投稿した場合のみ**、PM(呼び出し元)がその場で `gh pr merge --squash --delete-branch` を実行し、人間の事前承認なしで main に自動マージする
+- reviewer が APPROVEを出さなかった場合は絶対にマージしない。Projectsのステータスを `Under Review` のままにし、人間の判断を待つ(`Done` にしない)
+- 完了条件(PR作成・APPROVE・マージ、またはUnder Reviewでの待機)に到達しないままセッションが終了する場合、
   理由を問わず終了前に該当Issueへ状況説明コメントを残すルールを設けている(ai-team.yml 参照)
 - リポジトリは2026-07-30にprivateへ変更した。Actions実行時間は組織のFree枠(月2,000分)を消費する形になったが、
   Actions予算を `$0 / Stop usage: Yes` に設定済みのため、枠を使い切っても課金はされず自動的に実行が止まるだけ。
   Claude Code の利用(CLAUDE_CODE_OAUTH_TOKEN)は引き続きPro契約の枠内で追加課金なし
 
 ## スコープ外の発見事項の扱い
-- coder / qa-engineer / reviewer が作業中に今回のIssueと無関係な問題(バグ、技術的負債、改善点)に気づいた場合、
-  その場では直さずPMへの報告に「スコープ外の発見事項」として含める
+- coder / qa-engineer の報告、および reviewerが実際に投稿したPRレビュー本文中の「スコープ外の発見事項」に、
+  今回のIssueと無関係な問題(バグ、技術的負債、改善点)が含まれていた場合、PMがそれを拾う
 - PMはそれを新しいIssueとして作成し、`found-in-review` ラベルを付けてProjectに追加する(Statusは `Todo`)
-- **`ai-auto-dev` ラベルは付けない**。AIが自分の見つけた問題を連鎖的に自動着手し続ける暴走を防ぐため、
-  内容を人間が確認してから手動で `ai-auto-dev` を追加する運用とする
-- 自動着手されない分、放置されると気づかず溜まり続けるため、
+- 優先度ラベルは `next` を基本とする(緊急性が本当に高い場合のみ `now`)。`now` を付けた場合、
+  次回の ai-team-scheduler.yml 実行で通常のIssueと同じく自動的に選定対象になる
+- 優先度ラベルが未設定、または `next`/`later` のまま放置されると気づかず溜まり続けるため、
   [.github/workflows/found-in-review-digest.yml](.github/workflows/found-in-review-digest.yml) が
-  毎週月曜10:00 JSTに未対応の `found-in-review` Issue一覧をロードマップIssueへコメントでリマインドする
+  毎週月曜10:00 JSTに `now` が付いていない `found-in-review` Issue一覧をロードマップIssueへコメントでリマインドする
   (着手はせず通知のみ。`workflow_dispatch` でも手動実行可)

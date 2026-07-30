@@ -1,0 +1,44 @@
+name: AI Team Scheduler
+
+# 毎日1:00 UTC(=10:00 JST)に1回だけ実行し、nowラベルが付いたIssueの中から
+# 次に着手すべき1件をLLMを使わない決定的なスクリプト(select_next_issue.py)で選定する。
+# 選定できたら workflow_dispatch で ai-team.yml を issue_number 付きで起動する。
+#
+# 従来の「issues: labeled(ai-auto-dev)」による即時トリガーは廃止し、
+# 1日1回・優先度(now/next/later)順に着手する方式に統一した
+# (llm-practiceリポジトリのai-team-scheduler.ymlと同形)。
+# これにより found-in-review ラベルのIssueも、優先度ラベルさえ付いていれば
+# 通常のIssueと同じ選定ロジックの対象になる。
+
+on:
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  actions: write
+
+jobs:
+  pick-and-dispatch:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PROJECTS_GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+      PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
+      PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+      PROJECT_ID: ${{ vars.PROJECT_ID }}
+      STATUS_FIELD_ID: ${{ vars.STATUS_FIELD_ID }}
+      STATUS_TODO_ID: ${{ vars.STATUS_TODO_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick next issue
+        id: pick
+        run: python3 .github/scripts/select_next_issue.py
+
+      - name: Dispatch AI Team Orchestrator
+        if: steps.pick.outputs.issue_number != ''
+        run: gh workflow run ai-team.yml -f issue_number="${{ steps.pick.outputs.issue_number }}"
