@@ -7,6 +7,12 @@ name: AI Team Orchestrator
 on:
   issues:
     types: [labeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: '実装対象のIssue番号(オーナーが任意のタイミングで手動実行する用)'
+        required: true
+        type: number
 
 permissions:
   contents: write
@@ -14,9 +20,13 @@ permissions:
   pull-requests: write
   id-token: write
 
+concurrency:
+  group: ai-team-${{ github.event.inputs.issue_number || github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   pm-orchestrate:
-    if: github.event.label.name == 'ai-auto-dev'
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'ai-auto-dev'
     runs-on: ubuntu-latest
     env:
       # 注意: claude-code-action は内部で GH_TOKEN/GITHUB_TOKEN を
@@ -35,14 +45,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve target issue number
+        id: resolve
+        run: echo "issue_number=${{ github.event.inputs.issue_number || github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+
       - name: Run PM (lead) agent
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: "claude"
+          show_full_output: true
           prompt: |
             あなたはこのチームのPM/リードエンジニアです。
-            Issue #${{ github.event.issue.number }} を分析し、以下を順番に行ってください。
+            Issue #${{ steps.resolve.outputs.issue_number }} を分析し、以下を順番に行ってください。
 
             重要: `gh project` で始まるコマンド(item-list, item-add, item-edit など)は
             必ず先頭に `GH_TOKEN=$PROJECTS_GH_TOKEN` を付けて実行すること。
@@ -62,10 +77,13 @@ jobs:
             1. Status を In Progress ($STATUS_IN_PROGRESS_ID) に更新する
             2. 要件を明確化し、実装タスクに分解する
             3. coder サブエージェントに実装とブランチ作成を依頼する
+               完了報告を受けたら、`git fetch origin && git branch -r` で対象ブランチが
+               実際にリモートへ作成されているか必ず確認する(サブエージェントの報告を鵜呑みにしない)。
+               確認できない場合は先に進まず、13の手順に従って状況をIssueにコメントしてから終了する。
             4. qa-engineer サブエージェントにテスト作成・実行を依頼する
             5. テストが失敗した場合は coder に修正を依頼し、4に戻る(通るまで繰り返す。この間は In Progress のまま)
             6. テストが通ったら、ブランチを `git push -u origin <branch>` でリモートに反映し、
-               `Closes #${{ github.event.issue.number }}` を含めてPRを作成する(`gh pr create --title ... --body ...`)
+               `Closes #${{ steps.resolve.outputs.issue_number }}` を含めてPRを作成する(`gh pr create --title ... --body ...`)
             7. PRを作成したら、Status を Under Review ($STATUS_UNDER_REVIEW_ID) に更新する
             8. reviewer サブエージェントにレビューを依頼する
             9. reviewer が修正を要求した場合は、coder に修正を依頼し、修正後の変更を
@@ -79,13 +97,20 @@ jobs:
                 (In Progress や Todo に戻さない。PRが開いたまま止まっていることが分かるようにする)
             12. coder / qa-engineer / reviewer のいずれかの報告に「スコープ外の発見事項」が
                 含まれていた場合、それぞれについて以下を行う(なければ何もしなくてよい):
-                a. `gh issue create --title "<簡潔なタイトル>" --body "<発見内容。どのサブエージェントが何の作業中に気づいたか、元Issue #${{ github.event.issue.number }} へのリンクを含める>"` で新しいIssueを作成する
+                a. `gh issue create --title "<簡潔なタイトル>" --body "<発見内容。どのサブエージェントが何の作業中に気づいたか、元Issue #${{ steps.resolve.outputs.issue_number }} へのリンクを含める>"` で新しいIssueを作成する
                 b. `gh issue edit <新Issue番号> --add-label found-in-review` でラベルを付与する
                    (`ai-auto-dev` は絶対に付けないこと。自動着手させず、人間が内容を見てから
                    手動でラベルを追加する運用にする)
                 c. `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <新Issueのurl>`
                    でProjectに追加する(Statusは既定の Todo のままでよい)
-                d. `gh issue comment ${{ github.event.issue.number }} --body "関連Issueとして #<新Issue番号> を作成しました"`
+                d. `gh issue comment ${{ steps.resolve.outputs.issue_number }} --body "関連Issueとして #<新Issue番号> を作成しました"`
+            13. 完了条件(PR作成・reviewerのLGTM・マージ、または11の「Under Reviewで待機」)に
+                到達しないまま、このセッションを終了せざるを得ない場合(ターン数の制約、
+                サブエージェントからの応答異常、ツール実行エラー、3の確認でブランチが
+                見つからなかった、など理由を問わない)、終了する前に必ず次を実行すること:
+                `gh issue comment ${{ steps.resolve.outputs.issue_number }} --body "<ここまでの作業状況・どの手順まで進んだか・中断した理由(推測でよい)・人間が確認すべき点>"`
+                このとき、直前まで設定していた Status(In Progress または Under Review)は
+                変更せずそのままにする(Todo や Done には絶対に変更しない)。
 
             各サブエージェントは Task tool 経由で呼び出してください。
             reviewer の LGTM なしでのマージは、テストが全て通っていたとしても禁止です。

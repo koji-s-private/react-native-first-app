@@ -52,9 +52,16 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
   - 既存Issueの取り下げ → 該当Issueをクローズ
   - アクション不要な内容(雑談・確認質問など) → 何もしない
 - `ai-auto-dev` ラベルが付いた Issue は ai-team.yml を自動起動し、coder → qa-engineer → reviewer の順で処理される
+- ai-team.yml / roadmap-groomer.yml はどちらも `workflow_dispatch` に対応しており、GitHub Actionsタブから
+  オーナーが任意のタイミングで手動実行することもできる(ai-team.ymlはIssue番号を指定、roadmap-groomerは
+  要望文をそのまま入力する)。ラベル付与/コメント投稿による自動着手はこれまで通り併存する
 - **reviewer が LGTM を出した場合のみ**、PM(呼び出し元)がその場で `gh pr merge --squash --delete-branch` を実行し、人間の事前承認なしで main に自動マージする
 - reviewer が LGTM を出さなかった場合は絶対にマージしない。Projectsのステータスを `Under Review` のままにし、人間の判断を待つ(`Done` にしない)
-- この自動マージ運用はコストを増やさない前提(Publicリポジトリ + Pro契約のOAuthトークンの範囲内)で成立している。挙動が信頼できると分かるまでは、まず小さい要望で様子を見ること
+- 完了条件(PR作成・LGTM・マージ、またはUnder Reviewでの待機)に到達しないままセッションが終了する場合、
+  理由を問わず終了前に該当Issueへ状況説明コメントを残すルールを設けている(ai-team.yml 参照)
+- リポジトリは2026-07-30にprivateへ変更した。Actions実行時間は組織のFree枠(月2,000分)を消費する形になったが、
+  Actions予算を `$0 / Stop usage: Yes` に設定済みのため、枠を使い切っても課金はされず自動的に実行が止まるだけ。
+  Claude Code の利用(CLAUDE_CODE_OAUTH_TOKEN)は引き続きPro契約の枠内で追加課金なし
 
 ## スコープ外の発見事項の扱い
 - coder / qa-engineer / reviewer が作業中に今回のIssueと無関係な問題(バグ、技術的負債、改善点)に気づいた場合、
