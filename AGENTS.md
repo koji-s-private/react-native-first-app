@@ -81,7 +81,3 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
 - PMはそれを新しいIssueとして作成し、`found-in-review` ラベルを付けてProjectに追加する(Statusは `Todo`)
 - 優先度ラベルは `next` を基本とする(緊急性が本当に高い場合のみ `now`)。`now` を付けた場合、
   次回の ai-team-scheduler.yml 実行で通常のIssueと同じく自動的に選定対象になる
-- 優先度ラベルが未設定、または `next`/`later` のまま放置されると気づかず溜まり続けるため、
-  [.github/workflows/found-in-review-digest.yml](.github/workflows/found-in-review-digest.yml) が
-  毎週月曜10:00 JSTに `now` が付いていない `found-in-review` Issue一覧をロードマップIssueへコメントでリマインドする
-  (着手はせず通知のみ。`workflow_dispatch` でも手動実行可)
