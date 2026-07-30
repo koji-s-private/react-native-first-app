@@ -69,3 +69,7 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
 - PMはそれを新しいIssueとして作成し、`found-in-review` ラベルを付けてProjectに追加する(Statusは `Todo`)
 - **`ai-auto-dev` ラベルは付けない**。AIが自分の見つけた問題を連鎖的に自動着手し続ける暴走を防ぐため、
   内容を人間が確認してから手動で `ai-auto-dev` を追加する運用とする
+- 自動着手されない分、放置されると気づかず溜まり続けるため、
+  [.github/workflows/found-in-review-digest.yml](.github/workflows/found-in-review-digest.yml) が
+  毎週月曜10:00 JSTに未対応の `found-in-review` Issue一覧をロードマップIssueへコメントでリマインドする
+  (着手はせず通知のみ。`workflow_dispatch` でも手動実行可)

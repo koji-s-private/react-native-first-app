@@ -1,0 +1,44 @@
+name: Found-in-review Digest
+
+# found-in-review ラベル(暴走防止のため ai-auto-dev は付与しない設計)の
+# Issueが未着手のまま溜まっていないか、毎週リマインドするだけのワークフロー。
+# 着手の判断・実行は行わない(通知のみ)。
+
+on:
+  schedule:
+    - cron: '0 1 * * 1' # 毎週月曜 10:00 JST
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Post digest of unaddressed found-in-review issues
+        run: |
+          set -e
+
+          issues=$(gh issue list --repo "${{ github.repository }}" --label found-in-review --state open \
+            --json number,title,createdAt,url \
+            --jq 'sort_by(.createdAt)')
+
+          count=$(echo "$issues" | jq 'length')
+          if [ "$count" -eq 0 ]; then
+            echo "No open found-in-review issues. Skipping digest comment."
+            exit 0
+          fi
+
+          roadmap_issue=$(gh issue list --repo "${{ github.repository }}" --label roadmap-thread --state open --json number -q '.[0].number')
+
+          list=$(echo "$issues" | jq -r '.[] | "- #\(.number) \(.title)(作成日: \(.createdAt | split("T")[0]))"')
+
+          header="## 🔔 未着手の found-in-review Issue が ${count} 件あります"
+          note="これらはレビュー中に見つかったスコープ外の発見事項です。連鎖的な自動着手を防ぐため \`ai-auto-dev\` ラベルは自動では付与されていません。着手する場合は内容を確認のうえ、\`ai-auto-dev\` ラベルを追加するか、Actionsタブの \`AI Team Orchestrator\` を該当Issue番号で手動実行してください。"
+          body=$(printf '%s\n\n%s\n\n%s\n' "$header" "$note" "$list")
+
+          gh issue comment "$roadmap_issue" --repo "${{ github.repository }}" --body "$body"
