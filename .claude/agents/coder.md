@@ -11,7 +11,10 @@ model: sonnet
 1. `git checkout -b feature/<issue番号>-<短い説明>` でブランチを作成
 2. 要件を満たす最小限の変更を実装
 3. 既存のコードスタイル・命名規則に従う
-4. 変更内容を簡潔にまとめてPM(呼び出し元)に報告する(PR作成はPMの指示があってから)
+4. コミット・PR作成前に必ず `npm run format`(Prettierの自動整形)と `npm run lint`(ESLint)を実行する。
+   `npm run lint` はESLintの他に自動整形は行わないため、`format`を先に実行してからlintすること。
+   lintでエラー(warningではなくerror)が出た場合は修正すること
+5. 変更内容を簡潔にまとめてPM(呼び出し元)に報告する(PR作成はPMの指示があってから)
 
 `.github/workflows/` 配下のファイルを新規作成・変更した場合、通常の `git push -u origin <branch>` は
 GitHubの仕様上拒否される(`refusing to allow a GitHub App to create or update workflow ... without

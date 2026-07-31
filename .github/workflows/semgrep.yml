@@ -1,0 +1,36 @@
+name: Semgrep
+
+# 無料で使える静的セキュリティ解析(Semgrep OSS)。
+# 以前はGitHub標準のCodeQLを使用していたが、CodeQLのCode Scanningはprivateリポジトリでは
+# GitHub Advanced Security(有料)が必要で、実行するたびに
+# "Resource not accessible by integration" エラーで失敗していた(Issue #27のPR #47で発覚)。
+# Semgrepはpublicなコミュニティルールセット(p/*)を指定する限り、アカウント登録や
+# APIトークンなしで無料利用できるため、こちらに置き換えた。
+#
+# PR時・mainへのpush時・週次スケジュールで実行する。
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  schedule:
+    # 毎週月曜 3:00 UTC(12:00 JST)に実行
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  semgrep:
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Semgrepスキャン(OSSコミュニティルールセット)
+        run: semgrep scan --config p/security-audit --config p/typescript --config p/react --error

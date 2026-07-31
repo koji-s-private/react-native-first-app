@@ -77,10 +77,21 @@
 | `npm run ios` | iOSシミュレータ/実機向けに開発サーバーを起動する |
 | `npm run web` | Webブラウザ向けに開発サーバーを起動する |
 | `npm run lint` | ESLintでコードを検証する（`expo lint && eslint tests`） |
+| `npm run format` | Prettierでコードを自動整形する |
+| `npm run format:check` | Prettierのフォーマットが崩れていないかチェックする（整形はしない） |
 | `npm test` | Jestでテストを実行する |
 | `npm run reset-project` | 現在の `app` ディレクトリを `app-example` に退避し、まっさらな `app` ディレクトリを作り直す（このリポジトリでは基本的に使用しません） |
 
-コードを変更したときは、コミット前に `npm run lint` と `npm test` を実行し、既存のスタイル・テストを壊していないことを確認してください。
+コードを変更したときは、コミット前に `npm run format` → `npm run lint` → `npm test` を実行し、既存のスタイル・テストを壊していないことを確認してください。フォーマットルールは [`.prettierrc.json`](./.prettierrc.json) を参照してください（`.github/`・`.claude/`・Markdownファイルは対象外）。
+
+### CI(継続的インテグレーション)
+
+`main` ブランチ向けのPRを作成・更新すると、GitHub Actions上で以下が自動実行されます。
+
+| ワークフロー | 内容 |
+| --- | --- |
+| [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) | `npm run lint`(ESLint)・`npm run format:check`(Prettier)・`npm test`(Jest)・`npm audit --audit-level=high`(依存パッケージの脆弱性検知)を実行し、いずれかが失敗するとチェックが失敗する |
+| [`.github/workflows/semgrep.yml`](./.github/workflows/semgrep.yml) | [Semgrep](https://semgrep.dev/) OSSによるコードの静的セキュリティ解析(コミュニティルールセット `p/security-audit` `p/typescript` `p/react` を使用。無料・アカウント登録不要)。PR時・`main`へのpush時・週次スケジュールで実行する。GitHub標準のCodeQLはprivateリポジトリだとGitHub Advanced Security(有料)が必要なため採用していない |
 
 ## 使用技術・主要ライブラリ
 
@@ -146,6 +157,7 @@
 | --- | --- | --- |
 | [typescript](https://www.typescriptlang.org/) | 型付きJavaScriptによる開発 | プロジェクト全体（`.ts` / `.tsx`） |
 | [eslint](https://eslint.org/) + [eslint-config-expo](https://docs.expo.dev/guides/using-eslint/) | コードの静的解析・スタイルチェック | `npm run lint` |
+| [prettier](https://prettier.io/) + [eslint-config-prettier](https://github.com/prettier/eslint-config-prettier) | コードフォーマットの自動整形・統一（ESLintとのルール競合を無効化） | `npm run format` / `npm run format:check` |
 | [jest](https://jestjs.io/) + [jest-expo](https://docs.expo.dev/develop/unit-testing/) | ユニットテストの実行基盤 | `npm test`、`tests/` ディレクトリ |
 | [@testing-library/react-native](https://callstack.github.io/react-native-testing-library/) | コンポーネントのレンダリング・操作を伴うテストの記述 | `tests/` ディレクトリ |
 | [react-test-renderer](https://reactjs.org/docs/test-renderer.html) | Reactコンポーネントをテスト用にレンダリングする | `@testing-library/react-native` の内部依存 |
