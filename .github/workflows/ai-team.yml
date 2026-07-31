@@ -87,7 +87,10 @@ jobs:
           # 「Workflow initiated by non-human actor」で即失敗していた。github-actions を
           # allowed_bots に加えて許可する。
           allowed_bots: "claude,github-actions"
-          show_full_output: true
+          # show_full_output はデフォルト false(未指定)のままにする。true にすると
+          # ツール実行結果の生JSON(gh コマンド出力や.env絡みの中身を含みうる)がそのまま
+          # Actionsログに残るため、常時ONにはしない。原因不明な失敗(サブエージェントの
+          # 挙動異常など)を調査するときだけ、一時的に true にして再実行すること。
           prompt: |
             あなたはこのチームのPM/リードエンジニアです。今回対応するIssueは #${{ steps.sanitize.outputs.issue_number }} です。
             (Issueの選定自体は ai-team-scheduler.yml が既に済ませているので、選び直す必要はありません)
