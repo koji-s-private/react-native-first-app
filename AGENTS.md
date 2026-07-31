@@ -27,8 +27,10 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
   GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-edit --project-id $PROJECT_ID --field-id $STATUS_FIELD_ID \
     --id <ITEM_ID> --single-select-option-id $STATUS_IN_PROGRESS_ID
   ```
-- 作業開始時は `In Progress`、PR作成後は `Under Review`(reviewerとの修正ループ中もそのまま)、マージ完了後は `Done` に更新する
-- LGTMに至らず終了した場合も `In Progress` や `Todo` には戻さず `Under Review` のまま止め、人間が気づけるようにする
+- 作業開始時は `In Progress`、PR作成後は `Under Review`(reviewerとの修正ループ中もそのまま)に更新する。
+  マージおよびその後の `Done` への更新はPMでは行わない(後述のとおりマージ自体を行わないため)。
+  人間(オーナー)がマージした後、必要であれば手動で `Done` に更新する
+- reviewerのLGTM相当判定に至らず終了した場合も `In Progress` や `Todo` には戻さず `Under Review` のまま止め、人間が気づけるようにする
 - **重要**: `claude-code-action` はセッション内で `GH_TOKEN`/`GITHUB_TOKEN` を自身のGitHub Appインストールトークン(`claude[bot]`)で上書きする。
   このbotトークンはIssue/PR操作はできるが、Organization配下のProjectsには権限がないため、
   `gh project` で始まるコマンドは必ず `GH_TOKEN=$PROJECTS_GH_TOKEN` を先頭に付けて、専用トークンに明示的に差し替えて実行すること
@@ -38,7 +40,7 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
 - GitHub Actions上のセッション(このガイドラインを読んでいる側)はPM/リードエンジニア役。実装そのものは行わず、Task tool 経由で以下のサブエージェントに委任すること
   - `coder`: 実装・ブランチ作成・PR作成([.claude/agents/coder.md](.claude/agents/coder.md))
   - `qa-engineer`: テスト作成・実行([.claude/agents/qa-engineer.md](.claude/agents/qa-engineer.md))
-  - `reviewer`: 静的解析・セキュリティ観点でのレビュー、コード変更は行わない。判定結果は実際のGitHub PRレビュー(`gh pr review --approve`/`--request-changes`)として投稿する([.claude/agents/reviewer.md](.claude/agents/reviewer.md))
+  - `reviewer`: 静的解析・セキュリティ観点でのレビュー、コード変更は行わない。判定結果は実際のGitHub PRレビューとして投稿する。ただしcoderと同一GitHub App identity(`claude[bot]`)であるため、GitHubの仕様上自分自身のPRには`--approve`/`--request-changes`を実行できず(`Can not approve your own pull request`)、`gh pr review --comment`で判定(LGTM相当/要修正)を明記する運用にしている([.claude/agents/reviewer.md](.claude/agents/reviewer.md))
 - 3者の作業が完了し、テストが通ってからPRを作成する
 - ワークフロー本体は [.github/workflows/ai-team.yml](.github/workflows/ai-team.yml) を参照
 
@@ -67,9 +69,14 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
 - ai-team.yml / ai-team-scheduler.yml / roadmap-groomer.yml / daily-health-check.yml はすべて `workflow_dispatch`
   に対応しており、GitHub Actionsタブからオーナーが任意のタイミングで手動実行することもできる
   (ai-team.ymlはIssue番号を指定、roadmap-groomerは要望文をそのまま入力する)
-- **reviewer が実際にAPPROVEを投稿した場合のみ**、PM(呼び出し元)がその場で `gh pr merge --squash --delete-branch` を実行し、人間の事前承認なしで main に自動マージする
-- reviewer が APPROVEを出さなかった場合は絶対にマージしない。Projectsのステータスを `Under Review` のままにし、人間の判断を待つ(`Done` にしない)
-- 完了条件(PR作成・APPROVE・マージ、またはUnder Reviewでの待機)に到達しないままセッションが終了する場合、
+- **PRのマージは絶対に自動実行しない。マージは必ず人間(オーナー)が手動で行う**(このプロジェクト固有の恒久方針。llm-practiceリポジトリと同じ)。
+  coderとreviewerが同一GitHub App identity(`claude[bot]`)で動作する以上、reviewerはPRの作者である
+  自分自身を正式にAPPROVEできず(GitHub側の制約)、ネイティブなAPPROVE状態を作成すること自体ができないため、
+  「reviewerの実際のAPPROVEを条件に自動マージする」という設計は成立しない
+- reviewerは`gh pr review --comment`でLGTM相当/要修正の判定を投稿する。判定がどちらであってもPMはマージせず、
+  Projectsのステータスを `Under Review` のままにして人間の判断を待つ(`Done` にしない)
+- 完了条件(PR作成後、reviewerのレビューが完了しUnder Reviewで人間の判断待ちの状態になっていること。
+  マージはこの完了条件に含まれない)に到達しないままセッションが終了する場合、
   理由を問わず終了前に該当Issueへ状況説明コメントを残すルールを設けている(ai-team.yml 参照)
 - リポジトリは2026-07-30にprivateへ変更した。Actions実行時間は組織のFree枠(月2,000分)を消費する形になったが、
   Actions予算を `$0 / Stop usage: Yes` に設定済みのため、枠を使い切っても課金はされず自動的に実行が止まるだけ。

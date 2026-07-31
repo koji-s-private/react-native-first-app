@@ -1,8 +1,11 @@
 name: AI Team Orchestrator
 
 # 指定されたIssue番号1件について、coder → qa-engineer → reviewer のループで実装し、PRを作成する。
-# reviewer は実際のGitHub PRレビュー(gh pr review --approve/--request-changes)を投稿し、
-# coder はそれを読んで同一PR内で修正する(llm-practiceリポジトリと同じ実PRレビュー運用)。
+# reviewer は実際のGitHub PRレビュー(gh pr review --comment。本文にLGTM相当/要修正を明記)を
+# 投稿し、coder はそれを読んで同一PR内で修正する。coderとreviewerは同一GitHub App identity
+# (claude[bot])で動作するため、GitHubの仕様上 --approve/--request-changes は自分自身のPRに
+# 実行できず(`Can not approve your own pull request`)使えない。
+# PRのマージは絶対に行わない(必ず人間が手動で行う。llm-practiceリポジトリと同じ方針)。
 #
 # 対象Issueの選定自体は ai-team-scheduler.yml が1日1回、LLMを使わない決定的なロジックで行い、
 # 選定結果をこのworkflow_dispatchの issue_number 入力として渡す(直接この workflow を選定目的で
@@ -114,19 +117,25 @@ jobs:
 
             ## 実レビュー(reviewer)
 
-            8. `reviewer` サブエージェントに、控えたPR番号を伝えてレビューを依頼する。reviewerは
-               `gh pr review` で実際にGitHub上へapprove/request changesを投稿する(PMへのテキスト報告だけで終わらせない)。
-            9. reviewerがrequest changesを出した場合は、`coder` にPR番号を伝えて修正を依頼する。coderは
+            8. `reviewer` サブエージェントに、控えたPR番号を伝えてレビューを依頼する。coderが作成した
+               PRの作者とreviewerの実行アカウントは同一GitHub App(claude[bot])のため、GitHubの仕様上
+               `gh pr review --approve`/`--request-changes` は自分自身のPRに対して実行できず
+               (`GraphQL: Review Can not approve your own pull request`)エラーになる。そのためreviewerは
+               常に `gh pr review --comment` で投稿し、本文冒頭に判定(「LGTM相当」または「要修正」)を
+               明記する(PMへのテキスト報告だけで終わらせない)。
+            9. reviewerが「要修正」と判定した場合は、`coder` にPR番号を伝えて修正を依頼する。coderは
                `gh pr view <PR番号> --json reviews,comments` 等で実際のレビュー内容を確認した上で同じブランチ上で
                修正し、`git push` で反映する。反映後、再度 `reviewer` に同じPR番号でレビューを依頼する
                (このループの間、Statusは Under Review のまま)。
-            10. reviewerが実際にAPPROVEを投稿したかどうかは、口頭報告ではなく
-                `gh pr view <PR番号> --json reviews --jq '.reviews[-1].state'` が `APPROVED` であることで確認する。
-                APPROVEDが確認できた場合のみ、PR本文に「## 動作確認(エビデンス)」セクションを追記し、
-                qa-engineerが報告した実際のテスト出力をそのまま貼る。続けて
-                `gh pr merge --squash --delete-branch <PR番号>` を実行しそのままmainへ自動マージし、
-                Status を Done ($STATUS_DONE_ID) に更新する。
-            11. ターン数の都合などでAPPROVEDに到達できずに終了する場合は、絶対にマージしないこと。
+            10. reviewerが「LGTM相当」と判定したかどうかは、口頭報告ではなく
+                `gh pr view <PR番号> --json reviews --jq '.reviews[-1].body'` の実際の投稿内容で確認する。
+                確認できた場合、PR本文に「## 動作確認(エビデンス)」セクションを追記し、qa-engineerが
+                報告した実際のテスト出力をそのまま貼る。**ここでPRのマージは絶対に行わない
+                (マージは必ず人間(オーナー)が手動で行う。reviewerとcoderが同一identityである以上
+                GitHub側でネイティブなAPPROVE状態を作成できないため、人間の実レビューを経ない
+                自動マージは意図的に禁止している)。** Status は Under Review のままとし、PR作成後は
+                それ以上待機せずに終了する。
+            11. ターン数の都合などで「LGTM相当」判定に到達できずに終了する場合も、絶対にマージしないこと。
                 PRにこれまでの経緯を要約したコメントを残し、Status は Under Review のままにして人間の判断を待つ
                 (In Progress や Todo に戻さない。PRが開いたまま止まっていることが分かるようにする)。
             12. coder / qa-engineer の報告、および `gh pr view <PR番号> --json reviews --jq '.reviews[].body'` で
@@ -140,7 +149,8 @@ jobs:
                 d. `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <新IssueのURL>`
                    でProjectに追加する(Statusは既定のTodoのままでよい)。
                 e. `gh issue comment ${{ steps.sanitize.outputs.issue_number }} --body "関連Issueとして #<新Issue番号> を作成しました"`
-            13. 完了条件(PR作成・reviewerのAPPROVE・マージ、または11の「Under Reviewで待機」)に
+            13. 完了条件(PR作成後、reviewerのレビューが完了しUnder Reviewで人間の判断待ちの状態に
+                なっていること。マージはこのワークフローの完了条件に含まれない)に
                 到達しないまま、このセッションを終了せざるを得ない場合(ターン数の制約、
                 サブエージェントからの応答異常、ツール実行エラー、3の確認でブランチが
                 見つからなかった、など理由を問わない)、終了する前に必ず次を実行すること:
@@ -155,6 +165,7 @@ jobs:
             このセッションは1回限りのプロセスなので、後で結果を確認することはできず、そのまま
             セッションを終了すると実行中のサブエージェントの作業は失われます。「完了を待ちます」と
             発言するだけで実際には何もツールを呼ばずにターンを終了することは絶対にしないこと。
-            reviewer の実際のAPPROVEなしでのマージは、テストが全て通っていたとしても禁止です。
+            PRのマージは絶対に行わない。reviewerが「LGTM相当」と判定した場合でも、テストが全て
+            通っていたとしても、マージは必ず人間(オーナー)が手動で行う。
           claude_args: |
             --max-turns 60 --allowedTools "Bash,Read,Write,Edit,Grep,Glob,Task"
