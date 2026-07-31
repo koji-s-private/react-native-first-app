@@ -12,12 +12,19 @@ name: AI Team Orchestrator
 # NOTE: anthropics/claude-code-action の入力仕様(claude_code_oauth_token など)は
 # バージョンによって変わることがあるため、実際に動かす前に以下で最新の入力仕様を確認すること。
 # https://github.com/anthropics/claude-code-action
+#
+# NOTE: 手動実行(workflow_dispatch)でissue_numberに誤って`#3`のように`#`付きで
+# 入力されると、プロンプト内で`gh issue comment #3 ...`のようなbashコマンドに
+# 埋め込まれた際に`#`以降がシェルのコメント扱いとなり引数が消え、実装が完了しない
+# まま黙って終了する障害がllm-practiceリポジトリで実際に発生した。「Sanitize issue
+# number input」ステップで数字以外の文字を取り除いてから prompt 内で使うことで、
+# この種の入力ミスに対して防御的になっている。
 
 on:
   workflow_dispatch:
     inputs:
       issue_number:
-        description: "実装対象のIssue番号"
+        description: "実装対象のIssue番号(数字のみ。#は付けないこと。例: 3)"
         required: true
         type: number
 
@@ -53,6 +60,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Sanitize issue number input
+        id: sanitize
+        run: |
+          raw="${{ inputs.issue_number }}"
+          clean="$(echo "$raw" | tr -dc '0-9')"
+          if [ -z "$clean" ]; then
+            echo "::error::issue_number must contain a number, got: '$raw'"
+            exit 1
+          fi
+          if [ "$raw" != "$clean" ]; then
+            echo "::warning::issue_number '$raw' contained non-digit characters (e.g. a leading '#'); sanitized to '$clean'"
+          fi
+          echo "issue_number=$clean" >> "$GITHUB_OUTPUT"
+
       - name: Run PM (lead) agent
         uses: anthropics/claude-code-action@v1
         with:
@@ -60,7 +81,7 @@ jobs:
           allowed_bots: "claude"
           show_full_output: true
           prompt: |
-            あなたはこのチームのPM/リードエンジニアです。今回対応するIssueは #${{ inputs.issue_number }} です。
+            あなたはこのチームのPM/リードエンジニアです。今回対応するIssueは #${{ steps.sanitize.outputs.issue_number }} です。
             (Issueの選定自体は ai-team-scheduler.yml が既に済ませているので、選び直す必要はありません)
             以下の手順で実行してください。
 
@@ -87,7 +108,7 @@ jobs:
             4. `qa-engineer` サブエージェントにテスト作成・実行を依頼する。
             5. テストが失敗した場合は `coder` に修正を依頼し、4に戻る(通るまで繰り返す。この間は In Progress のまま)。
             6. テストが通ったら、ブランチを `git push -u origin <branch>` でリモートに反映し、
-               `Closes #${{ inputs.issue_number }}` を含めてPRを作成する(`gh pr create --title ... --body ...`)。
+               `Closes #${{ steps.sanitize.outputs.issue_number }}` を含めてPRを作成する(`gh pr create --title ... --body ...`)。
                作成後 `gh pr view --json number --jq '.number'` でPR番号を控える(以降reviewer/coderに伝える)。
             7. PRを作成したら、Status を Under Review ($STATUS_UNDER_REVIEW_ID) に更新する。
 
@@ -112,18 +133,18 @@ jobs:
                 確認できるreviewerの実際のレビュー本文中の「スコープ外の発見事項」に、範囲外の問題が
                 含まれていた場合、それぞれについて以下を行う(なければ何もしなくてよい):
                 a. `gh issue list --state open` で確認し、既存Issueと内容が重複する場合は新規作成しない。
-                b. 重複がなければ `gh issue create --title "<簡潔なタイトル>" --body "<発見内容。どのサブエージェントが何の作業中に気づいたか、元Issue #${{ inputs.issue_number }} へのリンクを含める>"` で起票する。
+                b. 重複がなければ `gh issue create --title "<簡潔なタイトル>" --body "<発見内容。どのサブエージェントが何の作業中に気づいたか、元Issue #${{ steps.sanitize.outputs.issue_number }} へのリンクを含める>"` で起票する。
                 c. `gh issue edit <新Issue番号> --add-label found-in-review` でラベルを付与する。
                    優先度ラベルは `next` を基本とする(緊急性が本当に高い場合のみ `now`)。
                    `now` を付けた場合、次回の ai-team-scheduler.yml 実行で自動的に選定対象になる点に留意する。
                 d. `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <新IssueのURL>`
                    でProjectに追加する(Statusは既定のTodoのままでよい)。
-                e. `gh issue comment ${{ inputs.issue_number }} --body "関連Issueとして #<新Issue番号> を作成しました"`
+                e. `gh issue comment ${{ steps.sanitize.outputs.issue_number }} --body "関連Issueとして #<新Issue番号> を作成しました"`
             13. 完了条件(PR作成・reviewerのAPPROVE・マージ、または11の「Under Reviewで待機」)に
                 到達しないまま、このセッションを終了せざるを得ない場合(ターン数の制約、
                 サブエージェントからの応答異常、ツール実行エラー、3の確認でブランチが
                 見つからなかった、など理由を問わない)、終了する前に必ず次を実行すること:
-                `gh issue comment ${{ inputs.issue_number }} --body "<ここまでの作業状況・どの手順まで進んだか・中断した理由(推測でよい)・人間が確認すべき点>"`
+                `gh issue comment ${{ steps.sanitize.outputs.issue_number }} --body "<ここまでの作業状況・どの手順まで進んだか・中断した理由(推測でよい)・人間が確認すべき点>"`
                 このとき、直前まで設定していた Status(In Progress または Under Review)は
                 変更せずそのままにする(Todo や Done には絶対に変更しない)。
 
