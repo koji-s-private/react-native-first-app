@@ -7,6 +7,13 @@ name: AI Team Orchestrator
 # 実行できず(`Can not approve your own pull request`)使えない。
 # PRのマージは絶対に行わない(必ず人間が手動で行う。llm-practiceリポジトリと同じ方針)。
 #
+# NOTE: .github/workflows/ 配下のファイルを新規作成・変更するブランチは、通常の
+# git push(claude[bot]のGitHub Appインストールトークン)ではGitHub側の仕様で拒否される
+# (`refusing to allow a GitHub App to create or update workflow ... without workflows
+# permission`)。この場合はcoderが`workflow`権限を持つ専用トークン$WORKFLOW_GH_TOKENで
+# pushする(詳細は.claude/agents/coder.md参照)。このトークンが未設定/権限不足の場合も
+# 同様に拒否されるので、その旨をPMへの報告に含めるようcoder.mdで指示している。
+#
 # 対象Issueの選定自体は ai-team-scheduler.yml が1日1回、LLMを使わない決定的なロジックで行い、
 # 選定結果をこのworkflow_dispatchの issue_number 入力として渡す(直接この workflow を選定目的で
 # 手動実行する場合は、対応したいIssue番号を明示的に指定すること)。
@@ -53,6 +60,9 @@ jobs:
       # 別名で持たせ、gh project 系コマンドを叩くときだけ明示的に
       # `GH_TOKEN=$PROJECTS_GH_TOKEN gh project ...` のように前置して使う。
       PROJECTS_GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+      # .github/workflows/ 配下への変更をpushするために必要な、workflow権限付きトークン
+      # (通常のGH_TOKENでは前述のNOTEの通り拒否されるため)。coder.mdの指示で使用する。
+      WORKFLOW_GH_TOKEN: ${{ secrets.WORKFLOW_GH_TOKEN }}
       PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
       PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
       PROJECT_ID: ${{ vars.PROJECT_ID }}
@@ -114,8 +124,10 @@ jobs:
                確認できない場合は先に進まず、13の手順に従って状況をIssueにコメントしてから終了する。
             4. `qa-engineer` サブエージェントにテスト作成・実行を依頼する。
             5. テストが失敗した場合は `coder` に修正を依頼し、4に戻る(通るまで繰り返す。この間は In Progress のまま)。
-            6. テストが通ったら、ブランチを `git push -u origin <branch>` でリモートに反映し、
-               PRを作成する(`gh pr create --title ... --body ...`)。PR本文には以下を含める:
+            6. テストが通ったら、ブランチを `git push -u origin <branch>` でリモートに反映し
+               (`.github/workflows/` 配下を変更したブランチの場合はcoder.mdの指示に従い
+               `$WORKFLOW_GH_TOKEN` を使ったpushになる)、PRを作成する(`gh pr create --title ... --body ...`)。
+               PR本文には以下を含める:
                 - `Closes #${{ steps.sanitize.outputs.issue_number }}`
                 - ## 対応したIssue(番号とリンク)
                 - ## 変更内容
