@@ -13,6 +13,8 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
 - 実装を変更したら対応するテストを `tests/` に必ず追加・更新する
 - テストが通らない状態でPRを作成しない
 - 新規に追加・変更するコードのコメントは日本語で記載する
+- 課金が発生する可能性のある操作(有料クラウドサービスの契約・起動、有料APIの利用等)は絶対に実行しない。実装・インフラ選定は必ず無料枠・無料ツールで完結する方法のみを採用する
+  (例: GitHub標準のCodeQL Code ScanningはprivateリポジトリだとGitHub Advanced Security(有料)が必要なため、静的解析には無料で使えるSemgrep OSSを採用している)
 
 ## GitHub Projects 運用
 - Project board: [koji-s-private/react-native-first-app AI Team](https://github.com/orgs/koji-s-private/projects/4)(Projects v2)
