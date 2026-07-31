@@ -81,7 +81,12 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "claude"
+          # ai-team-scheduler.yml は `gh workflow run` でこのworkflow_dispatchを起動するため、
+          # トリガーの actor は人間ではなく github-actions[bot] になる。claude-code-action は
+          # デフォルトでbotによる起動を拒否するため、scheduler経由の自動実行が
+          # 「Workflow initiated by non-human actor」で即失敗していた。github-actions を
+          # allowed_bots に加えて許可する。
+          allowed_bots: "claude,github-actions"
           show_full_output: true
           prompt: |
             あなたはこのチームのPM/リードエンジニアです。今回対応するIssueは #${{ steps.sanitize.outputs.issue_number }} です。
