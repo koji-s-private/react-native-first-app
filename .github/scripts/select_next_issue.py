@@ -16,7 +16,12 @@ import re
 import subprocess
 import sys
 
+COST_WARNING_PREFIX = "⚠️ 費用が発生する可能性があります"
 STUCK_STATUSES = ("In Progress", "Under Review")
+
+
+def is_cost_warning(body: str) -> bool:
+    return (body or "").lstrip().startswith(COST_WARNING_PREFIX)
 
 
 def issue_referenced_in_any_pr(number: int, prs: list[dict]) -> bool:
@@ -48,6 +53,8 @@ def pick_issue(
     heals: list[int] = []
     for issue in sorted(now_issues, key=lambda i: i["number"]):
         number = issue["number"]
+        if is_cost_warning(issue.get("body", "")):
+            continue
         if issue_referenced_in_any_pr(number, open_prs):
             continue
 

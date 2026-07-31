@@ -118,6 +118,12 @@ jobs:
                (見つからない場合は `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <issue-url>` で追加する)。
             1. Status を In Progress ($STATUS_IN_PROGRESS_ID) に更新する。
             2. 要件を明確化し、実装タスクに分解する。
+
+            **重要な制約(必須)**: 実装・インフラ選定は必ず無料で完結する方法のみを採用すること。
+            課金が発生する可能性のある操作(有料クラウドサービスの契約・起動、有料APIの利用等)は
+            絶対に実行しない。この制約によって実装できない場合は、実装を行わず、13の手順に従って
+            その旨をIssueにコメントし、Status は In Progress のままにして人間の判断を待つこと。
+
             3. `coder` サブエージェントに実装とブランチ作成を依頼する。
                完了報告を受けたら、`git fetch origin && git branch -r` で対象ブランチが
                実際にリモートへ作成されているか必ず確認する(サブエージェントの報告を鵜呑みにしない)。
@@ -193,5 +199,6 @@ jobs:
             発言するだけで実際には何もツールを呼ばずにターンを終了することは絶対にしないこと。
             PRのマージは絶対に行わない。reviewerが「LGTM相当」と判定した場合でも、テストが全て
             通っていたとしても、マージは必ず人間(オーナー)が手動で行う。
+            課金が発生する可能性のある操作は絶対に実行しない。
           claude_args: |
             --max-turns 60 --allowedTools "Bash,Read,Write,Edit,Grep,Glob,Task"

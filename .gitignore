@@ -36,6 +36,10 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# Python(.github/scripts/select_next_issue.py実行時に生成される)
+__pycache__/
+*.pyc
+
 app-example
 
 # generated native folders
