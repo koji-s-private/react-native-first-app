@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { randomUUID } from 'expo-crypto';
 import { useCallback, useEffect, useState } from 'react';
 import {
   FlatList,
@@ -51,7 +52,9 @@ export default function HomeScreen() {
     }
 
     const newEntry: DiaryEntry = {
-      id: Date.now().toString(),
+      // Date.now().toString() は同一ミリ秒での衝突リスクがあるため、
+      // 衝突しにくいUUID v4を生成するexpo-cryptoのrandomUUID()を使用する
+      id: randomUUID(),
       text: trimmed,
       createdAt: new Date().toISOString(),
     };

@@ -32,6 +32,13 @@ jest.mock('expo-router', () => {
   return { Link };
 });
 
+// `jest-expo` が自動生成する expo-crypto のモック(node_modules/expo-crypto/mocks/ExpoCrypto.ts)は
+// `randomUUID()` が常に `undefined` を返す実装になっているため、ID一意性を検証するテストのために
+// 呼び出しごとに異なる値を返す独自のモックに差し替える。
+jest.mock('expo-crypto', () => ({
+  randomUUID: jest.fn(),
+}));
+
 // The native `AsyncStorage` module isn't available in the Jest environment
 // (`NativeModule: AsyncStorage is null`), so we swap in the official in-memory mock
 // shipped with the package. This lets the screen's persistence logic (`getItem`/`setItem`)
@@ -40,7 +47,11 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')
 );
 
+import { randomUUID } from 'expo-crypto';
+
 import HomeScreen from '@/app/(tabs)/index';
+
+const mockRandomUUID = randomUUID as jest.Mock;
 
 const STORAGE_KEY = 'diary-entries';
 const INPUT_PLACEHOLDER = '今日の出来事や気持ちを書いてみましょう';
@@ -50,6 +61,11 @@ describe('HomeScreen', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
     jest.clearAllMocks();
+
+    // 各テストで一意なUUID風の値を返すデフォルト実装をセットしておく
+    // (個別のテストで一意性を厳密に検証したい場合は mockReturnValueOnce 等で上書きする)。
+    let uuidCounter = 0;
+    mockRandomUUID.mockImplementation(() => `mock-uuid-${uuidCounter++}`);
   });
 
   it('renders the diary title', async () => {
@@ -190,5 +206,43 @@ describe('HomeScreen', () => {
     expect(screen.queryByText('今日の日記')).toBeNull();
     expect(input.props.value).toBe('今日の日記');
     expect(screen.getByText('過去の日記')).toBeTruthy();
+  });
+
+  it('assigns a unique id (via expo-crypto randomUUID) to each entry saved consecutively', async () => {
+    // `randomUUID` を呼び出しごとに異なる値を返すようスタブし、
+    // 同一ミリ秒での `Date.now().toString()` による衝突が起きないことを検証する。
+    mockRandomUUID
+      .mockReturnValueOnce('uuid-1')
+      .mockReturnValueOnce('uuid-2')
+      .mockReturnValueOnce('uuid-3');
+
+    render(<HomeScreen />);
+    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+    const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+    const saveButton = screen.getByText('保存');
+
+    fireEvent.changeText(input, '1件目');
+    fireEvent.press(saveButton);
+    await screen.findByText('1件目');
+
+    fireEvent.changeText(input, '2件目');
+    fireEvent.press(saveButton);
+    await screen.findByText('2件目');
+
+    fireEvent.changeText(input, '3件目');
+    fireEvent.press(saveButton);
+    await screen.findByText('3件目');
+
+    expect(mockRandomUUID).toHaveBeenCalledTimes(3);
+
+    await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(3));
+    const lastCall = (AsyncStorage.setItem as jest.Mock).mock.calls[2];
+    const persisted = JSON.parse(lastCall[1]);
+
+    expect(persisted).toHaveLength(3);
+    const ids = persisted.map((entry: { id: string }) => entry.id);
+    expect(ids).toEqual(['uuid-3', 'uuid-2', 'uuid-1']);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

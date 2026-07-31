@@ -129,6 +129,7 @@
 | ライブラリ | 用途 | 主な使用箇所 |
 | --- | --- | --- |
 | [expo-constants](https://docs.expo.dev/versions/v54.0.0/sdk/constants/) | アプリ設定値・実行時定数の取得 | 設定値が必要な箇所全般 |
+| [expo-crypto](https://docs.expo.dev/versions/v54.0.0/sdk/crypto/) | 一意なID（UUID）生成などの暗号関連機能 | `app/(tabs)/index.tsx`（日記エントリIDの生成） |
 | [expo-font](https://docs.expo.dev/versions/v54.0.0/sdk/font/) | カスタムフォントの読み込み | `app/_layout.tsx`（フォントロード） |
 | [expo-haptics](https://docs.expo.dev/versions/v54.0.0/sdk/haptics/) | 触覚フィードバック（タップ時の振動） | `components/haptic-tab.tsx` |
 | [expo-image](https://docs.expo.dev/versions/v54.0.0/sdk/image/) | 高機能な画像表示コンポーネント | 画像を表示する画面・コンポーネント |
@@ -160,7 +161,7 @@
 
 ```ts
 type DiaryEntry = {
-  id: string;        // Date.now().toString() で生成する一意なID
+  id: string;        // expo-crypto の randomUUID() で生成する一意なID（UUID v4）
   text: string;       // 日記本文（保存時に前後の空白をtrim）
   createdAt: string;  // 作成日時（new Date().toISOString()）
 };
