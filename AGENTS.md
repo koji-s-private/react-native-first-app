@@ -35,6 +35,13 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
   このbotトークンはIssue/PR操作はできるが、Organization配下のProjectsには権限がないため、
   `gh project` で始まるコマンドは必ず `GH_TOKEN=$PROJECTS_GH_TOKEN` を先頭に付けて、専用トークンに明示的に差し替えて実行すること
   (逆に issue/PR 操作は素の `gh` のままでよい)
+- **重要**: 同様に、`claude[bot]`のGitHub Appインストールトークンには`workflow`権限が無いため、
+  `.github/workflows/` 配下のファイルを新規作成・変更するブランチは通常の`git push`が
+  GitHubの仕様で拒否される(`refusing to allow a GitHub App to create or update workflow ...
+  without workflows permission`)。この場合は`workflow`権限を持つ専用シークレット
+  `WORKFLOW_GH_TOKEN`(リポジトリのSecretsに登録済み)を使ってpushする
+  ([.claude/agents/coder.md](.claude/agents/coder.md)参照)。このシークレットが未設定/権限不足の
+  場合も同様に拒否されるため、その旨をPMへの報告に含める運用にしている
 
 ## 役割分担
 - GitHub Actions上のセッション(このガイドラインを読んでいる側)はPM/リードエンジニア役。実装そのものは行わず、Task tool 経由で以下のサブエージェントに委任すること

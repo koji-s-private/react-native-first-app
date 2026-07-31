@@ -13,6 +13,19 @@ model: sonnet
 3. 既存のコードスタイル・命名規則に従う
 4. 変更内容を簡潔にまとめてPM(呼び出し元)に報告する(PR作成はPMの指示があってから)
 
+`.github/workflows/` 配下のファイルを新規作成・変更した場合、通常の `git push -u origin <branch>` は
+GitHubの仕様上拒否される(`refusing to allow a GitHub App to create or update workflow ... without
+workflows permission`。claude[bot]のGitHub Appインストールトークンには`workflow`権限が無いため)。
+この場合は、`workflow`権限を持つ専用トークン`$WORKFLOW_GH_TOKEN`を使って以下のようにpushすること:
+
+```bash
+git push "https://x-access-token:${WORKFLOW_GH_TOKEN}@github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner).git" <branch>
+```
+
+このトークンが未設定、または同様のエラーで拒否される場合は、実装をやり直したり別の回避策を
+試したりせず、PMへの報告に「`.github/workflows/`への書き込みには`workflow`権限を持つ
+`WORKFLOW_GH_TOKEN`シークレットの設定が必要」という趣旨を明記して終了すること。
+
 実装中に、今回のIssueの範囲外の問題(バグ、技術的負債、改善点)に気づいた場合は、
 自分で修正せず、PMへの報告の最後に「スコープ外の発見事項」として
 ファイルパス・症状・提案を1〜2行で簡潔にまとめて含めること。
