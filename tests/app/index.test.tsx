@@ -44,7 +44,7 @@ jest.mock('expo-crypto', () => ({
 // shipped with the package. This lets the screen's persistence logic (`getItem`/`setItem`)
 // run against a real (fake) storage backend instead of crashing.
 jest.mock('@react-native-async-storage/async-storage', () =>
-  require('@react-native-async-storage/async-storage/jest/async-storage-mock')
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
 import { randomUUID } from 'expo-crypto';
@@ -199,9 +199,7 @@ describe('HomeScreen', () => {
     fireEvent.changeText(input, '今日の日記');
     fireEvent.press(screen.getByText('保存'));
 
-    expect(
-      await screen.findByText('保存に失敗しました。もう一度お試しください。')
-    ).toBeTruthy();
+    expect(await screen.findByText('保存に失敗しました。もう一度お試しください。')).toBeTruthy();
 
     expect(screen.queryByText('今日の日記')).toBeNull();
     expect(input.props.value).toBe('今日の日記');

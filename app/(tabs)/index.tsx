@@ -79,7 +79,8 @@ export default function HomeScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <ThemedView style={styles.container}>
         <ThemedText type="title" style={styles.title}>
           日記
@@ -97,14 +98,13 @@ export default function HomeScreen() {
           <Pressable
             style={[styles.saveButton, { backgroundColor: tintColor }]}
             onPress={handleSave}
-            disabled={!draft.trim()}>
+            disabled={!draft.trim()}
+          >
             <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
               保存
             </ThemedText>
           </Pressable>
-          {saveError ? (
-            <ThemedText style={styles.errorText}>{saveError}</ThemedText>
-          ) : null}
+          {saveError ? <ThemedText style={styles.errorText}>{saveError}</ThemedText> : null}
         </ThemedView>
 
         {entries.length === 0 ? (

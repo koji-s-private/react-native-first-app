@@ -45,8 +45,8 @@ describe('ModalScreen', () => {
 
     expect(
       screen.getByText(
-        'Swipe down or use the back gesture/button (depending on your device), or tap the link below to close this modal.'
-      )
+        'Swipe down or use the back gesture/button (depending on your device), or tap the link below to close this modal.',
+      ),
     ).toBeTruthy();
   });
 

@@ -1,0 +1,11 @@
+node_modules
+dist
+.expo
+coverage
+package-lock.json
+
+# ワークフローYAML・Markdownドキュメント・エージェント定義は対象外
+# (手書きのコメント配置・インデントを尊重し、Prettierの自動整形対象にしない)
+.github/**
+*.md
+.claude/**

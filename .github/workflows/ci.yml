@@ -1,6 +1,6 @@
 name: CI
 
-# PR作成・更新時にlint・テスト・依存パッケージの脆弱性検知を実行する。
+# PR作成・更新時にlint・フォーマットチェック・テスト・依存パッケージの脆弱性検知を実行する。
 # READMEに記載のNode.js v22系を使用する(厳密なバージョン管理はIssue #20で別途扱う)。
 
 on:
@@ -27,6 +27,9 @@ jobs:
 
       - name: Lint(ESLint)
         run: npm run lint
+
+      - name: フォーマットチェック(Prettier)
+        run: npm run format:check
 
       - name: テスト(Jest)
         run: npm test

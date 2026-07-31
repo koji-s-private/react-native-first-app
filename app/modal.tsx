@@ -9,8 +9,8 @@ export default function ModalScreen() {
     <ThemedView style={styles.container}>
       <ThemedText type="title">This is a modal</ThemedText>
       <ThemedText style={styles.description}>
-        Swipe down or use the back gesture/button (depending on your
-        device), or tap the link below to close this modal.
+        Swipe down or use the back gesture/button (depending on your device), or tap the link below
+        to close this modal.
       </ThemedText>
       <Link href="/" dismissTo style={styles.link}>
         <ThemedText type="link">Go to home screen</ThemedText>
