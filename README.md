@@ -91,7 +91,7 @@
 | ワークフロー | 内容 |
 | --- | --- |
 | [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) | `npm run lint`(ESLint)・`npm run format:check`(Prettier)・`npm test`(Jest)・`npm audit --audit-level=high`(依存パッケージの脆弱性検知)を実行し、いずれかが失敗するとチェックが失敗する |
-| [`.github/workflows/codeql.yml`](./.github/workflows/codeql.yml) | [CodeQL](https://codeql.github.com/) によるコードの静的セキュリティ解析(JavaScript/TypeScript対象)。PR時・`main`へのpush時・週次スケジュールで実行し、結果はリポジトリのSecurityタブに反映される |
+| [`.github/workflows/semgrep.yml`](./.github/workflows/semgrep.yml) | [Semgrep](https://semgrep.dev/) OSSによるコードの静的セキュリティ解析(コミュニティルールセット `p/security-audit` `p/typescript` `p/react` を使用。無料・アカウント登録不要)。PR時・`main`へのpush時・週次スケジュールで実行する。GitHub標準のCodeQLはprivateリポジトリだとGitHub Advanced Security(有料)が必要なため採用していない |
 
 ## 使用技術・主要ライブラリ
 
