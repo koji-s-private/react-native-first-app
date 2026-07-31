@@ -1,8 +1,11 @@
 name: AI Team Orchestrator
 
 # 指定されたIssue番号1件について、coder → qa-engineer → reviewer のループで実装し、PRを作成する。
-# reviewer は実際のGitHub PRレビュー(gh pr review --approve/--request-changes)を投稿し、
-# coder はそれを読んで同一PR内で修正する(llm-practiceリポジトリと同じ実PRレビュー運用)。
+# reviewer は実際のGitHub PRレビュー(gh pr review --comment。本文にLGTM相当/要修正を明記)を
+# 投稿し、coder はそれを読んで同一PR内で修正する。coderとreviewerは同一GitHub App identity
+# (claude[bot])で動作するため、GitHubの仕様上 --approve/--request-changes は自分自身のPRに
+# 実行できず(`Can not approve your own pull request`)使えない。
+# PRのマージは絶対に行わない(必ず人間が手動で行う。llm-practiceリポジトリと同じ方針)。
 #
 # 対象Issueの選定自体は ai-team-scheduler.yml が1日1回、LLMを使わない決定的なロジックで行い、
 # 選定結果をこのworkflow_dispatchの issue_number 入力として渡す(直接この workflow を選定目的で
@@ -78,8 +81,12 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "claude"
-          show_full_output: true
+          # ai-team-scheduler.yml は `gh workflow run` でこのworkflow_dispatchを起動するため、
+          # トリガーの actor は人間ではなく github-actions[bot] になる。claude-code-action は
+          # デフォルトでbotによる起動を拒否するため、scheduler経由の自動実行が
+          # 「Workflow initiated by non-human actor」で即失敗していた。github-actions を
+          # allowed_bots に加えて許可する。
+          allowed_bots: "claude,github-actions"
           prompt: |
             あなたはこのチームのPM/リードエンジニアです。今回対応するIssueは #${{ steps.sanitize.outputs.issue_number }} です。
             (Issueの選定自体は ai-team-scheduler.yml が既に済ませているので、選び直す必要はありません)
@@ -108,25 +115,39 @@ jobs:
             4. `qa-engineer` サブエージェントにテスト作成・実行を依頼する。
             5. テストが失敗した場合は `coder` に修正を依頼し、4に戻る(通るまで繰り返す。この間は In Progress のまま)。
             6. テストが通ったら、ブランチを `git push -u origin <branch>` でリモートに反映し、
-               `Closes #${{ steps.sanitize.outputs.issue_number }}` を含めてPRを作成する(`gh pr create --title ... --body ...`)。
+               PRを作成する(`gh pr create --title ... --body ...`)。PR本文には以下を含める:
+                - `Closes #${{ steps.sanitize.outputs.issue_number }}`
+                - ## 対応したIssue(番号とリンク)
+                - ## 変更内容
                作成後 `gh pr view --json number --jq '.number'` でPR番号を控える(以降reviewer/coderに伝える)。
             7. PRを作成したら、Status を Under Review ($STATUS_UNDER_REVIEW_ID) に更新する。
 
             ## 実レビュー(reviewer)
 
-            8. `reviewer` サブエージェントに、控えたPR番号を伝えてレビューを依頼する。reviewerは
-               `gh pr review` で実際にGitHub上へapprove/request changesを投稿する(PMへのテキスト報告だけで終わらせない)。
-            9. reviewerがrequest changesを出した場合は、`coder` にPR番号を伝えて修正を依頼する。coderは
+            8. `reviewer` サブエージェントに、控えたPR番号を伝えてレビューを依頼する。coderが作成した
+               PRの作者とreviewerの実行アカウントは同一GitHub App(claude[bot])のため、GitHubの仕様上
+               `gh pr review --approve`/`--request-changes` は自分自身のPRに対して実行できず
+               (`GraphQL: Review Can not approve your own pull request`)エラーになる。そのためreviewerは
+               常に `gh pr review --comment` で投稿し、本文冒頭に判定(「LGTM相当」または「要修正」)を
+               明記する(PMへのテキスト報告だけで終わらせない)。
+            9. reviewerが「要修正」と判定した場合は、`coder` にPR番号を伝えて修正を依頼する。coderは
                `gh pr view <PR番号> --json reviews,comments` 等で実際のレビュー内容を確認した上で同じブランチ上で
                修正し、`git push` で反映する。反映後、再度 `reviewer` に同じPR番号でレビューを依頼する
                (このループの間、Statusは Under Review のまま)。
-            10. reviewerが実際にAPPROVEを投稿したかどうかは、口頭報告ではなく
-                `gh pr view <PR番号> --json reviews --jq '.reviews[-1].state'` が `APPROVED` であることで確認する。
-                APPROVEDが確認できた場合のみ、PR本文に「## 動作確認(エビデンス)」セクションを追記し、
-                qa-engineerが報告した実際のテスト出力をそのまま貼る。続けて
-                `gh pr merge --squash --delete-branch <PR番号>` を実行しそのままmainへ自動マージし、
-                Status を Done ($STATUS_DONE_ID) に更新する。
-            11. ターン数の都合などでAPPROVEDに到達できずに終了する場合は、絶対にマージしないこと。
+            10. reviewerが「LGTM相当」と判定したかどうかは、口頭報告ではなく
+                `gh pr view <PR番号> --json reviews --jq '.reviews[-1].body'` の実際の投稿内容で確認する。
+                確認できた場合、PR本文に以下の2セクションを追記する:
+                - ## 動作確認(エビデンス): qa-engineerが報告した実際のテスト出力をそのまま貼る。
+                  `jest`実行など実行コマンドがあるものは、実行した具体的なコマンドも合わせて明記する。
+                  実機(iOSシミュレータ・ブラウザ等)の操作による動作確認を行った場合は、
+                  その検証フロー(操作手順)を箇条書きで記載した上で結果を示す。
+                - ## セルフレビューでの気付き: reviewerが実際に投稿したPRレビューを参照する旨と、
+                  その中のスコープ外の発見事項を起票したIssue番号があれば記載する(問題が無ければ「特になし」)。
+                **ここでPRのマージは絶対に行わない(マージは必ず人間(オーナー)が手動で行う。
+                reviewerとcoderが同一identityである以上GitHub側でネイティブなAPPROVE状態を
+                作成できないため、人間の実レビューを経ない自動マージは意図的に禁止している)。**
+                Status は Under Review のままとし、PR作成後はそれ以上待機せずに終了する。
+            11. ターン数の都合などで「LGTM相当」判定に到達できずに終了する場合も、絶対にマージしないこと。
                 PRにこれまでの経緯を要約したコメントを残し、Status は Under Review のままにして人間の判断を待つ
                 (In Progress や Todo に戻さない。PRが開いたまま止まっていることが分かるようにする)。
             12. coder / qa-engineer の報告、および `gh pr view <PR番号> --json reviews --jq '.reviews[].body'` で
@@ -140,13 +161,16 @@ jobs:
                 d. `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <新IssueのURL>`
                    でProjectに追加する(Statusは既定のTodoのままでよい)。
                 e. `gh issue comment ${{ steps.sanitize.outputs.issue_number }} --body "関連Issueとして #<新Issue番号> を作成しました"`
-            13. 完了条件(PR作成・reviewerのAPPROVE・マージ、または11の「Under Reviewで待機」)に
+            13. 完了条件(PR作成後、reviewerのレビューが完了しUnder Reviewで人間の判断待ちの状態に
+                なっていること。マージはこのワークフローの完了条件に含まれない)に
                 到達しないまま、このセッションを終了せざるを得ない場合(ターン数の制約、
                 サブエージェントからの応答異常、ツール実行エラー、3の確認でブランチが
                 見つからなかった、など理由を問わない)、終了する前に必ず次を実行すること:
                 `gh issue comment ${{ steps.sanitize.outputs.issue_number }} --body "<ここまでの作業状況・どの手順まで進んだか・中断した理由(推測でよい)・人間が確認すべき点>"`
                 このとき、直前まで設定していた Status(In Progress または Under Review)は
                 変更せずそのままにする(Todo や Done には絶対に変更しない)。
+            14. 最後に、対応したIssue番号、作成したPRのURL、reviewerのレビュー結果
+                (LGTM相当/要修正の経緯と回数)、新規に起票したIssue(あれば)を日本語でレポートする。
 
             各サブエージェントは Task tool 経由で呼び出してください。その際は必ず
             `run_in_background: false` を指定し、同期的に(結果が返るまで待って)実行すること。
@@ -155,6 +179,7 @@ jobs:
             このセッションは1回限りのプロセスなので、後で結果を確認することはできず、そのまま
             セッションを終了すると実行中のサブエージェントの作業は失われます。「完了を待ちます」と
             発言するだけで実際には何もツールを呼ばずにターンを終了することは絶対にしないこと。
-            reviewer の実際のAPPROVEなしでのマージは、テストが全て通っていたとしても禁止です。
+            PRのマージは絶対に行わない。reviewerが「LGTM相当」と判定した場合でも、テストが全て
+            通っていたとしても、マージは必ず人間(オーナー)が手動で行う。
           claude_args: |
             --max-turns 60 --allowedTools "Bash,Read,Write,Edit,Grep,Glob,Task"
