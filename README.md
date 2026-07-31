@@ -82,6 +82,15 @@
 
 コードを変更したときは、コミット前に `npm run lint` と `npm test` を実行し、既存のスタイル・テストを壊していないことを確認してください。
 
+### CI(継続的インテグレーション)
+
+`main` ブランチ向けのPRを作成・更新すると、GitHub Actions上で以下が自動実行されます。
+
+| ワークフロー | 内容 |
+| --- | --- |
+| [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) | `npm run lint`(ESLint)・`npm test`(Jest)・`npm audit --audit-level=high`(依存パッケージの脆弱性検知)を実行し、いずれかが失敗するとチェックが失敗する |
+| [`.github/workflows/codeql.yml`](./.github/workflows/codeql.yml) | [CodeQL](https://codeql.github.com/) によるコードの静的セキュリティ解析(JavaScript/TypeScript対象)。PR時・`main`へのpush時・週次スケジュールで実行し、結果はリポジトリのSecurityタブに反映される |
+
 ## 使用技術・主要ライブラリ
 
 [`package.json`](./package.json) の依存関係をもとに、それぞれの用途と主な使用箇所をまとめています。
