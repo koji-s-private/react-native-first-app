@@ -111,7 +111,10 @@ jobs:
             4. `qa-engineer` サブエージェントにテスト作成・実行を依頼する。
             5. テストが失敗した場合は `coder` に修正を依頼し、4に戻る(通るまで繰り返す。この間は In Progress のまま)。
             6. テストが通ったら、ブランチを `git push -u origin <branch>` でリモートに反映し、
-               `Closes #${{ steps.sanitize.outputs.issue_number }}` を含めてPRを作成する(`gh pr create --title ... --body ...`)。
+               PRを作成する(`gh pr create --title ... --body ...`)。PR本文には以下を含める:
+                - `Closes #${{ steps.sanitize.outputs.issue_number }}`
+                - ## 対応したIssue(番号とリンク)
+                - ## 変更内容
                作成後 `gh pr view --json number --jq '.number'` でPR番号を控える(以降reviewer/coderに伝える)。
             7. PRを作成したら、Status を Under Review ($STATUS_UNDER_REVIEW_ID) に更新する。
 
@@ -129,12 +132,17 @@ jobs:
                (このループの間、Statusは Under Review のまま)。
             10. reviewerが「LGTM相当」と判定したかどうかは、口頭報告ではなく
                 `gh pr view <PR番号> --json reviews --jq '.reviews[-1].body'` の実際の投稿内容で確認する。
-                確認できた場合、PR本文に「## 動作確認(エビデンス)」セクションを追記し、qa-engineerが
-                報告した実際のテスト出力をそのまま貼る。**ここでPRのマージは絶対に行わない
-                (マージは必ず人間(オーナー)が手動で行う。reviewerとcoderが同一identityである以上
-                GitHub側でネイティブなAPPROVE状態を作成できないため、人間の実レビューを経ない
-                自動マージは意図的に禁止している)。** Status は Under Review のままとし、PR作成後は
-                それ以上待機せずに終了する。
+                確認できた場合、PR本文に以下の2セクションを追記する:
+                - ## 動作確認(エビデンス): qa-engineerが報告した実際のテスト出力をそのまま貼る。
+                  `jest`実行など実行コマンドがあるものは、実行した具体的なコマンドも合わせて明記する。
+                  実機(iOSシミュレータ・ブラウザ等)の操作による動作確認を行った場合は、
+                  その検証フロー(操作手順)を箇条書きで記載した上で結果を示す。
+                - ## セルフレビューでの気付き: reviewerが実際に投稿したPRレビューを参照する旨と、
+                  その中のスコープ外の発見事項を起票したIssue番号があれば記載する(問題が無ければ「特になし」)。
+                **ここでPRのマージは絶対に行わない(マージは必ず人間(オーナー)が手動で行う。
+                reviewerとcoderが同一identityである以上GitHub側でネイティブなAPPROVE状態を
+                作成できないため、人間の実レビューを経ない自動マージは意図的に禁止している)。**
+                Status は Under Review のままとし、PR作成後はそれ以上待機せずに終了する。
             11. ターン数の都合などで「LGTM相当」判定に到達できずに終了する場合も、絶対にマージしないこと。
                 PRにこれまでの経緯を要約したコメントを残し、Status は Under Review のままにして人間の判断を待つ
                 (In Progress や Todo に戻さない。PRが開いたまま止まっていることが分かるようにする)。
@@ -157,6 +165,8 @@ jobs:
                 `gh issue comment ${{ steps.sanitize.outputs.issue_number }} --body "<ここまでの作業状況・どの手順まで進んだか・中断した理由(推測でよい)・人間が確認すべき点>"`
                 このとき、直前まで設定していた Status(In Progress または Under Review)は
                 変更せずそのままにする(Todo や Done には絶対に変更しない)。
+            14. 最後に、対応したIssue番号、作成したPRのURL、reviewerのレビュー結果
+                (LGTM相当/要修正の経緯と回数)、新規に起票したIssue(あれば)を日本語でレポートする。
 
             各サブエージェントは Task tool 経由で呼び出してください。その際は必ず
             `run_in_background: false` を指定し、同期的に(結果が返るまで待って)実行すること。
