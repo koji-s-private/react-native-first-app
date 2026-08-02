@@ -58,6 +58,9 @@ jobs:
                  - 重要度に応じて優先度ラベル `now`(すぐ対応すべき)/ `next`(次に対応)/ `later`(将来的)のいずれか1つを必ず付ける。
                    UI/UX提案は基本的に `next` または `later` とする(自発的な提案が無条件で最優先の `now` になり
                    自動実装に直行することを避けるため)
+               - `gh issue create` の出力(Issue URL)を使って、続けて
+                 `GH_TOKEN=$PROJECTS_GH_TOKEN gh project item-add $PROJECT_NUMBER --owner $PROJECT_OWNER --url <作成したIssueのURL>`
+                 を実行し、作成した各Issueを必ずProjectボードに追加してください(Statusは既定のTodoのままでよい)。
             6. **重要な制約(必須)**: インフラ、デプロイ、外部サービス連携などお金が絡む可能性のある提案をする場合は、
                必ず無料枠・無料ツールで実現できる方法をベストプラクティスとして採用して提案すること。
                Issue本文に「この対応は無料で実施可能」と明記する。どうしても有料が必須な内容(クレジットカードや
@@ -80,7 +83,8 @@ jobs:
                ヒアドキュメントの中身は実際に作成したIssue番号・タイトル・ラベルに置き換えること(プレースホルダのまま書き込まない)。
 
             ## 補足(GitHub Project連携について)
-            - 作成したIssueをProjectボードに追加する操作は不要です。リポジトリ側のGitHub Projects
-              「Auto-add to project」ワークフローが、新規Issueを自動でボードに追加します。
+            - このリポジトリのProject側には新規Issueを自動でボードに追加する仕組みは設定されていません。
+              手順5の `gh project item-add` を必ず実行し、作成したIssueを自分でProjectボードに追加してください
+              (実行し忘れるとボードに一切表示されず、優先度ラベルが付いていても選定対象として見えなくなります)。
           claude_args: |
             --max-turns 30 --allowedTools "Bash,Read,Grep,Glob"
