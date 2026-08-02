@@ -6,6 +6,11 @@
 スクリプトを移植したもの)。
 
 選定結果は GITHUB_OUTPUT に issue_number として書き出す(見つからない場合は書き出さない)。
+
+nowラベル付きIssueの中に選定条件をクリアするものが1件も無い場合、nextラベル付きIssueの
+中から同じ条件で1件を選び、nowへ自動的に繰り上げる(ラベルをnext→nowに付け替える)。
+これにより、nowラベルの付け忘れ・消化済みでnowが0件になった日でも自動実装が完全に
+止まってしまうことを防ぐ。
 """
 
 from __future__ import annotations
@@ -40,7 +45,7 @@ def issue_referenced_in_any_pr(number: int, prs: list[dict]) -> bool:
 
 
 def pick_issue(
-    now_issues: list[dict],
+    candidate_issues: list[dict],
     project_items: dict[int, dict],
     open_prs: list[dict],
     all_prs: list[dict],
@@ -51,7 +56,7 @@ def pick_issue(
     戻り値: (選ばれたIssue番号 or None, 自己修復(Statusの差し戻し)が必要なIssue番号のリスト)
     """
     heals: list[int] = []
-    for issue in sorted(now_issues, key=lambda i: i["number"]):
+    for issue in sorted(candidate_issues, key=lambda i: i["number"]):
         number = issue["number"]
         if is_cost_warning(issue.get("body", "")):
             continue
@@ -88,6 +93,18 @@ def gh_json(*args: str, token: str | None = None):
     return json.loads(gh(*args, token=token))
 
 
+def build_comment_counts(issues: list[dict], project_items: dict[int, dict]) -> dict[int, int]:
+    """STUCK_STATUSESにあるIssueのコメント数だけ都度取得する(不要なAPI呼び出しを避けるため)。"""
+    counts: dict[int, int] = {}
+    for issue in issues:
+        n = issue["number"]
+        item = project_items.get(n)
+        if item and item["status"] in STUCK_STATUSES:
+            comments = gh_json("issue", "view", str(n), "--json", "comments")["comments"]
+            counts[n] = len(comments)
+    return counts
+
+
 def main() -> None:
     projects_token = os.environ["PROJECTS_GH_TOKEN"]
     project_number = os.environ["PROJECT_NUMBER"]
@@ -97,6 +114,7 @@ def main() -> None:
     status_todo_id = os.environ["STATUS_TODO_ID"]
 
     now_issues = gh_json("issue", "list", "--state", "open", "--label", "now", "--json", "number,body")
+    next_issues = gh_json("issue", "list", "--state", "open", "--label", "next", "--json", "number,body")
     open_prs = gh_json("pr", "list", "--state", "open", "--json", "number,title,body,headRefName")
     all_prs = gh_json("pr", "list", "--state", "all", "--json", "number,title,body,headRefName")
 
@@ -109,15 +127,15 @@ def main() -> None:
         if item.get("content", {}).get("number") is not None
     }
 
-    comment_counts: dict[int, int] = {}
-    for issue in now_issues:
-        n = issue["number"]
-        item = project_items.get(n)
-        if item and item["status"] in STUCK_STATUSES:
-            comments = gh_json("issue", "view", str(n), "--json", "comments")["comments"]
-            comment_counts[n] = len(comments)
-
+    comment_counts = build_comment_counts(now_issues, project_items)
     selected, heals = pick_issue(now_issues, project_items, open_prs, all_prs, comment_counts)
+
+    promoted_from_next = False
+    if selected is None:
+        next_comment_counts = build_comment_counts(next_issues, project_items)
+        selected, next_heals = pick_issue(next_issues, project_items, open_prs, all_prs, next_comment_counts)
+        heals += next_heals
+        promoted_from_next = selected is not None
 
     for n in heals:
         item_id = project_items[n]["id"]
@@ -138,8 +156,12 @@ def main() -> None:
         )
 
     if selected is None:
-        print("本日着手できるnowラベル付きIssueが見つかりませんでした。")
+        print("本日着手できるnowまたはnextラベル付きIssueが見つかりませんでした。")
         return
+
+    if promoted_from_next:
+        gh("issue", "edit", str(selected), "--remove-label", "next", "--add-label", "now")
+        print(f"#{selected}: nowラベル付きIssueが無かったため、nextラベルからnowへ自動的に繰り上げました。")
 
     print(f"Issue #{selected} を選定しました。")
     github_output = os.environ.get("GITHUB_OUTPUT")
