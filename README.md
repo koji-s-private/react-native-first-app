@@ -133,6 +133,7 @@
 | [react-native-safe-area-context](https://docs.expo.dev/versions/v54.0.0/sdk/safe-area-context/) | ノッチ・ステータスバーなどを避けた安全領域の取得 | `components/themed-view.tsx` など画面レイアウト全般 |
 | [react-native-screens](https://docs.expo.dev/versions/v54.0.0/sdk/screen/) | ネイティブの画面遷移を最適化する | ナビゲーション全般（expo-router/ React Navigation の内部依存） |
 | [react-native-web](https://necolas.github.io/react-native-web/) | React NativeのコンポーネントをWeb上で動作させる | Web実行時の内部依存 |
+| [react-native-calendars](https://github.com/wix/react-native-calendars) | カレンダーUIコンポーネント。純JS実装でネイティブモジュールを持たないためNew Architectureとも互換性がある | `app/(tabs)/index.tsx`（日記のカレンダー表示・日付タップでの一覧表示） |
 | [@expo/vector-icons](https://docs.expo.dev/guides/icons/) | アイコンフォント集 | `components/ui/icon-symbol.tsx` など |
 
 ### Expo SDKモジュール
