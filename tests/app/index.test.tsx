@@ -364,6 +364,31 @@ describe('HomeScreen', () => {
   });
 
   describe('カレンダー表示とモーダル', () => {
+    it('shows the current year and month heading in the calendar header', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      // 「2026年8月」のように年→月の順で見出しが表示される(矢印の間に埋もれず視認できること)。
+      // react-native-calendarsのヘッダーは`importantForAccessibility="no-hide-descendants"`で
+      // 内部テキストをアクセシビリティツリーから隠しているため、`includeHiddenElements`を指定して検索する
+      // (画面上には通常どおり表示されており、アクセシビリティツリーからのみ隠れている)。
+      expect(
+        await screen.findByText(`${now.getFullYear()}年${now.getMonth() + 1}月`, {
+          includeHiddenElements: true,
+        }),
+      ).toBeTruthy();
+    });
+
+    it('shows a weekday header row (日 月 火 水 木 金 土)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      for (const dayName of ['日', '月', '火', '水', '木', '金', '土']) {
+        expect(screen.getByText(dayName, { includeHiddenElements: true })).toBeTruthy();
+      }
+    });
+
     it("shows the first entry's title of the day in the corresponding calendar cell", async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
@@ -386,7 +411,9 @@ describe('HomeScreen', () => {
       const exactlyTwentyChars = 'あ'.repeat(20);
       await AsyncStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: exactlyTwentyChars, createdAt: isoAt(now, dayWithEntry) }]),
+        JSON.stringify([
+          { id: '1', text: exactlyTwentyChars, createdAt: isoAt(now, dayWithEntry) },
+        ]),
       );
 
       render(<HomeScreen />);

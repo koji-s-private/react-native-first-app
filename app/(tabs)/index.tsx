@@ -31,6 +31,14 @@ type DiaryEntry = {
 // カレンダーの日付セルに表示するタイトルの最大文字数(超える場合は省略記号を付ける)
 const TITLE_MAX_LENGTH = 20;
 
+// 日付セルの高さのデフォルト最小値(カレンダーの実測高さがまだ取れていない初回レンダー用のフォールバック)
+const DEFAULT_DAY_CELL_MIN_HEIGHT = 48;
+// カレンダーのヘッダー(月表示+矢印)と曜日行を合わせたおおよその高さ(実測ではなく概算値)。
+// 日付グリッドに割り当てられる高さを求めるために、カレンダー全体の実測高さから差し引く
+const CALENDAR_CHROME_HEIGHT = 100;
+// showSixWeeksを有効にし、月をまたいでも常に6行で表示を揃えるため6固定で計算する
+const CALENDAR_WEEK_ROWS = 6;
+
 // react-native-calendarsが使うdayComponentのpropsの型(ライブラリ側から直接exportされていないため、
 // CalendarPropsから抽出して利用する)
 type DayComponentProps = ComponentProps<NonNullable<CalendarProps['dayComponent']>>;
@@ -101,6 +109,10 @@ export default function HomeScreen() {
   const [saveError, setSaveError] = useState<string | null>(null);
   // 一覧表示用にタップされた日付('YYYY-MM-DD')。nullの間はモーダルを閉じている
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  // カレンダーを包むViewの実測高さ(onLayoutで取得)。react-native-calendarsは内部で
+  // ジェスチャー認識用の無スタイルなViewでラップされており、`flex: 1`を渡しても
+  // 残りの縦スペースまで自動で広がらないため、実測高さから日付セルの高さを逆算して埋める
+  const [calendarHeight, setCalendarHeight] = useState(0);
   // ノッチ/Dynamic Island・ステータスバーとタイトルが重ならないよう、上端のセーフエリアインセットを取得する
   const insets = useSafeAreaInsets();
   const textColor = useThemeColor({}, 'text');
@@ -170,6 +182,15 @@ export default function HomeScreen() {
     return map;
   }, [entries]);
 
+  // カレンダー下に大きな空白が残らないよう、実測した高さに応じて日付セルの高さを広げる
+  const dayCellMinHeight = useMemo(() => {
+    if (calendarHeight <= 0) {
+      return DEFAULT_DAY_CELL_MIN_HEIGHT;
+    }
+    const availableHeight = calendarHeight - CALENDAR_CHROME_HEIGHT;
+    return Math.max(DEFAULT_DAY_CELL_MIN_HEIGHT, availableHeight / CALENDAR_WEEK_ROWS);
+  }, [calendarHeight]);
+
   const handleDayPress = useCallback(
     (date: DateData) => {
       // 日記が無い日は何も表示しない(タップしても反応しない)
@@ -194,20 +215,27 @@ export default function HomeScreen() {
 
       return (
         <Pressable
-          style={styles.dayCell}
+          style={[styles.dayCell, { minHeight: dayCellMinHeight }]}
           onPress={() => onPress?.(date)}
           disabled={!title}
           accessibilityRole={title ? 'button' : undefined}
         >
-          <ThemedText
-            style={[
-              styles.dayNumber,
-              isDisabled ? styles.dayNumberDisabled : undefined,
-              isToday ? { color: tintColor, fontWeight: '700' as const } : undefined,
-            ]}
-          >
-            {date.day}
-          </ThemedText>
+          {isToday ? (
+            // 今日のセルは数字を丸背景で囲んで強調する(一般的なカレンダーアプリの表現に合わせる)
+            <View style={[styles.todayBadge, { backgroundColor: tintColor }]}>
+              <ThemedText
+                style={[styles.dayNumber, { color: backgroundColor, fontWeight: '700' as const }]}
+              >
+                {date.day}
+              </ThemedText>
+            </View>
+          ) : (
+            <ThemedText
+              style={[styles.dayNumber, isDisabled ? styles.dayNumberDisabled : undefined]}
+            >
+              {date.day}
+            </ThemedText>
+          )}
           {title ? (
             <ThemedText style={[styles.dayEntryTitle, { color: tintColor }]} numberOfLines={1}>
               {title}
@@ -216,7 +244,7 @@ export default function HomeScreen() {
         </Pressable>
       );
     },
-    [entriesByDate, tintColor],
+    [entriesByDate, tintColor, backgroundColor, dayCellMinHeight],
   );
 
   const selectedDateEntries = selectedDate ? (entriesByDate[selectedDate] ?? []) : [];
@@ -252,21 +280,36 @@ export default function HomeScreen() {
           {saveError ? <ThemedText style={styles.errorText}>{saveError}</ThemedText> : null}
         </ThemedView>
 
-        <Calendar
-          style={[styles.calendar, { borderColor: iconColor }]}
-          theme={{
-            backgroundColor,
-            calendarBackground: backgroundColor,
-            textSectionTitleColor: iconColor,
-            dayTextColor: textColor,
-            monthTextColor: textColor,
-            arrowColor: tintColor,
-            todayTextColor: tintColor,
-          }}
-          dayComponent={renderDay}
-          onDayPress={handleDayPress}
-          enableSwipeMonths
-        />
+        <View
+          style={styles.calendarWrapper}
+          onLayout={(event) => setCalendarHeight(event.nativeEvent.layout.height)}
+        >
+          <Calendar
+            style={[styles.calendar, { borderColor: iconColor }]}
+            theme={{
+              backgroundColor,
+              calendarBackground: backgroundColor,
+              // 曜日行はtextColorを使い、アイコン色より高いコントラストで視認性を確保する
+              textSectionTitleColor: textColor,
+              textDayHeaderFontWeight: '600',
+              dayTextColor: textColor,
+              // 月・年の見出しも大きく太字にして、矢印の間で確実に視認できるようにする
+              monthTextColor: textColor,
+              textMonthFontWeight: '700',
+              textMonthFontSize: 18,
+              arrowColor: tintColor,
+              todayTextColor: tintColor,
+            }}
+            // 「2026年8月」のように年→月の順で表示する(デフォルトの'MMMM yyyy'は英語の語順のまま
+            // 月名だけ日本語化されてしまい不自然なため)
+            monthFormat="yyyy年M月"
+            dayComponent={renderDay}
+            onDayPress={handleDayPress}
+            enableSwipeMonths
+            // 月によって行数(4〜6週)が変わって高さがガタつかないよう、常に6週分の高さで揃える
+            showSixWeeks
+          />
+        </View>
 
         <Modal
           visible={selectedDate !== null}
@@ -344,14 +387,15 @@ const styles = StyleSheet.create({
     color: '#d32f2f',
     fontSize: 14,
   },
-  calendar: {
+  calendarWrapper: {
     flex: 1,
+  },
+  calendar: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 8,
   },
   dayCell: {
     flex: 1,
-    minHeight: 48,
     alignItems: 'center',
     paddingTop: 4,
     gap: 2,
@@ -361,6 +405,13 @@ const styles = StyleSheet.create({
   },
   dayNumberDisabled: {
     opacity: 0.3,
+  },
+  todayBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   dayEntryTitle: {
     fontSize: 10,
