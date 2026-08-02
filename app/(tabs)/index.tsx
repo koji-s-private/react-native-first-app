@@ -31,13 +31,16 @@ type DiaryEntry = {
 // カレンダーの日付セルに表示するタイトルの最大文字数(超える場合は省略記号を付ける)
 const TITLE_MAX_LENGTH = 20;
 
-// 日付セルの高さのデフォルト最小値(カレンダーの実測高さがまだ取れていない初回レンダー用のフォールバック)
-const DEFAULT_DAY_CELL_MIN_HEIGHT = 48;
-// カレンダーのヘッダー(月表示+矢印)と曜日行を合わせたおおよその高さ(実測ではなく概算値)。
-// 日付グリッドに割り当てられる高さを求めるために、カレンダー全体の実測高さから差し引く
-const CALENDAR_CHROME_HEIGHT = 100;
+// 日付セルの高さのデフォルト最小値(外枠の実測高さがまだ取れていない初回レンダー用のフォールバック)
+const DEFAULT_DAY_CELL_HEIGHT = 48;
 // showSixWeeksを有効にし、月をまたいでも常に6行で表示を揃えるため6固定で計算する
 const CALENDAR_WEEK_ROWS = 6;
+// react-native-calendarsのヘッダー(月表示+矢印)と曜日行を合わせたおおよその高さ、および
+// 1週間の行に付与される上下マージン(週の行が持つmarginVertical、react-native-calendarsの
+// デフォルトのweekVerticalMargin=7を上下2回分)。テーマのフォントサイズ等から算出した概算値であり、
+// 実測ではないが、日付セルの高さを外枠の実測高さから一度の計算で求めるための基準として使う
+const CALENDAR_CHROME_HEIGHT = 90;
+const CALENDAR_WEEK_ROW_MARGIN = 14;
 
 // react-native-calendarsが使うdayComponentのpropsの型(ライブラリ側から直接exportされていないため、
 // CalendarPropsから抽出して利用する)
@@ -109,10 +112,10 @@ export default function HomeScreen() {
   const [saveError, setSaveError] = useState<string | null>(null);
   // 一覧表示用にタップされた日付('YYYY-MM-DD')。nullの間はモーダルを閉じている
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  // カレンダーを包むViewの実測高さ(onLayoutで取得)。react-native-calendarsは内部で
-  // ジェスチャー認識用の無スタイルなViewでラップされており、`flex: 1`を渡しても
-  // 残りの縦スペースまで自動で広がらないため、実測高さから日付セルの高さを逆算して埋める
-  const [calendarHeight, setCalendarHeight] = useState(0);
+  // カレンダーの外枠(タイトル・入力欄・保存ボタンの下からタブバーの上までの残りスペースを
+  // `flex: 1`で使い切るView)の実測高さ(onLayoutで取得)。この外枠自体に枠線・角丸を付け、
+  // 日付グリッドの高さもこの実測値を基準に算出することで、外枠と日付グリッドの基準を一致させる
+  const [wrapperHeight, setWrapperHeight] = useState(0);
   // ノッチ/Dynamic Island・ステータスバーとタイトルが重ならないよう、上端のセーフエリアインセットを取得する
   const insets = useSafeAreaInsets();
   const textColor = useThemeColor({}, 'text');
@@ -182,14 +185,20 @@ export default function HomeScreen() {
     return map;
   }, [entries]);
 
-  // カレンダー下に大きな空白が残らないよう、実測した高さに応じて日付セルの高さを広げる
-  const dayCellMinHeight = useMemo(() => {
-    if (calendarHeight <= 0) {
-      return DEFAULT_DAY_CELL_MIN_HEIGHT;
+  // 外枠の実測高さ(wrapperHeight)からヘッダー+曜日行のおおよその高さと6週分の行マージンを差し引き、
+  // 残りを6週で均等に割ることで、外枠いっぱいに日付グリッドが広がる日付セルの高さを算出する。
+  // (カレンダー本体側の実測値を使って反復的に補正する方式も試したが、react-native-calendarsの
+  // 内部レイアウトが確定するタイミングとズレて誤った実測値を拾ってしまい、セルの高さが
+  // 異常に大きくなる/更新が反映されないなど不安定だったため、外枠の実測値のみを使う
+  // シンプルな一度切りの計算に倒している)
+  const dayCellHeight = useMemo(() => {
+    if (wrapperHeight <= 0) {
+      return DEFAULT_DAY_CELL_HEIGHT;
     }
-    const availableHeight = calendarHeight - CALENDAR_CHROME_HEIGHT;
-    return Math.max(DEFAULT_DAY_CELL_MIN_HEIGHT, availableHeight / CALENDAR_WEEK_ROWS);
-  }, [calendarHeight]);
+    const gridHeight = wrapperHeight - CALENDAR_CHROME_HEIGHT;
+    const perRowHeight = gridHeight / CALENDAR_WEEK_ROWS - CALENDAR_WEEK_ROW_MARGIN;
+    return Math.max(DEFAULT_DAY_CELL_HEIGHT, perRowHeight);
+  }, [wrapperHeight]);
 
   const handleDayPress = useCallback(
     (date: DateData) => {
@@ -215,7 +224,7 @@ export default function HomeScreen() {
 
       return (
         <Pressable
-          style={[styles.dayCell, { minHeight: dayCellMinHeight }]}
+          style={[styles.dayCell, { height: dayCellHeight }]}
           onPress={() => onPress?.(date)}
           disabled={!title}
           accessibilityRole={title ? 'button' : undefined}
@@ -244,7 +253,7 @@ export default function HomeScreen() {
         </Pressable>
       );
     },
-    [entriesByDate, tintColor, backgroundColor, dayCellMinHeight],
+    [entriesByDate, tintColor, backgroundColor, dayCellHeight],
   );
 
   const selectedDateEntries = selectedDate ? (entriesByDate[selectedDate] ?? []) : [];
@@ -281,11 +290,10 @@ export default function HomeScreen() {
         </ThemedView>
 
         <View
-          style={styles.calendarWrapper}
-          onLayout={(event) => setCalendarHeight(event.nativeEvent.layout.height)}
+          style={[styles.calendarWrapper, { borderColor: iconColor, backgroundColor }]}
+          onLayout={(event) => setWrapperHeight(event.nativeEvent.layout.height)}
         >
           <Calendar
-            style={[styles.calendar, { borderColor: iconColor }]}
             theme={{
               backgroundColor,
               calendarBackground: backgroundColor,
@@ -388,14 +396,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   calendarWrapper: {
+    // タイトル・入力欄・保存ボタンの下からタブバーの上までの残りスペースをすべて使い切る。
+    // 枠線・角丸もこの外枠に付け、内側の日付グリッドの高さ計算もこの実測高さを基準にすることで、
+    // 「外枠と内部の高さ計算の基準がズレて中身がはみ出す」問題が起きないようにする
     flex: 1,
-  },
-  calendar: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 8,
+    // 実測に多少の誤差があっても、日付グリッドが外枠からはみ出して見えないようにする保険
+    overflow: 'hidden',
   },
   dayCell: {
-    flex: 1,
     alignItems: 'center',
     paddingTop: 4,
     gap: 2,
