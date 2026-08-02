@@ -30,7 +30,7 @@ jobs:
     container:
       image: semgrep/semgrep
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Semgrepスキャン(OSSコミュニティルールセット)
         run: semgrep scan --config p/security-audit --config p/typescript --config p/react --error
