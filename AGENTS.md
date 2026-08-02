@@ -77,7 +77,10 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
 - 優先度ラベル `now`(すぐ着手)/ `next`(次に着手)/ `later`(将来的)のいずれかが付いたOpen Issueが選定対象。
   実装対象を決める具体的なロジックは [.github/scripts/select_next_issue.py](.github/scripts/select_next_issue.py) を参照
   (`now`ラベル付きIssueのうち、Open PRで既に参照されておらず、Statusが `In Progress`/`Under Review` のまま
-  放置されていないものを番号昇順で1件選ぶ。放置されたものは自動的に `Todo` へ差し戻す自己修復も行う)
+  放置されていないものを番号昇順で1件選ぶ。放置されたものは自動的に `Todo` へ差し戻す自己修復も行う。
+  `now`ラベル付きIssueが1件も無い日は、`next`ラベル付きIssueの中から同じ条件で1件を選び、
+  ラベルを`next`から`now`へ自動的に繰り上げてから選定する。これにより`now`の付け忘れ・消化済みで
+  自動実装が完全に止まってしまうことを防いでいる)
 - [.github/workflows/ai-team-scheduler.yml](.github/workflows/ai-team-scheduler.yml) が毎日1回(10:00 JST)、
   上記ロジックで1件だけ選び、[.github/workflows/ai-team.yml](.github/workflows/ai-team.yml) を
   `workflow_dispatch` で起動する。ai-team.yml自体はIssueラベルには反応せず、指定されたIssue番号1件だけを処理する
