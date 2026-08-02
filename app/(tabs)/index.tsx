@@ -9,6 +9,7 @@ import {
   StyleSheet,
   TextInput,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -26,6 +27,8 @@ export default function HomeScreen() {
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
   const [draft, setDraft] = useState('');
   const [saveError, setSaveError] = useState<string | null>(null);
+  // ノッチ/Dynamic Island・ステータスバーとタイトルが重ならないよう、上端のセーフエリアインセットを取得する
+  const insets = useSafeAreaInsets();
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
   const backgroundColor = useThemeColor({}, 'background');
@@ -82,7 +85,7 @@ export default function HomeScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ThemedView style={styles.container}>
-        <ThemedText type="title" style={styles.title}>
+        <ThemedText type="title" style={[styles.title, { marginTop: insets.top + 8 }]}>
           日記
         </ThemedText>
 
@@ -141,6 +144,8 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   title: {
+    // 実際のmarginTopはセーフエリアの上端インセットを加算してインライン指定するため、
+    // ここでの値はセーフエリア情報が取得できない場合のフォールバック用のベース余白
     marginTop: 8,
   },
   composer: {

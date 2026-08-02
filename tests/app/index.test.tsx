@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
+import { StyleSheet } from 'react-native';
 
 // `expo-router`'s `Link` (with its `Trigger`/`Preview`/`Menu` compound API) requires a
 // navigation/router context that isn't set up when rendering the screen in isolation.
@@ -39,6 +40,15 @@ jest.mock('expo-crypto', () => ({
   randomUUID: jest.fn(),
 }));
 
+// 実機では `expo-router` の `ExpoRoot` が自動的に `SafeAreaProvider` で全体をラップするが、
+// このテストでは `HomeScreen` を単体でレンダリングするため、そのラップが存在しない。
+// `useSafeAreaInsets` は `SafeAreaProvider` 配下でないとエラーを投げるため、
+// ライブラリ公式のjestモック(常にゼロインセットを返す)に差し替える。
+jest.mock(
+  'react-native-safe-area-context',
+  () => require('react-native-safe-area-context/jest/mock').default,
+);
+
 // The native `AsyncStorage` module isn't available in the Jest environment
 // (`NativeModule: AsyncStorage is null`), so we swap in the official in-memory mock
 // shipped with the package. This lets the screen's persistence logic (`getItem`/`setItem`)
@@ -48,6 +58,7 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 );
 
 import { randomUUID } from 'expo-crypto';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import HomeScreen from '@/app/(tabs)/index';
 
@@ -76,6 +87,38 @@ describe('HomeScreen', () => {
     // Let the initial `AsyncStorage.getItem` effect settle so it doesn't leak into
     // the next test.
     await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+  });
+
+  it('falls back to the base top margin (no extra inset) when the safe area top inset is zero (e.g. Android without a notch)', async () => {
+    render(<HomeScreen />);
+    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+    const title = screen.getByText('日記');
+    const flattenedStyle = StyleSheet.flatten(title.props.style);
+
+    // insets.top が 0 の場合は、ベースの余白(8)のみが適用される
+    expect(flattenedStyle.marginTop).toBe(8);
+  });
+
+  it('adds the safe area top inset to the title marginTop so it does not overlap the status bar/notch/Dynamic Island', async () => {
+    // iPhone 14 Pro (Dynamic Island) 相当のトップインセットを想定
+    render(
+      <SafeAreaProvider
+        initialMetrics={{
+          frame: { x: 0, y: 0, width: 393, height: 852 },
+          insets: { top: 59, left: 0, right: 0, bottom: 34 },
+        }}
+      >
+        <HomeScreen />
+      </SafeAreaProvider>,
+    );
+    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+    const title = screen.getByText('日記');
+    const flattenedStyle = StyleSheet.flatten(title.props.style);
+
+    // marginTop はベースの余白(8) + セーフエリアの上端インセット(59) になる
+    expect(flattenedStyle.marginTop).toBe(59 + 8);
   });
 
   it('shows the empty state message when there are no stored entries', async () => {
