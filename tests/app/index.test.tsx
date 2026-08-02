@@ -39,6 +39,15 @@ jest.mock('expo-crypto', () => ({
   randomUUID: jest.fn(),
 }));
 
+// 実機では `expo-router` の `ExpoRoot` が自動的に `SafeAreaProvider` で全体をラップするが、
+// このテストでは `HomeScreen` を単体でレンダリングするため、そのラップが存在しない。
+// `useSafeAreaInsets` は `SafeAreaProvider` 配下でないとエラーを投げるため、
+// ライブラリ公式のjestモック(常にゼロインセットを返す)に差し替える。
+jest.mock(
+  'react-native-safe-area-context',
+  () => require('react-native-safe-area-context/jest/mock').default,
+);
+
 // The native `AsyncStorage` module isn't available in the Jest environment
 // (`NativeModule: AsyncStorage is null`), so we swap in the official in-memory mock
 // shipped with the package. This lets the screen's persistence logic (`getItem`/`setItem`)
