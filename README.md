@@ -186,6 +186,24 @@ type DiaryEntry = {
 - **読み込み**: 画面表示時（`useEffect`）に `AsyncStorage.getItem('diary-entries')` を呼び出し、`JSON.parse` して state にセットする。ストレージが壊れている・スキーマ不整合の場合は空配列にフォールバックする
 - **保存失敗時の挙動**: 保存前の state に巻き戻し、画面にエラーメッセージ（`保存に失敗しました。もう一度お試しください。`）を表示する
 
+### ER図
+
+[AsyncStorage](https://react-native-async-storage.github.io/async-storage/) はキー・バリュー型のストレージであり、RDBのような「テーブル」は存在しませんが、保存キー `diary-entries` に配列として永続化される `DiaryEntry` を1つの概念的なエンティティとみなし、[Mermaid](https://mermaid.js.org/) の `erDiagram` 記法で図示しています（GitHub上のMarkdownプレビューで追加パッケージなしにレンダリングされます）。
+
+現時点ではエンティティが `DiaryEntry` の1つのみのためリレーションはありません。今後、AI分析結果や気分トレンドなど新しいデータ（エンティティ）を追加した場合は、このER図にもエンティティ・リレーションを追記していく想定です。
+
+```mermaid
+erDiagram
+    %% AsyncStorageはキー・バリューストアのため「テーブル」は概念的なものです。
+    %% 保存キー'diary-entries'に配列として保存されるDiaryEntryエンティティを表しています。
+    %% 今後AI分析・気分トレンドなど新しいエンティティを追加した際は、この図も更新してください。
+    DiaryEntry {
+        string id PK
+        string text
+        string createdAt
+    }
+```
+
 今後、日記以外のデータ（例: タグ、設定値など）を追加する場合も、このセクションに追記していく想定です。
 
 ## プロジェクト構成
