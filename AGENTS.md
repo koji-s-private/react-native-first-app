@@ -37,6 +37,21 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
   (例: GitHub標準のCodeQL Code ScanningはprivateリポジトリだとGitHub Advanced Security(有料)が必要なため、静的解析には無料で使えるSemgrep OSSを採用している)
 - README.mdが存在するディレクトリ(例: `.github/workflows/README.md`)に新しいファイルを追加した場合は、
   そのREADME.mdが古い内容のまま放置されないよう、必要に応じて追記・更新する
+- PR作成後にCI([.github/workflows/ci.yml](.github/workflows/ci.yml))が落ちている場合、PMは
+  `gh pr checks <PR番号>` で検知し、原因が今回のPR自体の変更によるものか、無関係な既存/新規の問題
+  (例: 依存パッケージの新しい脆弱性が`npm audit`で検知されるようになった等、他のPRでも同様に発生する
+  性質の問題)かを確認する。原因の如何を問わず、原則として別Issueに分割せず同じPR内でcoderに修正を
+  依頼し、CIをgreenにしてからreviewerのレビュー・人間のマージ判断に進める
+  (このPRのCIが落ちていたら修正するという方針自体は、以前から明文化されていたわけではなく、
+  2026-08-05に発生した実例をきっかけに追記した)
+  - `npm audit`の脆弱性検知が原因の場合: まず`npm audit fix`(`--force`無し)を試すが、
+    lockfileの差分が広範囲に及ぶ(依存関係全体が大きく再構築される・パッケージが重複する等)場合は
+    採用しない。代わりに`package.json`の`overrides`で該当パッケージのみを脆弱性のない
+    バージョンへ固定し、差分を最小限に抑える(`npm audit fix --force`のようなbreaking changeを
+    伴う手段は使わない)
+  - 修正が機械的に完結しない、またはbreaking changeを伴う対応が必要と判断した場合は、無理に
+    同PR内で解消せず、PRにコメントを残して人間の判断を待つ(mainブランチの運用にある
+    コンフリクト解消時の方針と同様)
 
 ## GitHub Projects 運用
 - Project board: [koji-s-private/react-native-first-app AI Team](https://github.com/orgs/koji-s-private/projects/4)(Projects v2)
