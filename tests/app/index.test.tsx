@@ -202,6 +202,66 @@ describe('HomeScreen', () => {
       expect(input.props.value).toBe('');
     });
 
+    it('shows a character counter that updates as the user types and limits input via maxLength', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+      expect(input.props.maxLength).toBe(1000);
+      expect(screen.getByText('0/1000')).toBeTruthy();
+
+      fireEvent.changeText(input, '何か書く');
+      expect(screen.getByText('4/1000')).toBeTruthy();
+    });
+
+    it('does not save when the text exceeds the max length (defense in depth against TextInput maxLength)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+      // TextInputのmaxLengthを迂回して直接onChangeTextを呼び出すケースを想定し、
+      // handleSave側の防御チェックが機能することを確認する
+      fireEvent.changeText(input, 'あ'.repeat(1001));
+      fireEvent.press(screen.getByText('保存'));
+
+      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+    });
+
+    it('allows saving when the text length is exactly at the max length (boundary)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+      const exactlyMaxLength = 'あ'.repeat(1000);
+      fireEvent.changeText(input, exactlyMaxLength);
+      expect(screen.getByText('1000/1000')).toBeTruthy();
+
+      fireEvent.press(screen.getByText('保存'));
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+      const [, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
+      const persisted = JSON.parse(value);
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0].text).toBe(exactlyMaxLength);
+    });
+
+    it('renders the character counter in red once the max length is reached, and in the normal color just below it (boundary)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+
+      // 上限の1文字手前(999文字)では強調色にならない
+      fireEvent.changeText(input, 'あ'.repeat(999));
+      const counterBelowLimit = screen.getByText('999/1000');
+      expect(StyleSheet.flatten(counterBelowLimit.props.style).color).not.toBe('#d32f2f');
+
+      // 上限ちょうど(1000文字)では赤字で強調される
+      fireEvent.changeText(input, 'あ'.repeat(1000));
+      const counterAtLimit = screen.getByText('1000/1000');
+      expect(StyleSheet.flatten(counterAtLimit.props.style).color).toBe('#d32f2f');
+    });
+
     it('disables the save button while the input is empty and enables it once text is entered', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
