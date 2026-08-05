@@ -31,6 +31,9 @@ type DiaryEntry = {
 // カレンダーの日付セルに表示するタイトルの最大文字数(超える場合は省略記号を付ける)
 const TITLE_MAX_LENGTH = 20;
 
+// 日記本文の最大文字数(AsyncStorageのサイズ制限に抵触しないよう、1件あたりの文字数を制限する)
+const BODY_MAX_LENGTH = 1000;
+
 // 日付セルの高さのデフォルト最小値(外枠の実測高さがまだ取れていない初回レンダー用のフォールバック)
 const DEFAULT_DAY_CELL_HEIGHT = 48;
 // showSixWeeksを有効にし、月をまたいでも常に6行で表示を揃えるため6固定で計算する
@@ -139,7 +142,8 @@ export default function HomeScreen() {
 
   const handleSave = useCallback(async () => {
     const trimmed = draft.trim();
-    if (!trimmed) {
+    // 万が一上限を超えたテキストが渡ってきても保存しない(TextInput側のmaxLengthが主な防御線)
+    if (!trimmed || trimmed.length > BODY_MAX_LENGTH) {
       return;
     }
 
@@ -276,16 +280,28 @@ export default function HomeScreen() {
             value={draft}
             onChangeText={setDraft}
             multiline
+            maxLength={BODY_MAX_LENGTH}
           />
-          <Pressable
-            style={[styles.saveButton, { backgroundColor: tintColor }]}
-            onPress={handleSave}
-            disabled={!draft.trim()}
-          >
-            <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
-              保存
+          <View style={styles.composerFooter}>
+            {/* 文字数カウンター(上限に近づいた/達したことがひと目で分かるよう常に表示する) */}
+            <ThemedText
+              style={[
+                styles.charCount,
+                draft.length >= BODY_MAX_LENGTH ? { color: '#d32f2f' } : { color: iconColor },
+              ]}
+            >
+              {draft.length}/{BODY_MAX_LENGTH}
             </ThemedText>
-          </Pressable>
+            <Pressable
+              style={[styles.saveButton, { backgroundColor: tintColor }]}
+              onPress={handleSave}
+              disabled={!draft.trim()}
+            >
+              <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
+                保存
+              </ThemedText>
+            </Pressable>
+          </View>
           {saveError ? <ThemedText style={styles.errorText}>{saveError}</ThemedText> : null}
         </ThemedView>
 
@@ -381,6 +397,14 @@ const styles = StyleSheet.create({
     minHeight: 80,
     textAlignVertical: 'top',
     fontSize: 16,
+  },
+  composerFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  charCount: {
+    fontSize: 12,
   },
   saveButton: {
     alignSelf: 'flex-end',

@@ -202,6 +202,31 @@ describe('HomeScreen', () => {
       expect(input.props.value).toBe('');
     });
 
+    it('shows a character counter that updates as the user types and limits input via maxLength', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+      expect(input.props.maxLength).toBe(1000);
+      expect(screen.getByText('0/1000')).toBeTruthy();
+
+      fireEvent.changeText(input, '何か書く');
+      expect(screen.getByText('4/1000')).toBeTruthy();
+    });
+
+    it('does not save when the text exceeds the max length (defense in depth against TextInput maxLength)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+      // TextInputのmaxLengthを迂回して直接onChangeTextを呼び出すケースを想定し、
+      // handleSave側の防御チェックが機能することを確認する
+      fireEvent.changeText(input, 'あ'.repeat(1001));
+      fireEvent.press(screen.getByText('保存'));
+
+      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+    });
+
     it('disables the save button while the input is empty and enables it once text is entered', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
