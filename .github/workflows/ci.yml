@@ -1,7 +1,7 @@
 name: CI
 
 # PR作成・更新時にlint・フォーマットチェック・テスト・依存パッケージの脆弱性検知を実行する。
-# READMEに記載のNode.js v22系を使用する(厳密なバージョン管理はIssue #20で別途扱う)。
+# .nvmrc に記載のNode.jsバージョンを使用する。
 
 on:
   pull_request:
@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version-file: ".nvmrc"
           cache: "npm"
 
       - name: 依存パッケージのインストール

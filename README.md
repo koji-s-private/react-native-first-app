@@ -25,7 +25,7 @@
 
 ### 前提環境
 
-- Node.js（[`package.json`](./package.json) に記載の依存関係が動作する LTS 系のバージョンを推奨。手元での動作確認は Node.js v22 系で行っています）
+- Node.js（推奨バージョンは [`.nvmrc`](./.nvmrc) に記載。CIも同じバージョンを使用しています。手元での動作確認は Node.js v22 系で行っています）
 - npm（Node.js に同梱）
 - （任意）iOSシミュレータで確認する場合は macOS + Xcode
 - （任意）Androidエミュレータで確認する場合は Android Studio
