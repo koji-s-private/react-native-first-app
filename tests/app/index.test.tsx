@@ -1,8 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { randomUUID } from 'expo-crypto';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
 import { StyleSheet } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+import HomeScreen from '@/app/(tabs)/index';
 
 // `expo-router`'s `Link` (with its `Trigger`/`Preview`/`Menu` compound API) requires a
 // navigation/router context that isn't set up when rendering the screen in isolation.
@@ -56,11 +60,6 @@ jest.mock(
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
-
-import { randomUUID } from 'expo-crypto';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-
-import HomeScreen from '@/app/(tabs)/index';
 
 const mockRandomUUID = randomUUID as jest.Mock;
 

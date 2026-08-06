@@ -3,6 +3,7 @@ import type { PropsWithChildren } from 'react';
 import React from 'react';
 
 import appConfig from '@/app.json';
+import ExploreScreen from '@/app/(tabs)/explore';
 
 // `ExternalLink` (used inside some of the Collapsible sections on this screen) wraps
 // `expo-router`'s `Link`, which requires a navigation/router context that isn't set up
@@ -51,8 +52,6 @@ jest.mock('expo-constants', () => {
     },
   };
 });
-
-import ExploreScreen from '@/app/(tabs)/explore';
 
 describe('ExploreScreen', () => {
   it('renders the Explore title', () => {

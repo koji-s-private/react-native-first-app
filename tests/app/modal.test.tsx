@@ -2,6 +2,8 @@ import { render, screen } from '@testing-library/react-native';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
 
+import ModalScreen from '@/app/modal';
+
 // `expo-router`'s `Link` (with its `Trigger`/`Preview`/`Menu` compound API) requires a
 // navigation/router context that isn't set up when rendering the screen in isolation.
 // We stub it out with simple pass-through components so the screen's own content can be
@@ -30,8 +32,6 @@ jest.mock('expo-router', () => {
 
   return { Link };
 });
-
-import ModalScreen from '@/app/modal';
 
 describe('ModalScreen', () => {
   it('renders the modal title', () => {
