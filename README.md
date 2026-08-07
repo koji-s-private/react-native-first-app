@@ -114,6 +114,7 @@
 | ライブラリ | 用途 | 主な使用箇所 |
 | --- | --- | --- |
 | [@react-native-async-storage/async-storage](https://react-native-async-storage.github.io/async-storage/) | 端末内への簡易キー・バリュー永続化ストレージ。日記データの保存に使用 | `app/(tabs)/index.tsx`（日記エントリの保存・読み込み） |
+| [@noble/ciphers](https://github.com/paulmillr/noble-ciphers) | 依存なし・監査実績のある純粋JS実装のAES-256-GCM暗号化ライブラリ。AsyncStorageに保存する日記データの暗号化に使用 | `utils/diary-encryption.ts` |
 
 ### ナビゲーション
 
@@ -141,7 +142,8 @@
 | ライブラリ | 用途 | 主な使用箇所 |
 | --- | --- | --- |
 | [expo-constants](https://docs.expo.dev/versions/v54.0.0/sdk/constants/) | アプリ設定値・実行時定数の取得 | 設定値が必要な箇所全般 |
-| [expo-crypto](https://docs.expo.dev/versions/v54.0.0/sdk/crypto/) | 一意なID（UUID）生成などの暗号関連機能 | `app/(tabs)/index.tsx`（日記エントリIDの生成） |
+| [expo-crypto](https://docs.expo.dev/versions/v54.0.0/sdk/crypto/) | 一意なID（UUID）生成、暗号鍵・nonce用の暗号学的乱数生成 | `app/(tabs)/index.tsx`（日記エントリIDの生成）、`utils/diary-encryption.ts`（鍵・nonce生成） |
+| [expo-secure-store](https://docs.expo.dev/versions/v54.0.0/sdk/securestore/) | 日記の暗号鍵を端末のKeychain（iOS）/ Keystore（Android）に安全に保存する | `utils/diary-encryption.ts` |
 | [expo-font](https://docs.expo.dev/versions/v54.0.0/sdk/font/) | カスタムフォントの読み込み | `app/_layout.tsx`（フォントロード） |
 | [expo-haptics](https://docs.expo.dev/versions/v54.0.0/sdk/haptics/) | 触覚フィードバック（タップ時の振動） | `components/haptic-tab.tsx` |
 | [expo-image](https://docs.expo.dev/versions/v54.0.0/sdk/image/) | 高機能な画像表示コンポーネント | 画像を表示する画面・コンポーネント |
@@ -182,8 +184,9 @@ type DiaryEntry = {
 
 - **保存先**: `@react-native-async-storage/async-storage`（端末内ストレージ）
 - **保存キー**: `'diary-entries'`
-- **保存形式**: `DiaryEntry[]`（新しいエントリが配列の先頭に追加される）を `JSON.stringify` した文字列
-- **読み込み**: 画面表示時（`useEffect`）に `AsyncStorage.getItem('diary-entries')` を呼び出し、`JSON.parse` して state にセットする。ストレージが壊れている・スキーマ不整合の場合は空配列にフォールバックする
+- **保存形式**: `DiaryEntry[]`（新しいエントリが配列の先頭に追加される）を `JSON.stringify` した文字列を、`utils/diary-encryption.ts` の `encryptText()` でAES-256-GCM暗号化した文字列（`'encrypted:v1:'` から始まる）
+- **暗号鍵の管理**: 端末ごとに一度だけ `expo-crypto` の `getRandomBytes()` で生成した256bit鍵を `expo-secure-store`（iOSはKeychain、AndroidはKeystoreに保存される）に保持する。鍵自体がAsyncStorageや平文で保存されることはない
+- **読み込み**: 画面表示時（`useEffect`）に `AsyncStorage.getItem('diary-entries')` を呼び出し、保存値が暗号化形式(`'encrypted:v1:'`始まり)であれば復号してから、そうでなければ暗号化対応前の平文JSONとしてそのまま `JSON.parse` して state にセットする（後方互換のマイグレーション。次回保存時から暗号化形式に移行する）。ストレージが壊れている・スキーマ不整合・復号失敗の場合は空配列にフォールバックする
 - **保存失敗時の挙動**: 保存前の state に巻き戻し、画面にエラーメッセージ（`保存に失敗しました。もう一度お試しください。`）を表示する
 
 ### ER図
@@ -216,6 +219,7 @@ app/                 画面（expo-router によるファイルベースルー�
 components/          再利用可能なUIコンポーネント
 constants/           テーマなどの定数
 hooks/               カスタムフック
+utils/               画面から独立した純粋なユーティリティ関数（diary-encryption.ts: 日記データの暗号化・復号）
 tests/               Jest + Testing Library によるテストコード
 scripts/             開発補助スクリプト（reset-project など）
 ```

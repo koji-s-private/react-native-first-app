@@ -19,6 +19,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useThemeColor } from '@/hooks/use-theme-color';
+import {
+  decryptText,
+  encryptText,
+  getOrCreateEncryptionKey,
+  isEncryptedPayload,
+} from '@/utils/diary-encryption';
 
 const STORAGE_KEY = 'diary-entries';
 
@@ -143,10 +149,17 @@ export default function HomeScreen() {
       try {
         const stored = await AsyncStorage.getItem(STORAGE_KEY);
         if (stored) {
-          setEntries(JSON.parse(stored) as DiaryEntry[]);
+          if (isEncryptedPayload(stored)) {
+            const key = await getOrCreateEncryptionKey();
+            setEntries(JSON.parse(decryptText(stored, key)) as DiaryEntry[]);
+          } else {
+            // 暗号化対応前に保存された平文JSON(後方互換)。そのまま読み込んで表示し、
+            // 次回保存時から暗号化形式に移行する
+            setEntries(JSON.parse(stored) as DiaryEntry[]);
+          }
         }
       } catch {
-        // ストレージが壊れている・スキーマ不整合の場合は空の状態から始める
+        // ストレージが壊れている・スキーマ不整合・復号失敗の場合は空の状態から始める
         setEntries([]);
       }
     })();
@@ -175,7 +188,10 @@ export default function HomeScreen() {
     setSaveError(null);
 
     try {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextEntries));
+      // 日記本文を平文のままAsyncStorageに保存しないよう、SecureStoreで保護した鍵で
+      // AES-256-GCM暗号化してから保存する
+      const key = await getOrCreateEncryptionKey();
+      await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(nextEntries), key));
     } catch {
       // 永続化に失敗した場合は保存前の状態に戻し、ユーザーにエラーを伝える
       setEntries(previousEntries);
