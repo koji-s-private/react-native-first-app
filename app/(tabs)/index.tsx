@@ -42,12 +42,30 @@ const BODY_MAX_LENGTH = 1000;
 
 // 日付セルの高さのデフォルト最小値(外枠の実測高さがまだ取れていない初回レンダー用のフォールバック)
 const DEFAULT_DAY_CELL_HEIGHT = 48;
+// 日付セル内のテキスト(日付番号・日記タイトル)に許容するOS文字サイズ設定の最大倍率。
+// react-native-calendars自体の月見出し・曜日行は内部実装で常にallowFontScaling={false}が
+// 指定されており(theme等では変更不可。node_modules/react-native-calendars/src/calendar/header/index.js
+// 参照)OSの文字サイズ設定の影響を受けないが、dayComponentとして差し替えている日付セルの中身は
+// このアプリ側のThemedTextであり、そのままでは無制限に拡大されてしまう。拡大を放置すると
+// セル内のテキストが1週あたりの行の高さ(dayCellHeight)を超えてはみ出し、calendarWrapperの
+// overflow: 'hidden'によって最下段の週が見切れる懸念があるため、拡大率の上限を設けてリスクを抑える
+const DAY_CELL_MAX_FONT_SCALE = 1.5;
 // showSixWeeksを有効にし、月をまたいでも常に6行で表示を揃えるため6固定で計算する
 const CALENDAR_WEEK_ROWS = 6;
 // react-native-calendarsのヘッダー(月表示+矢印)と曜日行を合わせたおおよその高さ、および
 // 1週間の行に付与される上下マージン(週の行が持つmarginVertical、react-native-calendarsの
 // デフォルトのweekVerticalMargin=7を上下2回分)。テーマのフォントサイズ等から算出した概算値であり、
 // 実測ではないが、日付セルの高さを外枠の実測高さから一度の計算で求めるための基準として使う
+//
+// なお、これらの値はOSの文字サイズ設定(Dynamic Type等)によって変化しないため、
+// PixelRatio.getFontScale()による補正はあえて行っていない。react-native-calendarsの
+// ヘッダー・曜日行を描画するTextコンポーネントは、テーマ等で変更不可能な形で内部実装として
+// 常にallowFontScaling={false}が指定されており(node_modules/react-native-calendars/src/calendar/
+// header/index.js、src/commons/WeekDaysNames.js参照)、OSの文字サイズ設定の影響を受けない。
+// この実装依存のガードは万一将来ライブラリ側の挙動が変わった場合に外れる可能性があるため、
+// フォントスケール由来の高さ増加リスクは、実際に可変であるこのアプリ側のセル内テキスト
+// (dayNumber/dayEntryTitle、上記のDAY_CELL_MAX_FONT_SCALEで拡大率を制限)側で根本的に
+// 抑える方針とし、既に文字サイズ設定の影響を受けないここでの概算値をあえて動かさない
 const CALENDAR_CHROME_HEIGHT = 90;
 const CALENDAR_WEEK_ROW_MARGIN = 14;
 
@@ -266,6 +284,7 @@ export default function HomeScreen() {
             <View style={[styles.todayBadge, { backgroundColor: tintColor }]}>
               <ThemedText
                 style={[styles.dayNumber, { color: backgroundColor, fontWeight: '700' as const }]}
+                maxFontSizeMultiplier={DAY_CELL_MAX_FONT_SCALE}
               >
                 {date.day}
               </ThemedText>
@@ -273,12 +292,17 @@ export default function HomeScreen() {
           ) : (
             <ThemedText
               style={[styles.dayNumber, isDisabled ? styles.dayNumberDisabled : undefined]}
+              maxFontSizeMultiplier={DAY_CELL_MAX_FONT_SCALE}
             >
               {date.day}
             </ThemedText>
           )}
           {title ? (
-            <ThemedText style={[styles.dayEntryTitle, { color: tintColor }]} numberOfLines={1}>
+            <ThemedText
+              style={[styles.dayEntryTitle, { color: tintColor }]}
+              numberOfLines={1}
+              maxFontSizeMultiplier={DAY_CELL_MAX_FONT_SCALE}
+            >
               {title}
             </ThemedText>
           ) : null}
