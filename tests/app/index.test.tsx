@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react-nativ
 import { randomUUID } from 'expo-crypto';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import HomeScreen from '@/app/(tabs)/index';
@@ -66,11 +66,38 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
+// `KeyboardAvoidingView` は `behavior` prop を内部でしか消費せず、レンダリング結果の
+// ホストView(のstyle)には直接反映されないため、実装が意図した `behavior` を渡しているかを
+// レンダリング結果だけから検証するのは難しい。そこで、実際の見た目・挙動には関与しない
+// 薄いモックに差し替え、渡された `behavior` prop を `testID` 付きのViewでそのまま可視化する。
+jest.mock('react-native/Libraries/Components/Keyboard/KeyboardAvoidingView', () => {
+  // `jest.mock`の巻き上げの都合によりファクトリ内で`require()`を使う必要がある
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ReactForMock = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const RN = require('react-native');
+
+  function MockKeyboardAvoidingView({
+    children,
+    behavior,
+    style,
+  }: PropsWithChildren<{ behavior?: string; style?: unknown }>) {
+    return ReactForMock.createElement(
+      RN.View,
+      { testID: 'keyboard-avoiding-view', accessibilityValue: { text: behavior }, style },
+      children,
+    );
+  }
+
+  return { __esModule: true, default: MockKeyboardAvoidingView };
+});
+
 const mockRandomUUID = randomUUID as jest.Mock;
 
 const STORAGE_KEY = 'diary-entries';
 const INPUT_PLACEHOLDER = '今日の出来事や気持ちを書いてみましょう';
 const CLOSE_BUTTON_TEXT = '閉じる';
+const KEYBOARD_AVOIDING_VIEW_TEST_ID = 'keyboard-avoiding-view';
 
 // `react-native-calendars` の `Calendar` はデフォルトで実行時点の「今日」を含む月を表示する
 // (このコンポーネントは `current`/`initialDate` を指定していないため)。そのため、テストで参照する
@@ -168,6 +195,36 @@ describe('HomeScreen', () => {
 
     // marginTop はベースの余白(8) + セーフエリアの上端インセット(59) になる
     expect(flattenedStyle.marginTop).toBe(59 + 8);
+  });
+
+  describe('KeyboardAvoidingView のプラットフォーム別挙動', () => {
+    // `Platform.OS` はテスト間で状態を共有するモジュールレベルの値のため、
+    // 変更したテストの後は必ず元の値(デフォルトの 'ios')へ戻す。
+    const originalPlatformOS = Platform.OS;
+
+    afterEach(() => {
+      Platform.OS = originalPlatformOS;
+    });
+
+    it('uses behavior="height" on Android so the input and save button are not hidden by the keyboard', async () => {
+      Platform.OS = 'android';
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const keyboardAvoidingView = screen.getByTestId(KEYBOARD_AVOIDING_VIEW_TEST_ID);
+      expect(keyboardAvoidingView.props.accessibilityValue.text).toBe('height');
+    });
+
+    it('keeps behavior="padding" on iOS (regression check)', async () => {
+      Platform.OS = 'ios';
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const keyboardAvoidingView = screen.getByTestId(KEYBOARD_AVOIDING_VIEW_TEST_ID);
+      expect(keyboardAvoidingView.props.accessibilityValue.text).toBe('padding');
+    });
   });
 
   describe('日記の保存', () => {
