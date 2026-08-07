@@ -265,7 +265,14 @@ export default function HomeScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      // Android は SDK 54 で edge-to-edge 表示が常時有効になり、OS標準の
+      // windowSoftInputMode(adjustResize相当)によるレイアウト自動リサイズが
+      // 効かないケースがあるため、iOS同様にbehaviorを明示的に指定する
+      // (undefinedのままだとAndroid実機でキーボード表示時に入力欄・保存ボタンが
+      // 隠れる可能性がある。React Native公式ドキュメントでも
+      // 「Android and iOS both interact with this prop differently. On both iOS and
+      // Android, setting behavior is recommended.」と案内されている)
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ThemedView style={styles.container}>
         <ThemedText type="title" style={[styles.title, { marginTop: insets.top + 8 }]}>
