@@ -135,6 +135,8 @@ const STORAGE_KEY = 'diary-entries';
 const ENCRYPTED_PREFIX = 'encrypted:v1:';
 const INPUT_PLACEHOLDER = '今日の出来事や気持ちを書いてみましょう';
 const CLOSE_BUTTON_TEXT = '閉じる';
+// Issue #63: 日記が0件のときにカレンダーの上に表示される案内メッセージ
+const EMPTY_STATE_TEXT = 'まだ日記がありません。最初の日記を書いてみましょう。';
 const KEYBOARD_AVOIDING_VIEW_TEST_ID = 'keyboard-avoiding-view';
 
 // AsyncStorageに実際に永続化された値(暗号化済み文字列)を、テストで検証しやすいよう
@@ -605,6 +607,74 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText('1件目'));
       expect(await screen.findByText('2件目')).toBeTruthy();
       expect(screen.getByText('3件目')).toBeTruthy();
+    });
+  });
+
+  describe('空状態(日記が0件)の案内メッセージ(Issue #63)', () => {
+    it('shows the empty state message immediately, even before the async AsyncStorage load resolves (entries starts as an empty array)', () => {
+      render(<HomeScreen />);
+
+      // useEffectによるAsyncStorageからの読み込みが完了する前でも、entriesの初期値は
+      // 空配列であるため、案内メッセージは最初のレンダリングから既に表示されている
+      expect(screen.getByText(EMPTY_STATE_TEXT)).toBeTruthy();
+
+      // カレンダー自体は日記が0件でも常に表示され続ける(曜日ヘッダーの存在で確認する)
+      expect(screen.getByText('日', { includeHiddenElements: true })).toBeTruthy();
+    });
+
+    it('keeps showing the empty state message after the async load resolves with no stored entries', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      expect(screen.getByText(EMPTY_STATE_TEXT)).toBeTruthy();
+    });
+
+    it('hides the empty state message once at least one diary entry is loaded from storage (regression check)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '既存の日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+
+      expect(await screen.findByText('既存の日記')).toBeTruthy();
+      expect(screen.queryByText(EMPTY_STATE_TEXT)).toBeNull();
+    });
+
+    it('hides the empty state message as soon as the first diary entry is saved', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      expect(screen.getByText(EMPTY_STATE_TEXT)).toBeTruthy();
+
+      fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '最初の日記');
+      fireEvent.press(screen.getByText('保存'));
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalled());
+      expect(screen.queryByText(EMPTY_STATE_TEXT)).toBeNull();
+    });
+
+    it('shows the empty state message again when stored data is corrupted (invalid JSON) and falls back to an empty list (boundary)', async () => {
+      jest.spyOn(AsyncStorage, 'getItem').mockResolvedValueOnce('not valid json');
+
+      render(<HomeScreen />);
+
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(STORAGE_KEY));
+      // 壊れたデータは読み捨てられ空の状態に戻るため、案内メッセージが表示される
+      expect(screen.getByText(EMPTY_STATE_TEXT)).toBeTruthy();
+    });
+
+    it('shows the empty state message when the encrypted payload fails to decrypt (corrupted ciphertext, boundary)', async () => {
+      jest
+        .spyOn(AsyncStorage, 'getItem')
+        .mockResolvedValueOnce(`${ENCRYPTED_PREFIX}not-a-real-ciphertext`);
+
+      render(<HomeScreen />);
+
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(STORAGE_KEY));
+      // 復号に失敗したデータも読み捨てられ空の状態に戻るため、案内メッセージが表示される
+      expect(screen.getByText(EMPTY_STATE_TEXT)).toBeTruthy();
     });
   });
 
