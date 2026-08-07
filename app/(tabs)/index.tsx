@@ -211,9 +211,13 @@ export default function HomeScreen() {
       const key = await getOrCreateEncryptionKey();
       await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(nextEntries), key));
     } catch {
-      // 永続化に失敗した場合は保存前の状態に戻し、ユーザーにエラーを伝える
+      // 永続化に失敗した場合は保存前の状態に戻し、ユーザーにエラーを伝える。
+      // ただし、保存処理中(この非同期処理の完了を待つ間)にユーザーが既に次の文章を
+      // 入力し始めている場合、previousDraftで単純に上書きすると新しい入力を消してしまう。
+      // 現在値が保存開始時にセットした空文字列のままであれば(=何も入力していなければ)
+      // previousDraftへ戻し、既に何か入力されていればその入力を優先して上書きしない
       setEntries(previousEntries);
-      setDraft(previousDraft);
+      setDraft((current) => (current === '' ? previousDraft : current));
       setSaveError('保存に失敗しました。もう一度お試しください。');
     }
   }, [draft, entries]);

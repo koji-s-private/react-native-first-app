@@ -581,6 +581,96 @@ describe('HomeScreen', () => {
       expect(screen.queryByText('今日の日記')).toBeNull();
     });
 
+    it('does not overwrite draft text the user typed while a save was still in flight, when that save later fails (Issue #80)', async () => {
+      const now = new Date();
+      const storedEntries = [
+        { id: 'old', text: '過去の日記', createdAt: isoAt(now, now.getDate(), 0, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      jest.clearAllMocks();
+
+      // AsyncStorage.setItemの解決/拒否を保存処理の呼び出し側から任意のタイミングで
+      // 制御できるようにするため、resolve/reject関数を外側に取り出しておく
+      let rejectSetItem: (reason: unknown) => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectSetItem = reject;
+          }),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('過去の日記');
+
+      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+      fireEvent.changeText(input, '保存中の日記');
+      fireEvent.press(screen.getByText('保存'));
+
+      // 保存(AsyncStorage.setItem)がまだpendingの間に、入力欄は一旦空になる
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+      expect(input.props.value).toBe('');
+
+      // pendingの間にユーザーが新しい下書きを書き始める
+      fireEvent.changeText(input, '書きかけの新しい下書き');
+
+      // ここで保存が失敗する
+      rejectSetItem(new Error('write failed'));
+
+      expect(await screen.findByText('保存に失敗しました。もう一度お試しください。')).toBeTruthy();
+
+      // ロールバックによって「保存前のdraft(保存中の日記)」で上書きされず、
+      // ユーザーが新しく入力した内容がそのまま保持される
+      expect(input.props.value).toBe('書きかけの新しい下書き');
+      expect(screen.queryByText('保存中の日記')).toBeNull();
+    });
+
+    it('does not clear draft text the user typed while a save was still in flight, when that save later succeeds (Issue #80, boundary)', async () => {
+      // 失敗時だけでなく成功時も、保存処理中(pending中)に入力された下書きが
+      // 意図せず消されないことを確認する(catch節以外の経路でdraftが上書きされないことの確認)
+      const now = new Date();
+      const storedEntries = [
+        { id: 'old', text: '過去の日記', createdAt: isoAt(now, now.getDate(), 0, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      jest.clearAllMocks();
+
+      let resolveSetItem: () => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSetItem = resolve;
+          }),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('過去の日記');
+
+      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+      fireEvent.changeText(input, '保存中の日記');
+      fireEvent.press(screen.getByText('保存'));
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+      expect(input.props.value).toBe('');
+
+      // pendingの間にユーザーが新しい下書きを書き始める
+      fireEvent.changeText(input, '書きかけの新しい下書き');
+
+      // ここで保存が成功する
+      resolveSetItem();
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      // 送信した「保存中の日記」自体は正しく永続化される(ただし過去の日記の方が時刻が早いため、
+      // カレンダーセルのタイトルは引き続き「過去の日記」のまま)
+      const [, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
+      const persisted = (await decryptPersistedEntries(value)) as { text: string }[];
+      expect(persisted.some((entry) => entry.text === '保存中の日記')).toBe(true);
+
+      // 成功パスはcatch節を通らずdraftに触れないため、ユーザーが新しく入力した内容が
+      // そのまま保持され、エラーメッセージも表示されない
+      expect(input.props.value).toBe('書きかけの新しい下書き');
+      expect(screen.queryByText('保存に失敗しました。もう一度お試しください。')).toBeNull();
+    });
+
     it('assigns a unique id (via expo-crypto randomUUID) to each entry saved consecutively', async () => {
       // `randomUUID` を呼び出しごとに異なる値を返すようスタブし、
       // 同一ミリ秒での `Date.now().toString()` による衝突が起きないことを検証する。
