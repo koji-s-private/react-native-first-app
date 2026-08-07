@@ -623,6 +623,25 @@ describe('HomeScreen', () => {
       expect(texts.indexOf('昼の出来事')).toBeLessThan(texts.indexOf('夜の出来事'));
     });
 
+    it("shows each entry's date/time in a locale-independent 'YYYY/MM/DD HH:mm' format regardless of the test environment's locale", async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '日記本文', createdAt: isoAt(now, dayWithEntry, 9, 5) }]),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('日記本文');
+
+      fireEvent.press(screen.getByText('日記本文'));
+
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(dayWithEntry).padStart(2, '0');
+      expect(await screen.findByText(`${year}/${month}/${day} 09:05`)).toBeTruthy();
+    });
+
     it('closes the modal when the close button is pressed', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
@@ -640,6 +659,74 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
 
       await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
+    });
+  });
+
+  describe('formatEntryDateTime のゼロパディング(境界値)', () => {
+    // `Calendar` は current/initialDate を指定していないため、実行時点の実際の月を表示する。
+    // `jest.useFakeTimers`でシステム時刻を差し替えても、`react-native-calendars`が内部で使う
+    // `xdate`ライブラリはモジュール読み込み時にネイティブの`Date`をIIFEのクロージャに
+    // 固定的に保持する実装になっており、後からのフェイクタイマーが反映されない
+    // (実際に検証済み)。そのため「表示月そのもの」を差し替える必要があるうるう年・
+    // 年またぎのようなケースは、この方式では決定的にテストできない。
+    // 一方、日・時・分は実行時点の実際の月の範囲内であれば自由に選べるため、
+    // それぞれ1桁の値でゼロパディングされることを検証する。
+    // (期待値はformatEntryDateTime実装のpadStartをそのまま模倣せず、
+    // 別ロジックのpadTwoで計算することで、実装と同じ勘違いをテスト側で
+    // 見逃してしまうリスクを減らす)
+    function padTwo(n: number): string {
+      return n < 10 ? `0${n}` : `${n}`;
+    }
+
+    it('zero-pads a single-digit day of month (e.g. day 3 -> "03")', async () => {
+      const now = new Date();
+      const singleDigitDay = 3; // 実行月に関わらず必ず存在する日を選ぶ
+      const storedEntries = [
+        { id: '1', text: '日付一桁テスト', createdAt: isoAt(now, singleDigitDay, 9, 5) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+
+      render(<HomeScreen />);
+      await screen.findByText('日付一桁テスト');
+
+      fireEvent.press(screen.getByText('日付一桁テスト'));
+
+      const expected = `${now.getFullYear()}/${padTwo(now.getMonth() + 1)}/${padTwo(singleDigitDay)} 09:05`;
+      expect(await screen.findByText(expected)).toBeTruthy();
+    });
+
+    it('zero-pads midnight (00:00) for both the hour and the minute', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const storedEntries = [
+        { id: '1', text: '真夜中テスト', createdAt: isoAt(now, dayWithEntry, 0, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+
+      render(<HomeScreen />);
+      await screen.findByText('真夜中テスト');
+
+      fireEvent.press(screen.getByText('真夜中テスト'));
+
+      const expected = `${now.getFullYear()}/${padTwo(now.getMonth() + 1)}/${padTwo(dayWithEntry)} 00:00`;
+      expect(await screen.findByText(expected)).toBeTruthy();
+    });
+
+    it("zero-pads the hour when it is a single digit but the minute is not (e.g. '09:30')", async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const storedEntries = [
+        { id: '1', text: '時刻一桁テスト', createdAt: isoAt(now, dayWithEntry, 9, 30) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+
+      render(<HomeScreen />);
+      await screen.findByText('時刻一桁テスト');
+
+      fireEvent.press(screen.getByText('時刻一桁テスト'));
+
+      const expected = `${now.getFullYear()}/${padTwo(now.getMonth() + 1)}/${padTwo(dayWithEntry)} 09:30`;
+      expect(await screen.findByText(expected)).toBeTruthy();
     });
   });
 });
