@@ -10,6 +10,8 @@ tests/
     index.test.tsx      app/(tabs)/index.tsx（日記画面）のテスト
     explore.test.tsx     app/(tabs)/explore.tsx（探索画面）のテスト
     modal.test.tsx        app/modal.tsx（モーダル画面）のテスト
+  utils/
+    diary-encryption.test.ts   utils/diary-encryption.ts（日記データの暗号化・復号）のテスト
 ```
 
 ## 配置ルール
@@ -24,13 +26,22 @@ tests/
 npm test
 ```
 
-これは `package.json` の `scripts` に登録された `jest` コマンドを実行します。`jest` の `roots` 設定（`package.json` 参照）により、`app`・`components`・`hooks`・`tests` の各ディレクトリ配下からテストファイルが探索されます。
+これは `package.json` の `scripts` に登録された `jest` コマンドを実行します。`jest` の `roots` 設定（`package.json` 参照）により、`app`・`components`・`hooks`・`utils`・`tests` の各ディレクトリ配下からテストファイルが探索されます。
 
 ## テスト作成の規約
 
 [AGENTS.md](../AGENTS.md) に定めるとおり、**実装を変更したら対応するテストをこの `tests/` ディレクトリに必ず追加・更新してください**。新機能を追加した場合はテストを新規作成し、既存のコードを修正した場合は対応する既存テストを更新します。この規約により、`tests/` の構成は常に本体コード（`app/` など）の構成と同期している状態を保つことを目指しています。
 
 テストが通らない状態でPRを作成しないでください（コミット前に `npm test` を実行して確認する運用です。ルートの [README.md](../README.md) の「開発用コマンド」セクションも参照）。
+
+### expo-crypto / expo-secure-store のモックについて
+
+`utils/diary-encryption.ts` は鍵・nonceの生成に `expo-crypto` の `getRandomBytes`、鍵の永続化に `expo-secure-store` を使用します。`jest-expo` が自動生成するモックは `getRandomBytes` を提供せず、`expo-secure-store` の `getItemAsync` も状態を永続化しない（呼び出しごとに `undefined` を返す）ため、これらに依存するテストでは以下の独自モックが必要です。
+
+- `expo-crypto`: Node標準の `crypto` モジュール（`crypto.randomBytes` / `crypto.randomUUID`）で代替し、実際に乱数として振る舞うようにする。
+- `expo-secure-store`: インメモリの `Record<string, string>` で `getItemAsync` / `setItemAsync` / `deleteItemAsync` を実装し、テスト間の状態分離のための `__reset()` ヘルパーを追加する。
+
+具体的な実装は [tests/utils/diary-encryption.test.ts](utils/diary-encryption.test.ts) と [tests/app/index.test.tsx](app/index.test.tsx) を参照してください。
 
 ## 関連ドキュメント
 

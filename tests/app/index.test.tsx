@@ -1,12 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { randomUUID } from 'expo-crypto';
+import * as SecureStore from 'expo-secure-store';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
 import { Platform, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import HomeScreen from '@/app/(tabs)/index';
+import { decryptText, encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
 
 // `expo-router`'s `Link` (with its `Trigger`/`Preview`/`Menu` compound API) requires a
 // navigation/router context that isn't set up when rendering the screen in isolation.
@@ -40,9 +42,42 @@ jest.mock('expo-router', () => {
 // `jest-expo` が自動生成する expo-crypto のモック(node_modules/expo-crypto/mocks/ExpoCrypto.ts)は
 // `randomUUID()` が常に `undefined` を返す実装になっているため、ID一意性を検証するテストのために
 // 呼び出しごとに異なる値を返す独自のモックに差し替える。
-jest.mock('expo-crypto', () => ({
-  randomUUID: jest.fn(),
-}));
+// また、日記の暗号化(utils/diary-encryption.ts)が鍵・nonceの生成に使う `getRandomBytes` も
+// オートモックには存在しない(`TypeError: getRandomBytes is not a function`になる)ため、
+// Node標準の`crypto`モジュールによる実際の乱数生成で代替する。
+jest.mock('expo-crypto', () => {
+  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
+  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const nodeCrypto = require('crypto');
+  return {
+    randomUUID: jest.fn(),
+    getRandomBytes: jest.fn((length: number) => new Uint8Array(nodeCrypto.randomBytes(length))),
+  };
+});
+
+// `expo-secure-store`はjest-expoのオートモックだと`getItemAsync`が常に`undefined`を返し、
+// 状態を永続化しない。そのままだと`getOrCreateEncryptionKey`が呼び出すたびに異なる鍵を
+// 新規生成してしまい、保存→再読み込みの暗号化ラウンドトリップを検証できないため、
+// インメモリでキーと値を保持する独自モックに差し替える。
+jest.mock('expo-secure-store', () => {
+  let store: Record<string, string> = {};
+  return {
+    getItemAsync: jest.fn((key: string) => Promise.resolve(store[key] ?? null)),
+    setItemAsync: jest.fn((key: string, value: string) => {
+      store[key] = value;
+      return Promise.resolve();
+    }),
+    deleteItemAsync: jest.fn((key: string) => {
+      delete store[key];
+      return Promise.resolve();
+    }),
+    // テスト間で鍵の永続化状態を分離するためのヘルパー(実際のexpo-secure-storeには存在しない)
+    __reset: () => {
+      store = {};
+    },
+  };
+});
 
 // 実機では `expo-router` の `ExpoRoot` が自動的に `SafeAreaProvider` で全体をラップするが、
 // このテストでは `HomeScreen` を単体でレンダリングするため、そのラップが存在しない。
@@ -93,11 +128,22 @@ jest.mock('react-native/Libraries/Components/Keyboard/KeyboardAvoidingView', () 
 });
 
 const mockRandomUUID = randomUUID as jest.Mock;
+// 上で定義した`__reset`にアクセスするための型付け直し
+const secureStoreMock = SecureStore as unknown as { __reset: () => void };
 
 const STORAGE_KEY = 'diary-entries';
+const ENCRYPTED_PREFIX = 'encrypted:v1:';
 const INPUT_PLACEHOLDER = '今日の出来事や気持ちを書いてみましょう';
 const CLOSE_BUTTON_TEXT = '閉じる';
 const KEYBOARD_AVOIDING_VIEW_TEST_ID = 'keyboard-avoiding-view';
+
+// AsyncStorageに実際に永続化された値(暗号化済み文字列)を、テストで検証しやすいよう
+// 復号してJSONとしてパースするヘルパー。`getOrCreateEncryptionKey`は
+// SecureStoreモックに永続化された鍵をそのまま返すため、画面側が使った鍵と同じ鍵が得られる。
+async function decryptPersistedEntries(encryptedValue: string): Promise<unknown> {
+  const key = await getOrCreateEncryptionKey();
+  return JSON.parse(decryptText(encryptedValue, key));
+}
 
 // `react-native-calendars` の `Calendar` はデフォルトで実行時点の「今日」を含む月を表示する
 // (このコンポーネントは `current`/`initialDate` を指定していないため)。そのため、テストで参照する
@@ -147,6 +193,7 @@ function flattenTexts(node: unknown, acc: string[] = []): string[] {
 describe('HomeScreen', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
+    secureStoreMock.__reset();
     jest.clearAllMocks();
 
     // 各テストで一意なUUID風の値を返すデフォルト実装をセットしておく
@@ -288,7 +335,7 @@ describe('HomeScreen', () => {
       expect(AsyncStorage.setItem).not.toHaveBeenCalled();
     });
 
-    it('allows saving when the text length is exactly at the max length (boundary)', async () => {
+    it('allows saving when the text length is exactly at the max length (boundary), and persists it encrypted (not as plain JSON)', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
@@ -301,7 +348,13 @@ describe('HomeScreen', () => {
 
       await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
       const [, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
-      const persisted = JSON.parse(value);
+
+      // AsyncStorageには平文JSONではなく、暗号化済みの文字列が保存される
+      expect(typeof value).toBe('string');
+      expect((value as string).startsWith(ENCRYPTED_PREFIX)).toBe(true);
+      expect(() => JSON.parse(value)).toThrow();
+
+      const persisted = (await decryptPersistedEntries(value)) as { text: string }[];
       expect(persisted).toHaveLength(1);
       expect(persisted[0].text).toBe(exactlyMaxLength);
     });
@@ -338,13 +391,14 @@ describe('HomeScreen', () => {
       expect(saveButton?.props.accessibilityState?.disabled).toBe(false);
     });
 
-    it('restores previously saved entries from AsyncStorage and shows them when the day is tapped', async () => {
+    it('restores previously saved plaintext entries (from before encryption was introduced) from AsyncStorage and shows them when the day is tapped', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       const storedEntries = [
         { id: '1', text: '2件目の日記', createdAt: isoAt(now, dayWithEntry, 20, 0) },
         { id: '2', text: '1件目の日記', createdAt: isoAt(now, dayWithEntry, 8, 0) },
       ];
+      // 暗号化対応前に保存された想定の平文JSONをそのままAsyncStorageに書き込む
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
       jest.clearAllMocks();
 
@@ -366,12 +420,70 @@ describe('HomeScreen', () => {
       expect(texts.indexOf('1件目の日記')).toBeLessThan(texts.indexOf('2件目の日記'));
     });
 
-    it('saves a new entry, persists it to AsyncStorage, and shows it together with an existing entry for the same day', async () => {
+    it('migrates plaintext entries to encrypted storage the next time an entry is saved', async () => {
       const now = new Date();
       const storedEntries = [
         { id: 'old', text: '過去の日記', createdAt: isoAt(now, now.getDate(), 0, 0) },
       ];
+      // 暗号化対応前に保存された想定の平文JSON
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('過去の日記');
+
+      fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '今日の日記');
+      fireEvent.press(screen.getByText('保存'));
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+      const [key, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
+      expect(key).toBe(STORAGE_KEY);
+
+      // 保存後は平文だったデータも含めて暗号化形式で書き戻される(後方互換マイグレーション)
+      expect((value as string).startsWith(ENCRYPTED_PREFIX)).toBe(true);
+
+      const persisted = (await decryptPersistedEntries(value)) as { text: string }[];
+      expect(persisted).toHaveLength(2);
+      expect(persisted.some((entry) => entry.text === '今日の日記')).toBe(true);
+      expect(persisted.some((entry) => entry.text === '過去の日記')).toBe(true);
+
+      // セルのタイトルは変わらず一番早い時刻の「過去の日記」のまま
+      expect(screen.getByText('過去の日記')).toBeTruthy();
+      expect(screen.queryByText('今日の日記')).toBeNull();
+
+      // タップするとその日の一覧に新しい日記も含めて表示される
+      fireEvent.press(screen.getAllByText('過去の日記')[0]);
+      expect(await screen.findByText('今日の日記')).toBeTruthy();
+      expect(screen.getAllByText('過去の日記').length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('persists diary entries encrypted and correctly reloads/decrypts them after remounting (simulating an app restart)', async () => {
+      const { unmount } = render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '再起動後も読める日記');
+      fireEvent.press(screen.getByText('保存'));
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      const [, storedValue] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
+      expect((storedValue as string).startsWith(ENCRYPTED_PREFIX)).toBe(true);
+
+      // アプリの再起動を模して画面をアンマウントし、新しいインスタンスとして再度マウントする。
+      // SecureStoreモックの鍵は永続化されたままなので、暗号化データを正しく復号できるはず。
+      unmount();
+
+      render(<HomeScreen />);
+      expect(await screen.findByText('再起動後も読める日記')).toBeTruthy();
+    });
+
+    it('saves a new entry, persists it to AsyncStorage encrypted, and shows it together with an existing entry for the same day', async () => {
+      const now = new Date();
+      const key = await getOrCreateEncryptionKey();
+      const storedEntries = [
+        { id: 'old', text: '過去の日記', createdAt: isoAt(now, now.getDate(), 0, 0) },
+      ];
+      // すでに暗号化されている状態を想定してAsyncStorageに直接書き込む
+      await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(storedEntries), key));
       jest.clearAllMocks();
 
       render(<HomeScreen />);
@@ -382,13 +494,13 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText('保存'));
 
       await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
-      const [key, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
-      expect(key).toBe(STORAGE_KEY);
+      const [savedKey, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
+      expect(savedKey).toBe(STORAGE_KEY);
 
-      const persisted = JSON.parse(value);
+      const persisted = (await decryptPersistedEntries(value)) as { text: string }[];
       expect(persisted).toHaveLength(2);
-      expect(persisted.some((entry: { text: string }) => entry.text === '今日の日記')).toBe(true);
-      expect(persisted.some((entry: { text: string }) => entry.text === '過去の日記')).toBe(true);
+      expect(persisted.some((entry) => entry.text === '今日の日記')).toBe(true);
+      expect(persisted.some((entry) => entry.text === '過去の日記')).toBe(true);
 
       // セルのタイトルは変わらず一番早い時刻の「過去の日記」のまま
       expect(screen.getByText('過去の日記')).toBeTruthy();
@@ -407,6 +519,18 @@ describe('HomeScreen', () => {
 
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(STORAGE_KEY));
       // 壊れたデータは読み捨てられ、空の状態から始まるためカレンダーに操作可能なセルは無い
+      expect(screen.queryAllByRole('button')).toHaveLength(0);
+    });
+
+    it('shows the empty state when stored data has the encrypted-payload marker but fails to decrypt (corrupted ciphertext)', async () => {
+      jest
+        .spyOn(AsyncStorage, 'getItem')
+        .mockResolvedValueOnce(`${ENCRYPTED_PREFIX}not-a-real-ciphertext`);
+
+      render(<HomeScreen />);
+
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(STORAGE_KEY));
+      // 復号に失敗したデータは読み捨てられ、空の状態から始まるためカレンダーに操作可能なセルは無い
       expect(screen.queryAllByRole('button')).toHaveLength(0);
     });
 
@@ -469,10 +593,10 @@ describe('HomeScreen', () => {
       expect(mockRandomUUID).toHaveBeenCalledTimes(3);
 
       const lastCall = (AsyncStorage.setItem as jest.Mock).mock.calls[2];
-      const persisted = JSON.parse(lastCall[1]);
+      const persisted = (await decryptPersistedEntries(lastCall[1])) as { id: string }[];
 
       expect(persisted).toHaveLength(3);
-      const ids = persisted.map((entry: { id: string }) => entry.id);
+      const ids = persisted.map((entry) => entry.id);
       expect(new Set(ids).size).toBe(ids.length);
 
       // 同じ日に書かれた3件すべてが、セルをタップした一覧に表示される

@@ -1,0 +1,195 @@
+import * as SecureStore from 'expo-secure-store';
+
+import {
+  decryptText,
+  encryptText,
+  getOrCreateEncryptionKey,
+  isEncryptedPayload,
+} from '@/utils/diary-encryption';
+
+// `jest-expo`が自動生成するexpo-cryptoのモック(node_modules/expo-crypto/mocks/ExpoCrypto.ts)は
+// `getRandomBytes`自体を持たず(内部実装が`getRandomValues`経由でネイティブ乱数を要求する)、
+// テスト環境ではそのまま使うと例外になる。Node標準の`crypto`モジュールによる実際の乱数生成に
+// 差し替えることで、暗号化のラウンドトリップ・nonceの一意性検証を実際の乱数で行えるようにする。
+jest.mock('expo-crypto', () => {
+  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
+  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const nodeCrypto = require('crypto');
+  return {
+    getRandomBytes: jest.fn((length: number) => new Uint8Array(nodeCrypto.randomBytes(length))),
+    randomUUID: jest.fn(() => nodeCrypto.randomUUID()),
+  };
+});
+
+// expo-secure-storeはjest-expoのオートモックだと`getItemAsync`が常に`undefined`を返し、
+// 状態を永続化しない(呼び出しごとに鍵を新規生成したことになってしまう)。
+// `getOrCreateEncryptionKey`の「保存後は同じ鍵を返す」という振る舞いを検証するため、
+// インメモリでキーと値を保持する独自モックに差し替える。
+jest.mock('expo-secure-store', () => {
+  let store: Record<string, string> = {};
+  return {
+    getItemAsync: jest.fn((key: string) => Promise.resolve(store[key] ?? null)),
+    setItemAsync: jest.fn((key: string, value: string) => {
+      store[key] = value;
+      return Promise.resolve();
+    }),
+    deleteItemAsync: jest.fn((key: string) => {
+      delete store[key];
+      return Promise.resolve();
+    }),
+    // テスト間で鍵の永続化状態を分離するためのヘルパー(実際のexpo-secure-storeには存在しない)
+    __reset: () => {
+      store = {};
+    },
+  };
+});
+
+// 上で定義した`__reset`にアクセスするための型付け直し
+const secureStoreMock = SecureStore as unknown as { __reset: () => void };
+
+describe('utils/diary-encryption', () => {
+  beforeEach(() => {
+    secureStoreMock.__reset();
+    jest.clearAllMocks();
+  });
+
+  describe('isEncryptedPayload', () => {
+    it('returns true for a string produced by encryptText', () => {
+      const key = new Uint8Array(32).fill(1);
+      const encrypted = encryptText('こんにちは', key);
+      expect(isEncryptedPayload(encrypted)).toBe(true);
+    });
+
+    it('returns false for plain JSON produced before encryption was introduced (array)', () => {
+      expect(
+        isEncryptedPayload('[{"id":"1","text":"a","createdAt":"2026-01-01T00:00:00.000Z"}]'),
+      ).toBe(false);
+    });
+
+    it('returns false for plain JSON produced before encryption was introduced (object)', () => {
+      expect(isEncryptedPayload('{"foo":"bar"}')).toBe(false);
+    });
+
+    it('returns false for an empty string (boundary)', () => {
+      expect(isEncryptedPayload('')).toBe(false);
+    });
+  });
+
+  describe('encryptText / decryptText のラウンドトリップ', () => {
+    const key = new Uint8Array(32).fill(7);
+
+    it('decrypts back to the original text for a typical Japanese diary entry', () => {
+      const plainText = '今日はいい天気でした。\n公園を散歩しました。';
+      const encrypted = encryptText(plainText, key);
+      expect(decryptText(encrypted, key)).toBe(plainText);
+    });
+
+    it('round-trips an empty string (boundary)', () => {
+      const encrypted = encryptText('', key);
+      expect(decryptText(encrypted, key)).toBe('');
+    });
+
+    it('round-trips text containing multi-byte characters such as emoji', () => {
+      const plainText = '🎉絵文字も含むテキスト🍣';
+      const encrypted = encryptText(plainText, key);
+      expect(decryptText(encrypted, key)).toBe(plainText);
+    });
+
+    it('round-trips a long JSON payload representing multiple diary entries', () => {
+      const entries = Array.from({ length: 50 }, (_, i) => ({
+        id: `id-${i}`,
+        text: `${i}件目の日記です。`.repeat(5),
+        createdAt: new Date(2026, 0, 1 + i).toISOString(),
+      }));
+      const plainText = JSON.stringify(entries);
+      const encrypted = encryptText(plainText, key);
+      expect(decryptText(encrypted, key)).toBe(plainText);
+      expect(JSON.parse(decryptText(encrypted, key))).toEqual(entries);
+    });
+
+    it('produces a value that starts with the encrypted payload prefix', () => {
+      const encrypted = encryptText('サンプル', key);
+      expect(isEncryptedPayload(encrypted)).toBe(true);
+      expect(encrypted.startsWith('encrypted:v1:')).toBe(true);
+    });
+
+    it('produces different ciphertext for the same plaintext and key on each call (nonce uniqueness)', () => {
+      const first = encryptText('同じ平文', key);
+      const second = encryptText('同じ平文', key);
+      expect(first).not.toBe(second);
+      // それぞれ独立に正しく復号できる(nonceが毎回異なるだけで壊れているわけではない)
+      expect(decryptText(first, key)).toBe('同じ平文');
+      expect(decryptText(second, key)).toBe('同じ平文');
+    });
+  });
+
+  describe('decryptText の異常系', () => {
+    const key = new Uint8Array(32).fill(3);
+
+    it('throws when given a plain (non-encrypted) string', () => {
+      expect(() => decryptText('[{"id":"1"}]', key)).toThrow('暗号化されていないデータです');
+    });
+
+    it('throws when given an empty string (boundary)', () => {
+      expect(() => decryptText('', key)).toThrow('暗号化されていないデータです');
+    });
+
+    it('throws when decrypting with a different key than the one used to encrypt', () => {
+      const encrypted = encryptText('秘密の日記', key);
+      const wrongKey = new Uint8Array(32).fill(9);
+      expect(() => decryptText(encrypted, wrongKey)).toThrow();
+    });
+
+    it('throws when the ciphertext has been tampered with', () => {
+      const encrypted = encryptText('改ざん検知テスト', key);
+      // base64部分の先頭の1文字を別の文字に差し替えて破損させる
+      const prefix = 'encrypted:v1:';
+      const payload = encrypted.slice(prefix.length);
+      const tamperedChar = payload[0] === 'A' ? 'B' : 'A';
+      const tampered = `${prefix}${tamperedChar}${payload.slice(1)}`;
+      expect(() => decryptText(tampered, key)).toThrow();
+    });
+
+    it('throws when the base64 payload contains invalid characters', () => {
+      expect(() => decryptText('encrypted:v1:not-valid-base64!!!', key)).toThrow(
+        '不正なbase64文字列です',
+      );
+    });
+
+    it('throws when the payload is too short to contain a full nonce', () => {
+      // プレフィックスの後にnonce長(12バイト)未満のデータしか無い場合
+      expect(() => decryptText('encrypted:v1:AAAA', key)).toThrow();
+    });
+  });
+
+  describe('getOrCreateEncryptionKey', () => {
+    it('generates a 256-bit (32-byte) key', async () => {
+      const key = await getOrCreateEncryptionKey();
+      expect(key).toBeInstanceOf(Uint8Array);
+      expect(key.length).toBe(32);
+    });
+
+    it('persists the generated key to SecureStore and returns the same key on subsequent calls', async () => {
+      const first = await getOrCreateEncryptionKey();
+      const second = await getOrCreateEncryptionKey();
+      expect(Array.from(second)).toEqual(Array.from(first));
+      expect(SecureStore.setItemAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns a key usable to decrypt text encrypted with a previously created key (SecureStore persistence round trip)', async () => {
+      const key = await getOrCreateEncryptionKey();
+      const encrypted = encryptText('鍵の永続化テスト', key);
+
+      const keyAfterReload = await getOrCreateEncryptionKey();
+      expect(decryptText(encrypted, keyAfterReload)).toBe('鍵の永続化テスト');
+    });
+
+    it('generates a new, different key once SecureStore is reset (simulating a fresh install)', async () => {
+      const first = await getOrCreateEncryptionKey();
+      secureStoreMock.__reset();
+      const second = await getOrCreateEncryptionKey();
+      expect(Array.from(second)).not.toEqual(Array.from(first));
+    });
+  });
+});
