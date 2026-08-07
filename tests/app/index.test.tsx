@@ -50,6 +50,9 @@ jest.mock('expo-crypto', () => ({
 // ライブラリ公式のjestモック(常にゼロインセットを返す)に差し替える。
 jest.mock(
   'react-native-safe-area-context',
+  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
+  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   () => require('react-native-safe-area-context/jest/mock').default,
 );
 
@@ -58,6 +61,8 @@ jest.mock(
 // shipped with the package. This lets the screen's persistence logic (`getItem`/`setItem`)
 // run against a real (fake) storage backend instead of crashing.
 jest.mock('@react-native-async-storage/async-storage', () =>
+  // 上記と同様、`jest.mock`の巻き上げの都合によりファクトリ内で`require()`を使う必要がある
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
