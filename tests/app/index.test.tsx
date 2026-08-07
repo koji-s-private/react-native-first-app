@@ -623,6 +623,25 @@ describe('HomeScreen', () => {
       expect(texts.indexOf('昼の出来事')).toBeLessThan(texts.indexOf('夜の出来事'));
     });
 
+    it("shows each entry's date/time in a locale-independent 'YYYY/MM/DD HH:mm' format regardless of the test environment's locale", async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '日記本文', createdAt: isoAt(now, dayWithEntry, 9, 5) }]),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('日記本文');
+
+      fireEvent.press(screen.getByText('日記本文'));
+
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(dayWithEntry).padStart(2, '0');
+      expect(await screen.findByText(`${year}/${month}/${day} 09:05`)).toBeTruthy();
+    });
+
     it('closes the modal when the close button is pressed', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);

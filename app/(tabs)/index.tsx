@@ -109,6 +109,18 @@ function formatDateHeading(dateKey: string): string {
   return `${year}年${Number(month)}月${Number(day)}日`;
 }
 
+// 日記エントリの日時を'YYYY/MM/DD HH:mm'形式で整形する(端末のロケール設定に依存する
+// toLocaleString()は使わず、日本語UIで一貫した表記になるよう手動でフォーマットする)
+function formatEntryDateTime(isoString: string): string {
+  const date = new Date(isoString);
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  const hours = `${date.getHours()}`.padStart(2, '0');
+  const minutes = `${date.getMinutes()}`.padStart(2, '0');
+  return `${year}/${month}/${day} ${hours}:${minutes}`;
+}
+
 export default function HomeScreen() {
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
   const [draft, setDraft] = useState('');
@@ -366,7 +378,7 @@ export default function HomeScreen() {
                 renderItem={({ item }) => (
                   <ThemedView style={[styles.entry, { borderBottomColor: iconColor }]}>
                     <ThemedText style={styles.entryDate}>
-                      {new Date(item.createdAt).toLocaleString()}
+                      {formatEntryDateTime(item.createdAt)}
                     </ThemedText>
                     <ThemedText>{item.text}</ThemedText>
                   </ThemedView>
