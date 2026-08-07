@@ -340,6 +340,17 @@ export default function HomeScreen() {
           {saveError ? <ThemedText style={styles.errorText}>{saveError}</ThemedText> : null}
         </ThemedView>
 
+        {entries.length === 0 ? (
+          // 日記が1件も保存されていない場合、ラベルの無いカレンダーだけが表示されて
+          // 何をすればよいか分かりにくくならないよう、案内メッセージを表示する
+          // (カレンダー自体は今後日記を書く導線として引き続き表示しておく)
+          <ThemedView style={styles.emptyState}>
+            <ThemedText style={styles.emptyStateText}>
+              まだ日記がありません。最初の日記を書いてみましょう。
+            </ThemedText>
+          </ThemedView>
+        ) : null}
+
         <View
           style={[styles.calendarWrapper, { borderColor: iconColor, backgroundColor }]}
           onLayout={(event) => setWrapperHeight(event.nativeEvent.layout.height)}
@@ -453,6 +464,13 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#d32f2f',
     fontSize: 14,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  emptyStateText: {
+    opacity: 0.7,
   },
   calendarWrapper: {
     // タイトル・入力欄・保存ボタンの下からタブバーの上までの残りスペースをすべて使い切る。
