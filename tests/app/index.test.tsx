@@ -135,7 +135,7 @@ const STORAGE_KEY = 'diary-entries';
 const ENCRYPTED_PREFIX = 'encrypted:v1:';
 const INPUT_PLACEHOLDER = '今日の出来事や気持ちを書いてみましょう';
 const CLOSE_BUTTON_TEXT = '閉じる';
-// Issue #63: 日記が0件のときにカレンダーの上に表示される案内メッセージ
+// 日記が0件のときにカレンダーの上に表示される案内メッセージ
 const EMPTY_STATE_TEXT = 'まだ日記がありません。最初の日記を書いてみましょう。';
 const KEYBOARD_AVOIDING_VIEW_TEST_ID = 'keyboard-avoiding-view';
 
@@ -165,8 +165,8 @@ function pickTestDays(now: Date): { dayWithEntry: number; dayWithoutEntry: numbe
 }
 
 // pickTestDays と同じ10〜20日の「はみ出しと重複しない」範囲の中から、実行時点の「今日」とは
-// 異なる日を1つ選ぶ。Issue #75のテストでは「今日」バッジのセル(todayBadgeスタイル)と
-// 通常のセルを区別して検証したいため、意図せず両者が同じ日になってしまうことを避ける。
+// 異なる日を1つ選ぶ。「今日」バッジのセル(todayBadgeスタイル)と通常のセルを区別して検証したいため、
+// 意図せず両者が同じ日になってしまうことを避ける。
 // 10〜20日の11通りのうち「今日」と一致するのは高々1通りなので、必ず1つは見つかる。
 function pickNonTodayDayInRange(now: Date): number {
   const today = now.getDate();
@@ -581,7 +581,7 @@ describe('HomeScreen', () => {
       expect(screen.queryByText('今日の日記')).toBeNull();
     });
 
-    it('does not overwrite draft text the user typed while a save was still in flight, when that save later fails (Issue #80)', async () => {
+    it('does not overwrite draft text the user typed while a save was still in flight, when that save later fails', async () => {
       const now = new Date();
       const storedEntries = [
         { id: 'old', text: '過去の日記', createdAt: isoAt(now, now.getDate(), 0, 0) },
@@ -624,7 +624,7 @@ describe('HomeScreen', () => {
       expect(screen.queryByText('保存中の日記')).toBeNull();
     });
 
-    it('does not clear draft text the user typed while a save was still in flight, when that save later succeeds (Issue #80, boundary)', async () => {
+    it('does not clear draft text the user typed while a save was still in flight, when that save later succeeds (boundary)', async () => {
       // 失敗時だけでなく成功時も、保存処理中(pending中)に入力された下書きが
       // 意図せず消されないことを確認する(catch節以外の経路でdraftが上書きされないことの確認)
       const now = new Date();
@@ -715,7 +715,7 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('空状態(日記が0件)の案内メッセージ(Issue #63)', () => {
+  describe('空状態(日記が0件)の案内メッセージ', () => {
     it('shows the empty state message immediately, even before the async AsyncStorage load resolves (entries starts as an empty array)', () => {
       render(<HomeScreen />);
 
@@ -961,7 +961,7 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('日付セルのフォント拡大率の上限(Issue #75, maxFontSizeMultiplier)', () => {
+  describe('日付セルのフォント拡大率の上限(maxFontSizeMultiplier)', () => {
     // OSの文字サイズ設定(アクセシビリティのフォント拡大・Dynamic Type)を拡大しても、
     // 日付セル内のテキスト(日付番号・日記タイトル)が際限なく拡大されて最下段の週が
     // 見切れてしまわないよう、`maxFontSizeMultiplier`で拡大率の上限が指定されていることを検証する。

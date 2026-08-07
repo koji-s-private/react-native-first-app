@@ -3,7 +3,7 @@ name: Semgrep
 # 無料で使える静的セキュリティ解析(Semgrep OSS)。
 # 以前はGitHub標準のCodeQLを使用していたが、CodeQLのCode Scanningはprivateリポジトリでは
 # GitHub Advanced Security(有料)が必要で、実行するたびに
-# "Resource not accessible by integration" エラーで失敗していた(Issue #27のPR #47で発覚)。
+# "Resource not accessible by integration" エラーで失敗していた。
 # Semgrepはpublicなコミュニティルールセット(p/*)を指定する限り、アカウント登録や
 # APIトークンなしで無料利用できるため、こちらに置き換えた。
 #
