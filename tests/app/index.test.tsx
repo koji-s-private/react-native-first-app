@@ -164,6 +164,21 @@ function pickTestDays(now: Date): { dayWithEntry: number; dayWithoutEntry: numbe
   };
 }
 
+// pickTestDays と同じ10〜20日の「はみ出しと重複しない」範囲の中から、実行時点の「今日」とは
+// 異なる日を1つ選ぶ。Issue #75のテストでは「今日」バッジのセル(todayBadgeスタイル)と
+// 通常のセルを区別して検証したいため、意図せず両者が同じ日になってしまうことを避ける。
+// 10〜20日の11通りのうち「今日」と一致するのは高々1通りなので、必ず1つは見つかる。
+function pickNonTodayDayInRange(now: Date): number {
+  const today = now.getDate();
+  for (let day = 10; day <= 20; day += 1) {
+    if (day !== today) {
+      return day;
+    }
+  }
+  // 10〜20日は11通りあるため、ここには到達しない
+  return 10;
+}
+
 // 実行時点の年月と、指定した日付・時刻から端末ローカル時刻ベースのISO文字列を作る
 // (UTC表記のリテラルを直接組み立てるとテスト実行環境のタイムゾーンによって
 // 日付がずれる恐れがあるため、必ずDateのローカルコンストラクタ経由で作成する)。
@@ -853,6 +868,81 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
 
       await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
+    });
+  });
+
+  describe('日付セルのフォント拡大率の上限(Issue #75, maxFontSizeMultiplier)', () => {
+    // OSの文字サイズ設定(アクセシビリティのフォント拡大・Dynamic Type)を拡大しても、
+    // 日付セル内のテキスト(日付番号・日記タイトル)が際限なく拡大されて最下段の週が
+    // 見切れてしまわないよう、`maxFontSizeMultiplier`で拡大率の上限が指定されていることを検証する。
+    // react-native-calendars自体の月見出し・曜日行はライブラリ内部で常に
+    // `allowFontScaling={false}`が指定されており対象外のため、ここでは検証しない。
+    const EXPECTED_MAX_FONT_SCALE = 1.5;
+
+    it('caps the font scale multiplier at a value greater than 1 but not unbounded (sanity check on the constant itself)', () => {
+      // 実装側の定数はモジュール外にexportされていないため、直接importはできないが、
+      // 「等倍(1)ではなく拡大を許容しつつも、無制限ではない妥当な値」であることは
+      // 以下の各テストで実際にレンダリングされるpropsの値として確認できる。
+      // ここではその期待値自体が1(拡大を許さない)や極端に大きい値(実質無制限)ではないことを明記する。
+      expect(EXPECTED_MAX_FONT_SCALE).toBeGreaterThan(1);
+      expect(EXPECTED_MAX_FONT_SCALE).toBeLessThanOrEqual(2);
+    });
+
+    it("sets maxFontSizeMultiplier on a regular (non-today) day cell's day number", async () => {
+      const now = new Date();
+      const day = pickNonTodayDayInRange(now);
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const dayNumber = screen.getByText(String(day));
+      expect(dayNumber.props.maxFontSizeMultiplier).toBe(EXPECTED_MAX_FONT_SCALE);
+    });
+
+    it("sets maxFontSizeMultiplier on today's badge day number", async () => {
+      const now = new Date();
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      // 月初/月末の「はみ出し」表示で前後の月にも同じ日付番号が重複することがあるため、
+      // 今日バッジ特有のスタイル(丸背景に合わせた太字)を持つものだけを絞り込む
+      const candidates = screen.getAllByText(String(now.getDate()));
+      const todayNumber = candidates.find((node) => {
+        const flattenedStyle = StyleSheet.flatten(node.props.style);
+        return flattenedStyle.fontWeight === '700';
+      });
+
+      expect(todayNumber).toBeTruthy();
+      expect(todayNumber?.props.maxFontSizeMultiplier).toBe(EXPECTED_MAX_FONT_SCALE);
+    });
+
+    it('sets maxFontSizeMultiplier on the diary title shown inside a day cell', async () => {
+      const now = new Date();
+      const day = pickNonTodayDayInRange(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: 'フォント拡大確認用の日記', createdAt: isoAt(now, day) }]),
+      );
+
+      render(<HomeScreen />);
+
+      const title = await screen.findByText('フォント拡大確認用の日記');
+      expect(title.props.maxFontSizeMultiplier).toBe(EXPECTED_MAX_FONT_SCALE);
+    });
+
+    it('still shows the day number and diary title as before (regression check: adding maxFontSizeMultiplier does not change rendered content)', async () => {
+      const now = new Date();
+      const day = pickNonTodayDayInRange(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '回帰確認用の日記', createdAt: isoAt(now, day) }]),
+      );
+
+      render(<HomeScreen />);
+
+      expect(await screen.findByText('回帰確認用の日記')).toBeTruthy();
+      expect(screen.getByText(String(day))).toBeTruthy();
     });
   });
 
