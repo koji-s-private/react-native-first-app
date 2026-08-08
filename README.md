@@ -188,6 +188,7 @@ type DiaryEntry = {
 - **暗号鍵の管理**: 端末ごとに一度だけ `expo-crypto` の `getRandomBytes()` で生成した256bit鍵を `expo-secure-store`（iOSはKeychain、AndroidはKeystoreに保存される）に保持する。鍵自体がAsyncStorageや平文で保存されることはない
 - **読み込み**: 画面表示時（`useEffect`）に `AsyncStorage.getItem('diary-entries')` を呼び出し、保存値が暗号化形式(`'encrypted:v1:'`始まり)であれば復号してから、そうでなければ暗号化対応前の平文JSONとしてそのまま `JSON.parse` して state にセットする（後方互換のマイグレーション。次回保存時から暗号化形式に移行する）。ストレージが壊れている・スキーマ不整合・復号失敗の場合は空配列にフォールバックする
 - **保存失敗時の挙動**: 保存前の state に巻き戻し、画面にエラーメッセージ（`保存に失敗しました。もう一度お試しください。`）を表示する
+- **全件削除**: ストアのデータ削除要件（Google Play/Apple双方でユーザーによるデータ削除手段の提供が求められる）に対応するため、設定タブ（`app/(tabs)/settings.tsx`）から確認ダイアログ（キャンセル可能）付きで日記データを全件削除できる。実体は `utils/diary-storage.ts` の `clearAllDiaryEntries()`（`AsyncStorage.removeItem('diary-entries')`）で、暗号鍵など他のキーには影響しない
 
 ### ER図
 

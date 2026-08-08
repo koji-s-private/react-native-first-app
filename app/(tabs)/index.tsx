@@ -25,8 +25,11 @@ import {
   getOrCreateEncryptionKey,
   isEncryptedPayload,
 } from '@/utils/diary-encryption';
+import { DIARY_ENTRIES_STORAGE_KEY } from '@/utils/diary-storage';
 
-const STORAGE_KEY = 'diary-entries';
+// 日記データのAsyncStorageキーは、設定画面からの全件削除機能(utils/diary-storage.ts)と
+// 共有するため、そちらで定義した定数を参照する
+const STORAGE_KEY = DIARY_ENTRIES_STORAGE_KEY;
 
 type DiaryEntry = {
   id: string;

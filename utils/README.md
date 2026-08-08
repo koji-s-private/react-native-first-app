@@ -7,6 +7,7 @@
 ```
 utils/
   diary-encryption.ts    日記データ(AsyncStorageに保存するJSON文字列)のAES-256-GCM暗号化・復号
+  diary-storage.ts       日記データのAsyncStorageキー定義、および全件削除
 ```
 
 ## `diary-encryption.ts` の構成
@@ -18,6 +19,13 @@ utils/
 - `isEncryptedPayload(value)`: 保存されている文字列が既に暗号化済みの形式(`'encrypted:v1:'`始まり)かどうかを判定します。暗号化対応前に保存された平文JSONとの後方互換マイグレーションに使います。
 
 利用箇所は [`app/(tabs)/index.tsx`](../app/(tabs)/index.tsx) です。日記データの保存フォーマットの詳細はルートの [README.md](../README.md#日記エントリdiaryentry) を参照してください。
+
+## `diary-storage.ts` の構成
+
+日記データのAsyncStorageキー(`diary-entries`)を`app/(tabs)/index.tsx`(保存・読み込み)と設定画面(全件削除)で共有するためのユーティリティです。
+
+- `DIARY_ENTRIES_STORAGE_KEY`: 日記データのAsyncStorageキーの定数。
+- `clearAllDiaryEntries()`: 日記データのみをAsyncStorageから`removeItem`で削除します。暗号鍵(`expo-secure-store`側)など日記データ以外のキーには影響しません。ストアのデータ削除要件(Google Play/Apple双方でユーザーによるデータ削除手段の提供が求められる)に対応するため、[`app/(tabs)/settings.tsx`](<../app/(tabs)/settings.tsx>)の確認ダイアログ付きボタンから呼び出されます。
 
 ## 関連ドキュメント
 
