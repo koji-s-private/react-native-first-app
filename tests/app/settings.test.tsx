@@ -65,10 +65,17 @@ describe('SettingsScreen', () => {
     expect(privacyPolicy).toBeDefined();
     expect(termsOfService).toBeDefined();
 
+    // `item.href`は`SettingsMenuItem`のユニオン型全体では`string | HrefObject`のため、
+    // `.startsWith`を呼ぶには`type`で`'external'`に絞り込んでTypeScriptに文字列型だと
+    // 認識させる必要がある(絞り込まずに呼ぶと`tsc --noEmit`がコンパイルエラーになる)。
     expect(privacyPolicy?.type).toBe('external');
-    expect(privacyPolicy?.href.startsWith('https://')).toBe(true);
+    if (privacyPolicy?.type === 'external') {
+      expect(privacyPolicy.href.startsWith('https://')).toBe(true);
+    }
     expect(termsOfService?.type).toBe('external');
-    expect(termsOfService?.href.startsWith('https://')).toBe(true);
+    if (termsOfService?.type === 'external') {
+      expect(termsOfService.href.startsWith('https://')).toBe(true);
+    }
   });
 
   it('links "OSSライセンス" to the in-app /oss-licenses route (internal navigation)', () => {
@@ -90,7 +97,9 @@ describe('SettingsScreen', () => {
     const contact = supportSection?.items.find((item) => item.key === 'contact');
     expect(contact).toBeDefined();
     expect(contact?.type).toBe('mailto');
-    expect(contact?.href.startsWith('mailto:')).toBe(true);
+    if (contact?.type === 'mailto') {
+      expect(contact.href.startsWith('mailto:')).toBe(true);
+    }
 
     const link = screen.getByTestId(`link-${contact?.href}`);
     expect(within(link).getByText('お問い合わせ')).toBeTruthy();
@@ -101,5 +110,42 @@ describe('SettingsScreen', () => {
 
     // 直接ThemedTextを描画確認するSmokeテスト
     expect(screen.UNSAFE_getAllByType(Text).length).toBeGreaterThan(0);
+  });
+});
+
+describe('SETTINGS_SECTIONS data integrity (境界値・異常系)', () => {
+  it('is not empty (boundary: at least 1 section must be defined)', () => {
+    expect(SETTINGS_SECTIONS.length).toBeGreaterThan(0);
+  });
+
+  it('has at least 1 item in every section (boundary: no empty section)', () => {
+    for (const section of SETTINGS_SECTIONS) {
+      expect(section.items.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('has non-empty required fields (key/label/href) on every item', () => {
+    for (const section of SETTINGS_SECTIONS) {
+      expect(section.key.length).toBeGreaterThan(0);
+      expect(section.title.length).toBeGreaterThan(0);
+
+      for (const item of section.items) {
+        expect(item.key.length).toBeGreaterThan(0);
+        expect(item.label.length).toBeGreaterThan(0);
+        expect(String(item.href).length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('has unique section keys and unique item keys within each section (React key衝突の防止)', () => {
+    // `section.key`/`item.key`はReactの`key` propとしてそのまま使われているため、
+    // 重複すると意図しない再利用・警告が発生する。将来項目が追加された際の回帰を防ぐ。
+    const sectionKeys = SETTINGS_SECTIONS.map((section) => section.key);
+    expect(new Set(sectionKeys).size).toBe(sectionKeys.length);
+
+    for (const section of SETTINGS_SECTIONS) {
+      const itemKeys = section.items.map((item) => item.key);
+      expect(new Set(itemKeys).size).toBe(itemKeys.length);
+    }
   });
 });
