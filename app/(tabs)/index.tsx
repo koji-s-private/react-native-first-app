@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { randomUUID } from 'expo-crypto';
+import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from 'expo-router';
 import type { ComponentProps } from 'react';
 import { useCallback, useMemo, useState } from 'react';
@@ -18,6 +19,7 @@ import type { CalendarProps, DateData } from 'react-native-calendars';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SaveToast } from '@/components/save-toast';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useThemeColor } from '@/hooks/use-theme-color';
@@ -37,6 +39,9 @@ const TITLE_MAX_LENGTH = 20;
 
 // 日記本文の最大文字数(AsyncStorageのサイズ制限に抵触しないよう、1件あたりの文字数を制限する)
 const BODY_MAX_LENGTH = 1000;
+
+// 保存成功時にトーストへ表示するメッセージ
+const SAVE_SUCCESS_MESSAGE = '保存しました';
 
 // 日付セルの高さのデフォルト最小値(外枠の実測高さがまだ取れていない初回レンダー用のフォールバック)
 const DEFAULT_DAY_CELL_HEIGHT = 48;
@@ -147,6 +152,8 @@ export default function HomeScreen() {
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
   const [draft, setDraft] = useState('');
   const [saveError, setSaveError] = useState<string | null>(null);
+  // 保存成功時に一時的に表示するトーストのメッセージ。nullの間は非表示
+  const [saveToastMessage, setSaveToastMessage] = useState<string | null>(null);
   // 一覧表示用にタップされた日付('YYYY-MM-DD')。nullの間はモーダルを閉じている
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   // 編集中のエントリのid。nullの間は編集モーダルを閉じている
@@ -211,6 +218,13 @@ export default function HomeScreen() {
       // AES-256-GCM暗号化してから保存する
       const key = await getOrCreateEncryptionKey();
       await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(nextEntries), key));
+
+      // 保存成功をユーザーに明示するため、一時的なトーストとハプティックフィードバックを発火する。
+      // 保存失敗時はsaveErrorでエラーメッセージを表示しており、成功時も対称的にフィードバックする
+      setSaveToastMessage(SAVE_SUCCESS_MESSAGE);
+      if (process.env.EXPO_OS === 'ios') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
     } catch {
       // 永続化に失敗した場合は保存前の状態に戻し、ユーザーにエラーを伝える。
       // ただし、保存処理中(この非同期処理の完了を待つ間)にユーザーが既に次の文章を
@@ -292,6 +306,14 @@ export default function HomeScreen() {
     },
     [entries],
   );
+
+  // トーストを非表示にする(SaveToastのuseEffectの依存配列に含まれるため、毎レンダーで
+  // 参照が変わらないようuseCallbackで安定化する。インライン関数のままだと、トースト表示中に
+  // ユーザーが入力欄を編集し続けるたびにHomeScreenが再レンダーされてonHideの参照が変わり、
+  // 自動非表示タイマーが張り直され続けてトーストが仕様通り2.5秒で消えなくなってしまう)
+  const handleHideSaveToast = useCallback(() => {
+    setSaveToastMessage(null);
+  }, []);
 
   // 削除ボタン押下時、誤操作防止のため確認ダイアログを挟んでから削除を実行する
   const handleDeletePress = useCallback(
@@ -448,6 +470,9 @@ export default function HomeScreen() {
             </Pressable>
           </View>
           {saveError ? <ThemedText style={styles.errorText}>{saveError}</ThemedText> : null}
+          {saveToastMessage ? (
+            <SaveToast message={saveToastMessage} onHide={handleHideSaveToast} />
+          ) : null}
         </ThemedView>
 
         {entries.length === 0 ? (
