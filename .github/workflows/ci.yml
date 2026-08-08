@@ -35,4 +35,19 @@ jobs:
         run: npm test
 
       - name: 依存パッケージの脆弱性検知(npm audit)
-        run: npm audit --audit-level=high
+        run: |
+          # image-size (metro経由の間接依存) のICNS/JXL/HEIFパーサーにおける無限ループDoSは
+          # 上流に修正版が存在しない(first_patched_version: null)ため暫定的に許容する。
+          # ビルド時にリポジトリ内の静的な画像アセットの寸法取得にのみ使われ、実行時に
+          # ユーザー入力の画像を処理する経路ではないため実害は限定的と判断している。
+          # 詳細・今後の再検討: https://github.com/koji-s-private/react-native-first-app/issues/116
+          ALLOWLIST="GHSA-w3rx-r6r6-pgpr GHSA-5p2g-fcmc-qvqq"
+          npm audit --audit-level=high --json > audit-result.json || true
+          FOUND=$(jq -r '[.vulnerabilities[].via[]? | select(type=="object") | .url] | unique[]' audit-result.json | grep -oE 'GHSA-[a-z0-9-]+' | sort -u)
+          UNKNOWN=$(comm -23 <(echo "$FOUND") <(echo "$ALLOWLIST" | tr ' ' '\n' | sort))
+          if [ -n "$UNKNOWN" ]; then
+            echo "許可リスト外の高深刻度脆弱性が検知されました:"
+            echo "$UNKNOWN"
+            exit 1
+          fi
+          echo "許可リスト外の高深刻度脆弱性は検知されませんでした(既知の2件は許容中)。"
