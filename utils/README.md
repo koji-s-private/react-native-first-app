@@ -6,8 +6,9 @@
 
 ```
 utils/
-  diary-encryption.ts    日記データ(AsyncStorageに保存するJSON文字列)のAES-256-GCM暗号化・復号
-  diary-storage.ts       日記データのAsyncStorageキー定義、および全件削除
+  diary-encryption.ts     日記データ(AsyncStorageに保存するJSON文字列)のAES-256-GCM暗号化・復号
+  diary-storage.ts        日記データのAsyncStorageキー定義、および全件削除
+  onboarding-storage.ts   オンボーディング表示済みフラグのAsyncStorageキー定義、および読み書き
 ```
 
 ## `diary-encryption.ts` の構成
@@ -26,6 +27,14 @@ utils/
 
 - `DIARY_ENTRIES_STORAGE_KEY`: 日記データのAsyncStorageキーの定数。
 - `clearAllDiaryEntries()`: 日記データのみをAsyncStorageから`removeItem`で削除します。暗号鍵(`expo-secure-store`側)など日記データ以外のキーには影響しません。ストアのデータ削除要件(Google Play/Apple双方でユーザーによるデータ削除手段の提供が求められる)に対応するため、[`app/(tabs)/settings.tsx`](<../app/(tabs)/settings.tsx>)の確認ダイアログ付きボタンから呼び出されます。
+
+## `onboarding-storage.ts` の構成
+
+初回起動時のオンボーディング(使い方説明)を表示済みかどうかのフラグ(`onboarding-completed`)を、`app/_layout.tsx`(表示要否の判定)と共有するためのユーティリティです。
+
+- `ONBOARDING_COMPLETED_STORAGE_KEY`: フラグのAsyncStorageキーの定数。
+- `hasCompletedOnboarding()`: 表示済みかどうかを取得します。読み込みに失敗した場合は未表示(false)として扱います。
+- `markOnboardingCompleted()`: 表示済みとして記録します。[`components/onboarding.tsx`](../components/onboarding.tsx)で「スキップ」または最後のスライドの「はじめる」が押されたタイミングで、[`app/_layout.tsx`](<../app/_layout.tsx>)から呼び出されます。
 
 ## 関連ドキュメント
 

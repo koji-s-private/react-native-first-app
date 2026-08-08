@@ -9,6 +9,7 @@ components/
   external-link.tsx        外部URLを開くリンクコンポーネント
   haptic-tab.tsx            タップ時に触覚フィードバックを伴うタブボタン
   hello-wave.tsx             アニメーション付きの手を振るアイコン
+  onboarding.tsx             初回起動時に表示する使い方説明のオンボーディング画面
   parallax-scroll-view.tsx   ヘッダーがパララックスするスクロールビュー
   themed-text.tsx            ライト/ダークテーマに対応したTextコンポーネント
   themed-view.tsx             ライト/ダークテーマに対応したViewコンポーネント
