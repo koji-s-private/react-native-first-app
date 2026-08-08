@@ -820,6 +820,81 @@ describe('HomeScreen', () => {
       }
     });
 
+    it('still hides the toast after ~2.5s even if the user keeps editing the input while it is shown (regression: onHide must be a stable callback, not recreated on every render)', async () => {
+      jest.useFakeTimers();
+      try {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+        fireEvent.changeText(input, '自動的に消えるはずの日記');
+        fireEvent.press(screen.getByText('保存'));
+
+        await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalled());
+        expect(await screen.findByText('保存しました')).toBeTruthy();
+
+        // トースト表示中に、ユーザーが次の日記の入力を続ける(=onChangeTextのたびにHomeScreenが
+        // 再レンダーされる)。onHideが毎レンダーで再生成される実装だと、SaveToast側の
+        // useEffect(依存配列に[message, onHide])が再実行され続け、自動非表示タイマーが
+        // 都度張り直されてしまう(最初の表示から2.5秒経っても消えない)。
+        act(() => {
+          jest.advanceTimersByTime(1000);
+        });
+        fireEvent.changeText(input, '続');
+        act(() => {
+          jest.advanceTimersByTime(1000);
+        });
+        fireEvent.changeText(input, '続けて入力中');
+
+        // 最初にトーストが表示されてから合計2.5秒経過した時点(トースト表示中の編集を挟んでも)
+        // で自動的に消えることを確認する
+        act(() => {
+          jest.advanceTimersByTime(600);
+        });
+
+        await waitFor(() => expect(screen.queryByText('保存しました')).toBeNull());
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('hides the toast ~2.5s after it was first shown, even if the user saves another entry (without dismissing it first) while it is still visible', async () => {
+      jest.useFakeTimers();
+      try {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+
+        // 1件目を保存し、トーストを表示させる
+        fireEvent.changeText(input, '1件目の日記');
+        fireEvent.press(screen.getByText('保存'));
+        await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+        expect(await screen.findByText('保存しました')).toBeTruthy();
+
+        // トーストがまだ消えていない(2.5秒経過前の)タイミングで、消さずに続けて2件目を保存する
+        // (このアプリの保存成功メッセージは常に固定文言のため、setSaveToastMessageに渡す値自体は
+        // 変わらないが、保存に伴うHomeScreenの再レンダー自体は発生する)
+        act(() => {
+          jest.advanceTimersByTime(1000);
+        });
+        fireEvent.changeText(input, '2件目の日記');
+        fireEvent.press(screen.getByText('保存'));
+        await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(2));
+        expect(screen.getByText('保存しました')).toBeTruthy();
+
+        // 最初にトーストが表示されてから合計2.5秒経過した時点で、2件目の保存を挟んでいても
+        // 意図通り自動的に消える(onHideが安定した参照であるため、保存に伴う再レンダーで
+        // タイマーが余計に張り直されない)
+        act(() => {
+          jest.advanceTimersByTime(1600);
+        });
+        await waitFor(() => expect(screen.queryByText('保存しました')).toBeNull());
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('triggers a success haptic notification (Haptics.notificationAsync) after a successful save', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());

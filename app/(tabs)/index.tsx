@@ -307,6 +307,14 @@ export default function HomeScreen() {
     [entries],
   );
 
+  // トーストを非表示にする(SaveToastのuseEffectの依存配列に含まれるため、毎レンダーで
+  // 参照が変わらないようuseCallbackで安定化する。インライン関数のままだと、トースト表示中に
+  // ユーザーが入力欄を編集し続けるたびにHomeScreenが再レンダーされてonHideの参照が変わり、
+  // 自動非表示タイマーが張り直され続けてトーストが仕様通り2.5秒で消えなくなってしまう)
+  const handleHideSaveToast = useCallback(() => {
+    setSaveToastMessage(null);
+  }, []);
+
   // 削除ボタン押下時、誤操作防止のため確認ダイアログを挟んでから削除を実行する
   const handleDeletePress = useCallback(
     (entry: DiaryEntry) => {
@@ -463,7 +471,7 @@ export default function HomeScreen() {
           </View>
           {saveError ? <ThemedText style={styles.errorText}>{saveError}</ThemedText> : null}
           {saveToastMessage ? (
-            <SaveToast message={saveToastMessage} onHide={() => setSaveToastMessage(null)} />
+            <SaveToast message={saveToastMessage} onHide={handleHideSaveToast} />
           ) : null}
         </ThemedView>
 
