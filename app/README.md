@@ -10,6 +10,7 @@
 app/
   _layout.tsx          アプリ全体のレイアウト・初期化処理（テーマ、フォント読み込みなど）
   modal.tsx             モーダル画面
+  oss-licenses.tsx       OSSライセンス一覧画面
   (tabs)/
     _layout.tsx          タブナビゲーションの定義
     index.tsx            日記画面（ホームタブ）
@@ -20,8 +21,12 @@ app/
 
 `_layout.tsx` は、そのディレクトリ配下の画面に共通する「入れ物」を定義するファイルです。
 
-- `app/_layout.tsx`: アプリ全体のレイアウト。`ThemeProvider` によるライト/ダークテーマの切り替え、`Stack` によるスタックナビゲーションの定義（`(tabs)` と `modal` の2つの画面をスタックに登録）、スプラッシュ画面制御などを行っています。
+- `app/_layout.tsx`: アプリ全体のレイアウト。`ThemeProvider` によるライト/ダークテーマの切り替え、`Stack` によるスタックナビゲーションの定義（`(tabs)`・`modal`・`oss-licenses` の各画面をスタックに登録）、スプラッシュ画面制御などを行っています。
 - `app/(tabs)/_layout.tsx`: タブ画面群のレイアウト。`Tabs` コンポーネントでタブバーの見た目・アイコン・タイトルを定義しています。
+
+## `oss-licenses.tsx` の役割
+
+アプリが利用しているOSSライブラリのライセンス一覧を表示する画面です。表示内容は [`data/licenses.json`](../data/licenses.json)（`npm run generate-licenses` で `package.json` の `dependencies` から自動生成される静的ファイル）を読み込んで一覧表示しているだけで、実行時に依存関係を解析しているわけではありません。依存関係を追加・更新したら、コミット前に `npm run generate-licenses` を再実行してください。現時点ではこの画面への導線（設定画面などからのリンク）は未実装です。
 
 ## `(tabs)/` の役割
 

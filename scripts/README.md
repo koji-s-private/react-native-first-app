@@ -6,7 +6,8 @@
 
 ```
 scripts/
-  reset-project.js    プロジェクトをまっさらな状態にリセットするスクリプト
+  reset-project.js       プロジェクトをまっさらな状態にリセットするスクリプト
+  generate-licenses.js   OSSライセンス一覧(data/licenses.json)を生成するスクリプト
 ```
 
 ## `reset-project.js` の用途
@@ -25,6 +26,14 @@ npm run reset-project
 ```
 
 これは `node ./scripts/reset-project.js` を実行するのと同じです。
+
+## `generate-licenses.js` の用途
+
+`package.json` の `dependencies`（本番でアプリに同梱されるライブラリ）を対象に、`node_modules` 配下の各パッケージの `package.json` からライブラリ名・バージョン・ライセンス種別・リポジトリURLを収集し、[`data/licenses.json`](../data/licenses.json) を生成します。アプリ内の [OSSライセンス画面](../app/oss-licenses.tsx) はこの静的ファイルを読み込んで表示するだけなので、依存関係を追加・更新した場合は以下のコマンドを再実行し、差分をコミットしてください。
+
+```bash
+npm run generate-licenses
+```
 
 ## 新しいスクリプトを追加する場合
 
