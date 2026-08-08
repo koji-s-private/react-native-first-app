@@ -4,6 +4,7 @@ import { useFocusEffect } from 'expo-router';
 import type { ComponentProps } from 'react';
 import { useCallback, useMemo, useState } from 'react';
 import {
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -155,6 +156,10 @@ export default function HomeScreen() {
   const [saveError, setSaveError] = useState<string | null>(null);
   // 一覧表示用にタップされた日付('YYYY-MM-DD')。nullの間はモーダルを閉じている
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  // 編集中のエントリのid。nullの間は編集モーダルを閉じている
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
   // カレンダーの外枠(タイトル・入力欄・保存ボタンの下からタブバーの上までの残りスペースを
   // `flex: 1`で使い切るView)の実測高さ(onLayoutで取得)。この外枠自体に枠線・角丸を付け、
   // 日付グリッドの高さもこの実測値を基準に算出することで、外枠と日付グリッドの基準を一致させる
@@ -240,6 +245,87 @@ export default function HomeScreen() {
       setSaveError('保存に失敗しました。もう一度お試しください。');
     }
   }, [draft, entries]);
+
+  // 編集モーダルを開き、対象エントリの本文を編集用の下書きにセットする
+  const handleStartEdit = useCallback((entry: DiaryEntry) => {
+    setEditingEntryId(entry.id);
+    setEditDraft(entry.text);
+    setEditError(null);
+  }, []);
+
+  // 編集モーダルを閉じ、編集用の状態をリセットする
+  const handleCancelEdit = useCallback(() => {
+    setEditingEntryId(null);
+    setEditDraft('');
+    setEditError(null);
+  }, []);
+
+  const handleSaveEdit = useCallback(async () => {
+    const trimmed = editDraft.trim();
+    // 万が一上限を超えたテキストが渡ってきても保存しない(TextInput側のmaxLengthが主な防御線)
+    if (!editingEntryId || !trimmed || trimmed.length > BODY_MAX_LENGTH) {
+      return;
+    }
+
+    const previousEntries = entries;
+    // 対象エントリのtextのみを更新する(createdAtは変更しない)
+    const nextEntries = entries.map((entry) =>
+      entry.id === editingEntryId ? { ...entry, text: trimmed } : entry,
+    );
+
+    setEntries(nextEntries);
+    setEditError(null);
+
+    try {
+      const key = await getOrCreateEncryptionKey();
+      await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(nextEntries), key));
+      // 永続化に成功した場合のみ編集モーダルを閉じる
+      setEditingEntryId(null);
+      setEditDraft('');
+    } catch {
+      // 永続化に失敗した場合は保存前の状態に戻し、編集モーダルは開いたままエラーを伝える
+      setEntries(previousEntries);
+      setEditError('更新に失敗しました。もう一度お試しください。');
+    }
+  }, [editDraft, editingEntryId, entries]);
+
+  // 日付一覧モーダルを閉じる(開いていた編集モーダルがあれば合わせて閉じる)
+  const handleCloseDateModal = useCallback(() => {
+    setSelectedDate(null);
+    setEditingEntryId(null);
+    setEditDraft('');
+    setEditError(null);
+  }, []);
+
+  const handleDeleteEntry = useCallback(
+    async (entryId: string) => {
+      const previousEntries = entries;
+      const nextEntries = entries.filter((entry) => entry.id !== entryId);
+
+      setEntries(nextEntries);
+
+      try {
+        const key = await getOrCreateEncryptionKey();
+        await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(nextEntries), key));
+      } catch {
+        // 永続化に失敗した場合は削除前の状態に戻す
+        setEntries(previousEntries);
+        Alert.alert('削除に失敗しました', 'もう一度お試しください。');
+      }
+    },
+    [entries],
+  );
+
+  // 削除ボタン押下時、誤操作防止のため確認ダイアログを挟んでから削除を実行する
+  const handleDeletePress = useCallback(
+    (entry: DiaryEntry) => {
+      Alert.alert('日記を削除しますか?', 'この操作は取り消せません。', [
+        { text: 'キャンセル', style: 'cancel' },
+        { text: '削除', style: 'destructive', onPress: () => handleDeleteEntry(entry.id) },
+      ]);
+    },
+    [handleDeleteEntry],
+  );
 
   // 日付ごとに日記をまとめる(カレンダーセルへの表示・タップ時の一覧表示の両方で利用する)
   const entriesByDate = useMemo(() => {
@@ -432,7 +518,7 @@ export default function HomeScreen() {
           visible={selectedDate !== null}
           animationType="slide"
           transparent
-          onRequestClose={() => setSelectedDate(null)}
+          onRequestClose={handleCloseDateModal}
         >
           <View style={styles.modalOverlay}>
             <ThemedView style={[styles.modalContent, { borderColor: iconColor }]}>
@@ -440,7 +526,7 @@ export default function HomeScreen() {
                 <ThemedText type="subtitle">
                   {selectedDate ? formatDateHeading(selectedDate) : ''}
                 </ThemedText>
-                <Pressable onPress={() => setSelectedDate(null)}>
+                <Pressable onPress={handleCloseDateModal}>
                   <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
                     閉じる
                   </ThemedText>
@@ -451,13 +537,76 @@ export default function HomeScreen() {
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
                   <ThemedView style={[styles.entry, { borderBottomColor: iconColor }]}>
-                    <ThemedText style={styles.entryDate}>
-                      {formatEntryDateTime(item.createdAt)}
-                    </ThemedText>
+                    <View style={styles.entryHeader}>
+                      <ThemedText style={styles.entryDate}>
+                        {formatEntryDateTime(item.createdAt)}
+                      </ThemedText>
+                      <View style={styles.entryActions}>
+                        <Pressable onPress={() => handleStartEdit(item)} hitSlop={8}>
+                          <ThemedText style={[styles.entryActionText, { color: tintColor }]}>
+                            編集
+                          </ThemedText>
+                        </Pressable>
+                        <Pressable onPress={() => handleDeletePress(item)} hitSlop={8}>
+                          <ThemedText style={[styles.entryActionText, styles.entryDeleteText]}>
+                            削除
+                          </ThemedText>
+                        </Pressable>
+                      </View>
+                    </View>
                     <ThemedText>{item.text}</ThemedText>
                   </ThemedView>
                 )}
               />
+            </ThemedView>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={editingEntryId !== null}
+          animationType="slide"
+          transparent
+          onRequestClose={handleCancelEdit}
+        >
+          <View style={styles.modalOverlay}>
+            <ThemedView style={[styles.modalContent, { borderColor: iconColor }]}>
+              <View style={styles.modalHeader}>
+                <ThemedText type="subtitle">日記を編集</ThemedText>
+                <Pressable onPress={handleCancelEdit}>
+                  <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
+                    閉じる
+                  </ThemedText>
+                </Pressable>
+              </View>
+              <TextInput
+                style={[styles.input, { color: textColor, borderColor: tintColor }]}
+                value={editDraft}
+                onChangeText={setEditDraft}
+                multiline
+                maxLength={BODY_MAX_LENGTH}
+              />
+              <View style={styles.composerFooter}>
+                <ThemedText
+                  style={[
+                    styles.charCount,
+                    editDraft.length >= BODY_MAX_LENGTH
+                      ? { color: '#d32f2f' }
+                      : { color: iconColor },
+                  ]}
+                >
+                  {editDraft.length}/{BODY_MAX_LENGTH}
+                </ThemedText>
+                <Pressable
+                  style={[styles.saveButton, { backgroundColor: tintColor }]}
+                  onPress={handleSaveEdit}
+                  disabled={!editDraft.trim()}
+                >
+                  <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
+                    保存
+                  </ThemedText>
+                </Pressable>
+              </View>
+              {editError ? <ThemedText style={styles.errorText}>{editError}</ThemedText> : null}
             </ThemedView>
           </View>
         </Modal>
@@ -577,8 +726,24 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  entryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   entryDate: {
     fontSize: 12,
     opacity: 0.6,
+  },
+  entryActions: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  entryActionText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  entryDeleteText: {
+    color: '#d32f2f',
   },
 });
