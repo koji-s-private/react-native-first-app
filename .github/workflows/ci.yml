@@ -31,6 +31,9 @@ jobs:
       - name: フォーマットチェック(Prettier)
         run: npm run format:check
 
+      - name: 型チェック(TypeScript)
+        run: npx tsc --noEmit
+
       - name: テスト(Jest)
         run: npm test
 
