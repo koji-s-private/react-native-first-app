@@ -225,7 +225,9 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
 
     expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
     // AsyncStorage上のデータもそのまま残っている
-    expect(await AsyncStorage.getItem(DIARY_ENTRIES_STORAGE_KEY)).toBe('encrypted:v1:dummy-payload');
+    expect(await AsyncStorage.getItem(DIARY_ENTRIES_STORAGE_KEY)).toBe(
+      'encrypted:v1:dummy-payload',
+    );
   });
 
   it('deletes all diary data from AsyncStorage and shows a completion alert once confirmed (正常系: 削除の実行と完了通知)', async () => {
@@ -260,7 +262,10 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
     await pressAlertButton('削除する');
 
     await waitFor(() =>
-      expect(Alert.alert).toHaveBeenLastCalledWith('削除に失敗しました', 'もう一度お試しください。'),
+      expect(Alert.alert).toHaveBeenLastCalledWith(
+        '削除に失敗しました',
+        'もう一度お試しください。',
+      ),
     );
   });
 });
