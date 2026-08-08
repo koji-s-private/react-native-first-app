@@ -13,7 +13,7 @@ utils/
 
 日記本文が端末の紛失・盗難やOSのバックアップ機構経由で平文のまま読み取られないよう、`@react-native-async-storage/async-storage` に保存する前にAES-256-GCMで暗号化するためのユーティリティです。
 
-- `getOrCreateEncryptionKey()`: 暗号鍵を`expo-secure-store`(iOSはKeychain、AndroidはKeystore)から取得します。まだ存在しない場合は`expo-crypto`の`getRandomBytes()`(暗号学的に安全な乱数)で新規生成して保存します。
+- `getOrCreateEncryptionKey()`: 暗号鍵を取得します。まだ存在しない場合は`expo-crypto`の`getRandomBytes()`(暗号学的に安全な乱数)で新規生成して保存します。保存先はプラットフォームによって異なり、iOS/Androidは`expo-secure-store`(Keychain/Keystore)、Webは`expo-secure-store`が非対応のため代わりに`localStorage`を使います(Web版はKeychain/Keystoreほど安全ではありませんが、このアプリのWeb対応の範囲では許容しています)。
 - `encryptText(plainText, key)` / `decryptText(encoded, key)`: 実際の暗号化・復号を行う純粋関数です。外部I/Oを持たないため、鍵を直接渡してユニットテストできます。対称鍵暗号化そのものは依存が無く監査実績のある純粋JS実装のAES-GCMライブラリ[`@noble/ciphers`](https://github.com/paulmillr/noble-ciphers)で行います(`expo-crypto`はハッシュ・乱数生成用のAPIのみでAES実装は提供していないため)。
 - `isEncryptedPayload(value)`: 保存されている文字列が既に暗号化済みの形式(`'encrypted:v1:'`始まり)かどうかを判定します。暗号化対応前に保存された平文JSONとの後方互換マイグレーションに使います。
 
