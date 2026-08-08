@@ -35,12 +35,22 @@ jest.mock('expo-router', () => {
 // このファイル内での記述位置に関わらず、上のimportより先に評価される。
 jest.mock('@/data/licenses.json', () => [
   // 通常のエントリ(リポジトリURLあり)。最小構成(1件のみ)の境界値も兼ねる。
-  { name: 'single-lib', version: '1.0.0', license: 'MIT', repository: 'https://example.com/single-lib' },
+  {
+    name: 'single-lib',
+    version: '1.0.0',
+    license: 'MIT',
+    repository: 'https://example.com/single-lib',
+  },
   // `repository` フィールドが無いエントリ(異常系: 生成スクリプトがリポジトリ情報を
   // 取得できなかった場合を想定)。
   { name: 'no-repo-lib', version: '2.0.0', license: 'Apache-2.0' },
   // 別のエントリと同じライセンス種別を持つエントリ(名前・バージョンの取り違えが無いことの確認用)。
-  { name: 'shared-license-lib', version: '3.0.0', license: 'MIT', repository: 'https://example.com/shared' },
+  {
+    name: 'shared-license-lib',
+    version: '3.0.0',
+    license: 'MIT',
+    repository: 'https://example.com/shared',
+  },
 ]);
 
 describe('OssLicensesScreen (境界値・異常系: モックデータ)', () => {
