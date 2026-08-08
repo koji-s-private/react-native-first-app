@@ -1,8 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
-import { Alert, Text } from 'react-native';
+import { Alert, Platform, Text } from 'react-native';
 
 import SettingsScreen from '@/app/(tabs)/settings';
 import { SETTINGS_SECTIONS } from '@/constants/settings-menu';
@@ -18,6 +20,38 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
+
+// `expo-file-system/legacy`はJest環境ではネイティブモジュールが存在せず、`cacheDirectory`は
+// 常に`null`になる(実機のiOS/Androidではキャッシュディレクトリのパス文字列が入る)。
+// エクスポート機能の正常系(ファイル書き出し→共有)を検証するため、固定のパスと
+// 書き込み成功を返すモックに差し替える。
+//
+// `cacheDirectory`は一部のテストで`null`に上書きしたいが、`import * as FileSystem`は
+// Babelのwildcard importヘルパー(`_interopRequireWildcard`)によりファイルごとに別の
+// namespaceオブジェクトへコピーされるため、単純な文字列プロパティのままだと
+// このテストファイル側での代入が`app/(tabs)/settings.tsx`側のコピーには反映されない
+// (関数プロパティは参照コピーのため影響を受けないが、プリミティブ値は値コピーになるため)。
+// get/setアクセサとして定義し、実体を外側のクロージャ変数に持たせることで、
+// どちらのファイルのコピーを経由しても同じ実体を読み書きできるようにしている。
+jest.mock('expo-file-system/legacy', () => {
+  const state: { cacheDirectory: string | null } = { cacheDirectory: 'file:///mock-cache/' };
+  return {
+    get cacheDirectory() {
+      return state.cacheDirectory;
+    },
+    set cacheDirectory(value: string | null) {
+      state.cacheDirectory = value;
+    },
+    writeAsStringAsync: jest.fn(() => Promise.resolve()),
+  };
+});
+
+// `expo-sharing`もJest環境ではネイティブモジュールが存在せず、`isAvailableAsync`が常に`false`を
+// 返す(=共有不可)実際の挙動になってしまうため、共有可能なケースをテストできるよう明示的にモックする。
+jest.mock('expo-sharing', () => ({
+  isAvailableAsync: jest.fn(() => Promise.resolve(true)),
+  shareAsync: jest.fn(() => Promise.resolve()),
+}));
 
 // `ExternalLink`(内部で`expo-router`の`Link`を使う)や`Link`自体は、実機ではナビゲーション/
 // ルーターのコンテキストを必要とするため、画面を単体でレンダリングするこのテストでは利用できない。
@@ -267,5 +301,222 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
         'もう一度お試しください。',
       ),
     );
+  });
+});
+
+describe('日記データをエクスポートボタン(Issue #51: データ管理セクション)', () => {
+  const EXPORT_BUTTON_LABEL = '日記データをエクスポート';
+  const sampleEntriesJson = JSON.stringify([
+    { id: '1', text: '今日はいい天気でした。', createdAt: '2026-01-01T00:00:00.000Z' },
+    { id: '2', text: '公園を散歩しました。', createdAt: '2026-01-02T00:00:00.000Z' },
+  ]);
+
+  const originalPlatformOS = Platform.OS;
+
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    jest.clearAllMocks();
+    // 各テストごとにモックの既定挙動をリセットする(個別のテストで上書きするため)
+    (FileSystem as unknown as { cacheDirectory: string | null }).cacheDirectory =
+      'file:///mock-cache/';
+    (FileSystem.writeAsStringAsync as jest.Mock).mockResolvedValue(undefined);
+    (Sharing.isAvailableAsync as jest.Mock).mockResolvedValue(true);
+    (Sharing.shareAsync as jest.Mock).mockResolvedValue(undefined);
+    Platform.OS = originalPlatformOS;
+  });
+
+  afterEach(() => {
+    Platform.OS = originalPlatformOS;
+  });
+
+  it('renders the export button inside the "データ管理" section (操作導線の存在確認)', () => {
+    render(<SettingsScreen />);
+
+    expect(screen.getByText('データ管理')).toBeTruthy();
+    expect(screen.getByText(EXPORT_BUTTON_LABEL)).toBeTruthy();
+  });
+
+  it('shows an alert and does not touch the file system/sharing APIs when there are 0 diary entries (境界値: 0件)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(EXPORT_BUTTON_LABEL));
+    });
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'エクスポートできる日記データがありません',
+        '日記を書いてからもう一度お試しください。',
+      ),
+    );
+    expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(Sharing.isAvailableAsync).not.toHaveBeenCalled();
+    expect(Sharing.shareAsync).not.toHaveBeenCalled();
+  });
+
+  it('writes the JSON file to the cache directory and opens the native share sheet when there is data (正常系)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    // 暗号化対応前の平文JSON形式でも読み込めることを兼ねて確認するため、そのまま保存する
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, sampleEntriesJson);
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(EXPORT_BUTTON_LABEL));
+    });
+
+    await waitFor(() => expect(FileSystem.writeAsStringAsync).toHaveBeenCalledTimes(1));
+    const [fileUri, content] = (FileSystem.writeAsStringAsync as jest.Mock).mock.calls[0];
+    expect(fileUri).toMatch(/^file:\/\/\/mock-cache\/diary-export-\d{8}-\d{6}\.json$/);
+    expect(JSON.parse(content)).toEqual(JSON.parse(sampleEntriesJson));
+
+    await waitFor(() => expect(Sharing.isAvailableAsync).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(Sharing.shareAsync).toHaveBeenCalledTimes(1));
+    expect(Sharing.shareAsync).toHaveBeenCalledWith(fileUri, {
+      mimeType: 'application/json',
+      dialogTitle: '日記データをエクスポート',
+      UTI: 'public.json',
+    });
+
+    // 失敗系のAlertは呼ばれていないこと
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('shows an alert and does not call shareAsync when sharing is unavailable on the device (異常系)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, sampleEntriesJson);
+    (Sharing.isAvailableAsync as jest.Mock).mockResolvedValue(false);
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(EXPORT_BUTTON_LABEL));
+    });
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        '共有機能を利用できません',
+        'この端末では共有機能を利用できないため、エクスポートを完了できませんでした。',
+      ),
+    );
+    expect(Sharing.shareAsync).not.toHaveBeenCalled();
+  });
+
+  it('shows a failure alert when writing the export file fails (異常系: ファイル書き込み失敗)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, sampleEntriesJson);
+    (FileSystem.writeAsStringAsync as jest.Mock).mockRejectedValue(new Error('disk full'));
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(EXPORT_BUTTON_LABEL));
+    });
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'エクスポートに失敗しました',
+        'もう一度お試しください。',
+      ),
+    );
+    expect(Sharing.shareAsync).not.toHaveBeenCalled();
+  });
+
+  it('shows a failure alert when the share sheet itself fails (異常系: 共有失敗)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, sampleEntriesJson);
+    (Sharing.shareAsync as jest.Mock).mockRejectedValue(new Error('share cancelled'));
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(EXPORT_BUTTON_LABEL));
+    });
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'エクスポートに失敗しました',
+        'もう一度お試しください。',
+      ),
+    );
+  });
+
+  it('shows a failure alert when the cache directory is unavailable (境界値: FileSystem.cacheDirectoryがnull)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, sampleEntriesJson);
+    (FileSystem as unknown as { cacheDirectory: string | null }).cacheDirectory = null;
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(EXPORT_BUTTON_LABEL));
+    });
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'エクスポートに失敗しました',
+        'もう一度お試しください。',
+      ),
+    );
+    expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
+  });
+
+  describe('Web版(Platform.OS === "web")', () => {
+    // Webはexpo-file-system/expo-sharingの双方に対応していないため、実装はBlob + <a download>による
+    // ブラウザ標準ダウンロードにフォールバックする。Jest環境(Node)には`document`が存在しないため、
+    // `click`呼び出しを検証できる最小限のモックを用意する。
+    // また、`URL.createObjectURL`/`revokeObjectURL`はexpoがJestにも登録するポリフィル
+    // (expo/src/winter/url.ts)に差し替わっており、実機のネイティブ`BlobModule`を前提とするため
+    // Jest環境でそのまま呼ぶと`Cannot read properties of undefined (reading 'BlobModule')`で
+    // 例外になる。ブラウザの実際の挙動を模した最小限のモックに差し替える。
+    let createdAnchor: { href: string; download: string; click: jest.Mock };
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+
+    beforeEach(() => {
+      Platform.OS = 'web';
+      createdAnchor = { href: '', download: '', click: jest.fn() };
+      (global as unknown as { document: Document }).document = {
+        createElement: jest.fn(() => createdAnchor),
+      } as unknown as Document;
+      URL.createObjectURL = jest.fn(() => 'blob:mock-url');
+      URL.revokeObjectURL = jest.fn();
+    });
+
+    afterEach(() => {
+      delete (global as unknown as { document?: Document }).document;
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
+    });
+
+    it('triggers a browser download instead of calling expo-file-system/expo-sharing (正常系: Webフォールバック)', async () => {
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, sampleEntriesJson);
+      render(<SettingsScreen />);
+
+      await act(async () => {
+        fireEvent.press(screen.getByText(EXPORT_BUTTON_LABEL));
+      });
+
+      await waitFor(() => expect(createdAnchor.click).toHaveBeenCalledTimes(1));
+      expect(createdAnchor.download).toMatch(/^diary-export-\d{8}-\d{6}\.json$/);
+      expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
+      expect(Sharing.isAvailableAsync).not.toHaveBeenCalled();
+      expect(Sharing.shareAsync).not.toHaveBeenCalled();
+      expect(Alert.alert).not.toHaveBeenCalled();
+    });
+
+    it('shows the empty-data alert without touching the DOM when there are 0 entries (境界値: Web版0件)', async () => {
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      render(<SettingsScreen />);
+
+      await act(async () => {
+        fireEvent.press(screen.getByText(EXPORT_BUTTON_LABEL));
+      });
+
+      await waitFor(() =>
+        expect(Alert.alert).toHaveBeenCalledWith(
+          'エクスポートできる日記データがありません',
+          '日記を書いてからもう一度お試しください。',
+        ),
+      );
+      expect(createdAnchor.click).not.toHaveBeenCalled();
+    });
   });
 });
