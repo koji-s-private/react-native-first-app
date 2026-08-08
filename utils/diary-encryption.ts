@@ -2,6 +2,10 @@
 //
 // - 暗号鍵はexpo-secure-store(iOSはKeychain、AndroidはKeystore)にのみ保存し、平文の日記本文が
 //   端末のバックアップ機構等を通じて第三者に読み取られるリスクを減らす。
+//   ただしexpo-secure-storeはWebプラットフォームに対応しておらず(ネイティブモジュールが存在しない
+//   ため呼び出すとUnavailabilityErrorを投げる)、Web版では代わりに`localStorage`へ保存する。
+//   Web版はKeychain/Keystoreほど安全ではない(XSS等で読み取られ得る)が、このアプリのWeb対応の
+//   範囲ではその制約を許容する。
 // - 実際の対称鍵暗号化にはexpo-crypto(乱数生成用のAPIのみでAES実装は提供していない)ではなく、
 //   依存が無く監査実績のある純粋JS実装のAES-GCMライブラリ`@noble/ciphers`を利用する。
 // - 鍵・nonce(IV)の生成にはexpo-cryptoの`getRandomBytes`(暗号学的に安全な乱数)を使う。
@@ -11,6 +15,7 @@
 // 鍵を直接渡して検証できる。
 import { getRandomBytes } from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 import { gcm } from '@noble/ciphers/aes.js';
 import { bytesToUtf8, utf8ToBytes } from '@noble/ciphers/utils.js';
@@ -74,16 +79,42 @@ function base64ToBytes(base64: string): Uint8Array {
   return new Uint8Array(bytes);
 }
 
-// SecureStoreから暗号鍵を取得する。まだ存在しない場合は暗号学的に安全な乱数で新規生成し、
-// SecureStore(iOS: Keychain, Android: Keystore)へ保存してから返す。
+// 暗号鍵の保存先から既存の鍵(base64文字列)を読み込む。
+// Webはexpo-secure-storeに対応していないため`localStorage`から、それ以外(iOS/Android)は
+// expo-secure-store(Keychain/Keystore)から読み込む。
+async function readStoredKey(): Promise<string | null> {
+  if (Platform.OS === 'web') {
+    // SSR等でlocalStorageが存在しない環境も考慮し、存在チェックしてから使う
+    if (typeof localStorage === 'undefined') {
+      return null;
+    }
+    return localStorage.getItem(ENCRYPTION_KEY_STORAGE_KEY);
+  }
+  return SecureStore.getItemAsync(ENCRYPTION_KEY_STORAGE_KEY);
+}
+
+// 暗号鍵の保存先へ新規生成した鍵(base64文字列)を書き込む(readStoredKeyの逆操作)。
+async function writeStoredKey(value: string): Promise<void> {
+  if (Platform.OS === 'web') {
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+    localStorage.setItem(ENCRYPTION_KEY_STORAGE_KEY, value);
+    return;
+  }
+  await SecureStore.setItemAsync(ENCRYPTION_KEY_STORAGE_KEY, value);
+}
+
+// 暗号鍵を取得する。まだ存在しない場合は暗号学的に安全な乱数で新規生成し、保存してから返す。
+// 保存先はプラットフォームによって異なる(readStoredKey/writeStoredKeyのコメント参照)。
 export async function getOrCreateEncryptionKey(): Promise<Uint8Array> {
-  const stored = await SecureStore.getItemAsync(ENCRYPTION_KEY_STORAGE_KEY);
+  const stored = await readStoredKey();
   if (stored) {
     return base64ToBytes(stored);
   }
 
   const newKey = getRandomBytes(KEY_LENGTH_BYTES);
-  await SecureStore.setItemAsync(ENCRYPTION_KEY_STORAGE_KEY, bytesToBase64(newKey));
+  await writeStoredKey(bytesToBase64(newKey));
   return newKey;
 }
 

@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 import {
   decryptText,
@@ -190,6 +191,79 @@ describe('utils/diary-encryption', () => {
       secureStoreMock.__reset();
       const second = await getOrCreateEncryptionKey();
       expect(Array.from(second)).not.toEqual(Array.from(first));
+    });
+  });
+
+  describe('getOrCreateEncryptionKey on Web (Platform.OS === "web")', () => {
+    // expo-secure-storeはWebプラットフォームに対応していないため(ネイティブモジュールが無く
+    // 呼び出すとエラーになる)、Web版では代わりにlocalStorageを使う実装になっている。
+    // `Platform.OS`はテスト間で状態を共有するモジュールレベルの値のため、変更したテストの後は
+    // 必ず元の値(デフォルトの'ios')へ戻す。
+    const originalPlatformOS = Platform.OS;
+    let store: Record<string, string>;
+
+    beforeEach(() => {
+      Platform.OS = 'web';
+      // テスト実行環境(Node)には`localStorage`が存在しないため、最小限のインメモリ実装を用意する
+      store = {};
+      (global as unknown as { localStorage: Storage }).localStorage = {
+        getItem: jest.fn((key: string) => store[key] ?? null),
+        setItem: jest.fn((key: string, value: string) => {
+          store[key] = value;
+        }),
+        removeItem: jest.fn((key: string) => {
+          delete store[key];
+        }),
+        clear: jest.fn(() => {
+          store = {};
+        }),
+        key: jest.fn(() => null),
+        length: 0,
+      } as unknown as Storage;
+    });
+
+    afterEach(() => {
+      Platform.OS = originalPlatformOS;
+      delete (global as unknown as { localStorage?: Storage }).localStorage;
+    });
+
+    it('does not call expo-secure-store on web', async () => {
+      await getOrCreateEncryptionKey();
+      expect(SecureStore.getItemAsync).not.toHaveBeenCalled();
+      expect(SecureStore.setItemAsync).not.toHaveBeenCalled();
+    });
+
+    it('generates a 256-bit (32-byte) key', async () => {
+      const key = await getOrCreateEncryptionKey();
+      expect(key).toBeInstanceOf(Uint8Array);
+      expect(key.length).toBe(32);
+    });
+
+    it('persists the generated key to localStorage and returns the same key on subsequent calls', async () => {
+      const first = await getOrCreateEncryptionKey();
+      const second = await getOrCreateEncryptionKey();
+      expect(Array.from(second)).toEqual(Array.from(first));
+      expect(localStorage.setItem).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns a key usable to decrypt text encrypted with a previously created key (localStorage persistence round trip)', async () => {
+      const key = await getOrCreateEncryptionKey();
+      const encrypted = encryptText('Web版の鍵の永続化テスト', key);
+
+      const keyAfterReload = await getOrCreateEncryptionKey();
+      expect(decryptText(encrypted, keyAfterReload)).toBe('Web版の鍵の永続化テスト');
+    });
+
+    it('generates a new, different key once localStorage is cleared (simulating a fresh browser profile)', async () => {
+      const first = await getOrCreateEncryptionKey();
+      localStorage.clear();
+      const second = await getOrCreateEncryptionKey();
+      expect(Array.from(second)).not.toEqual(Array.from(first));
+    });
+
+    it('does not throw even if localStorage is unavailable (e.g. during SSR, boundary)', async () => {
+      delete (global as unknown as { localStorage?: Storage }).localStorage;
+      await expect(getOrCreateEncryptionKey()).resolves.toBeInstanceOf(Uint8Array);
     });
   });
 });
