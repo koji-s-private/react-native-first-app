@@ -194,6 +194,37 @@ describe('utils/diary-encryption', () => {
     });
   });
 
+  describe('getOrCreateEncryptionKey on Android (Platform.OS === "android", boundary)', () => {
+    // Web以外(iOS/Android)では従来通りSecureStoreを使う実装になっている。
+    // 上の describe('getOrCreateEncryptionKey') は既定値(jest-expoの既定は'ios')でこれを検証しているが、
+    // 実装は`Platform.OS === 'web'`かどうかのみで分岐するため、'android'でも同じ経路(SecureStore)を
+    // 通ることを明示的に確認する境界値テスト。
+    const originalPlatformOS = Platform.OS;
+
+    beforeEach(() => {
+      Platform.OS = 'android';
+    });
+
+    afterEach(() => {
+      Platform.OS = originalPlatformOS;
+    });
+
+    it('uses expo-secure-store, not localStorage, on android', async () => {
+      const key = await getOrCreateEncryptionKey();
+      expect(key).toBeInstanceOf(Uint8Array);
+      expect(key.length).toBe(32);
+      expect(SecureStore.getItemAsync).toHaveBeenCalledWith('diary-encryption-key');
+      expect(SecureStore.setItemAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it('persists the generated key to SecureStore and returns the same key on subsequent calls', async () => {
+      const first = await getOrCreateEncryptionKey();
+      const second = await getOrCreateEncryptionKey();
+      expect(Array.from(second)).toEqual(Array.from(first));
+      expect(SecureStore.setItemAsync).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('getOrCreateEncryptionKey on Web (Platform.OS === "web")', () => {
     // expo-secure-storeはWebプラットフォームに対応していないため(ネイティブモジュールが無く
     // 呼び出すとエラーになる)、Web版では代わりにlocalStorageを使う実装になっている。
