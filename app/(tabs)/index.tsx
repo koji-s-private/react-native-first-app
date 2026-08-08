@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { randomUUID } from 'expo-crypto';
+import { useFocusEffect } from 'expo-router';
 import type { ComponentProps } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -25,8 +26,11 @@ import {
   getOrCreateEncryptionKey,
   isEncryptedPayload,
 } from '@/utils/diary-encryption';
+import { DIARY_ENTRIES_STORAGE_KEY } from '@/utils/diary-storage';
 
-const STORAGE_KEY = 'diary-entries';
+// 日記データのAsyncStorageキーは、設定画面からの全件削除機能(utils/diary-storage.ts)と
+// 共有するため、そちらで定義した定数を参照する
+const STORAGE_KEY = DIARY_ENTRIES_STORAGE_KEY;
 
 type DiaryEntry = {
   id: string;
@@ -162,26 +166,41 @@ export default function HomeScreen() {
   const backgroundColor = useThemeColor({}, 'background');
   const iconColor = useThemeColor({}, 'icon');
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const stored = await AsyncStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          if (isEncryptedPayload(stored)) {
-            const key = await getOrCreateEncryptionKey();
-            setEntries(JSON.parse(decryptText(stored, key)) as DiaryEntry[]);
-          } else {
-            // 暗号化対応前に保存された平文JSON(後方互換)。そのまま読み込んで表示し、
-            // 次回保存時から暗号化形式に移行する
-            setEntries(JSON.parse(stored) as DiaryEntry[]);
-          }
-        }
-      } catch {
-        // ストレージが壊れている・スキーマ不整合・復号失敗の場合は空の状態から始める
+  const loadEntries = useCallback(async () => {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_KEY);
+      if (!stored) {
+        // 他画面(設定タブの全件削除等)によってAsyncStorageが空になっている場合も含めて、
+        // ここで必ず最新の状態(空)にstateを揃える
         setEntries([]);
+        return;
       }
-    })();
+      if (isEncryptedPayload(stored)) {
+        const key = await getOrCreateEncryptionKey();
+        setEntries(JSON.parse(decryptText(stored, key)) as DiaryEntry[]);
+      } else {
+        // 暗号化対応前に保存された平文JSON(後方互換)。そのまま読み込んで表示し、
+        // 次回保存時から暗号化形式に移行する
+        setEntries(JSON.parse(stored) as DiaryEntry[]);
+      }
+    } catch {
+      // ストレージが壊れている・スキーマ不整合・復号失敗の場合は空の状態から始める
+      setEntries([]);
+    }
   }, []);
+
+  // expo-routerの`Tabs`はデフォルトで一度訪れたタブ画面をアンマウントせず保持するため、
+  // マウント時に一度だけ読み込む`useEffect`だと、設定タブでの全件削除のように他画面から
+  // AsyncStorageが書き換えられても、この画面のstateには反映されないまま残ってしまう
+  // (その状態で新しい日記を保存すると、stateに残っていた削除前の古いエントリを含めて
+  // 上書き保存してしまい、削除したはずのデータが復活する)。
+  // `useFocusEffect`でタブにフォーカスが当たるたびに読み込み直すことで、この不整合を防ぐ
+  // (初回マウント時にフォーカスされている場合も含めて発火するため、従来のマウント時読み込みも兼ねる)。
+  useFocusEffect(
+    useCallback(() => {
+      loadEntries();
+    }, [loadEntries]),
+  );
 
   const handleSave = useCallback(async () => {
     const trimmed = draft.trim();

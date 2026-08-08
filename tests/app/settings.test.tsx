@@ -1,10 +1,23 @@
-import { render, screen, within } from '@testing-library/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
-import { Text } from 'react-native';
+import { Alert, Text } from 'react-native';
 
 import SettingsScreen from '@/app/(tabs)/settings';
 import { SETTINGS_SECTIONS } from '@/constants/settings-menu';
+import { DIARY_ENTRIES_STORAGE_KEY } from '@/utils/diary-storage';
+
+// `settings.tsx`は削除ボタンから`clearAllDiaryEntries`(内部で`AsyncStorage.removeItem`を呼ぶ)を
+// 利用するようになったため、ネイティブの`AsyncStorage`モジュールが存在しないJest環境では
+// `NativeModule: AsyncStorage is null`エラーになる。`tests/app/index.test.tsx`と同様、
+// パッケージ公式のインメモリモックに差し替える。
+jest.mock('@react-native-async-storage/async-storage', () =>
+  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
+  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+);
 
 // `ExternalLink`(内部で`expo-router`の`Link`を使う)や`Link`自体は、実機ではナビゲーション/
 // ルーターのコンテキストを必要とするため、画面を単体でレンダリングするこのテストでは利用できない。
@@ -147,5 +160,112 @@ describe('SETTINGS_SECTIONS data integrity (境界値・異常系)', () => {
       const itemKeys = section.items.map((item) => item.key);
       expect(new Set(itemKeys).size).toBe(itemKeys.length);
     }
+  });
+});
+
+describe('日記データを全件削除ボタン(Issue #103: データ管理セクション)', () => {
+  const DELETE_BUTTON_LABEL = '日記データを全件削除';
+  const CONFIRM_DIALOG_TITLE = '日記データを削除しますか?';
+  const CONFIRM_DIALOG_MESSAGE =
+    'この端末に保存されているすべての日記データが削除されます。この操作は取り消せません。';
+
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    jest.clearAllMocks();
+  });
+
+  // Alert.alertは実機ではネイティブダイアログを表示するが、テスト環境では
+  // jest.spyOnでモック化した上で、直近の呼び出しに渡されたボタン定義から
+  // 指定ラベルのonPressを直接呼び出すことで「ユーザーがそのボタンをタップした」ことを模倣する。
+  // onPress自体が状態更新を伴う非同期処理(handleDelete)を呼び出すため、actで包んで
+  // Reactのバッチ更新がテスト側に反映されるのを待つ。
+  async function pressAlertButton(label: string) {
+    const alertMock = Alert.alert as jest.Mock;
+    const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
+    const buttons = lastCall[2] as { text: string; onPress?: () => void }[];
+    const button = buttons.find((b) => b.text === label);
+    expect(button).toBeDefined();
+    await act(async () => {
+      button?.onPress?.();
+    });
+  }
+
+  it('renders a "データ管理" section containing the delete-all button (操作導線の存在確認)', () => {
+    render(<SettingsScreen />);
+
+    expect(screen.getByText('データ管理')).toBeTruthy();
+    expect(screen.getByText(DELETE_BUTTON_LABEL)).toBeTruthy();
+  });
+
+  it('shows a confirmation dialog with cancel/delete options when pressed, and does not delete anything yet (確認ダイアログの表示)', () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    render(<SettingsScreen />);
+
+    fireEvent.press(screen.getByText(DELETE_BUTTON_LABEL));
+
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+    const [title, message, buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+    expect(title).toBe(CONFIRM_DIALOG_TITLE);
+    expect(message).toBe(CONFIRM_DIALOG_MESSAGE);
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0]).toMatchObject({ text: 'キャンセル', style: 'cancel' });
+    expect(buttons[1]).toMatchObject({ text: '削除する', style: 'destructive' });
+
+    // ダイアログを表示しただけの段階では削除処理はまだ呼ばれていない
+    expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
+  });
+
+  it('deletes nothing when the cancel button is pressed (キャンセル時は削除されない)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, 'encrypted:v1:dummy-payload');
+    render(<SettingsScreen />);
+
+    fireEvent.press(screen.getByText(DELETE_BUTTON_LABEL));
+    await pressAlertButton('キャンセル');
+
+    expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
+    // AsyncStorage上のデータもそのまま残っている
+    expect(await AsyncStorage.getItem(DIARY_ENTRIES_STORAGE_KEY)).toBe(
+      'encrypted:v1:dummy-payload',
+    );
+  });
+
+  it('deletes all diary data from AsyncStorage and shows a completion alert once confirmed (正常系: 削除の実行と完了通知)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    // 削除前に実際に日記データが保存されている状態を用意する
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, 'encrypted:v1:dummy-payload');
+    render(<SettingsScreen />);
+
+    fireEvent.press(screen.getByText(DELETE_BUTTON_LABEL));
+    await pressAlertButton('削除する');
+
+    await waitFor(() =>
+      expect(AsyncStorage.removeItem).toHaveBeenCalledWith(DIARY_ENTRIES_STORAGE_KEY),
+    );
+    // 受け入れ条件: 削除後、AsyncStorageから該当データが実際に消えていること
+    expect(await AsyncStorage.getItem(DIARY_ENTRIES_STORAGE_KEY)).toBeNull();
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenLastCalledWith(
+        '削除が完了しました',
+        '保存されていた日記データをすべて削除しました。',
+      ),
+    );
+  });
+
+  it('shows a failure alert (and does not crash) when AsyncStorage.removeItem rejects (異常系: 削除失敗時のフィードバック)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    jest.spyOn(AsyncStorage, 'removeItem').mockRejectedValueOnce(new Error('delete failed'));
+    render(<SettingsScreen />);
+
+    fireEvent.press(screen.getByText(DELETE_BUTTON_LABEL));
+    await pressAlertButton('削除する');
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenLastCalledWith(
+        '削除に失敗しました',
+        'もう一度お試しください。',
+      ),
+    );
   });
 });

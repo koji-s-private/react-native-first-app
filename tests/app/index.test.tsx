@@ -36,7 +36,21 @@ jest.mock('expo-router', () => {
   Link.Menu = PassThrough;
   Link.MenuAction = LinkMenuAction;
 
-  return { Link };
+  // `jest.mock`の巻き上げの都合によりファクトリ内で`require()`を使う必要がある
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ReactForMock = require('react');
+
+  // 本物の`useFocusEffect`(expo-router内部で`useNavigation()`を要求する)は、
+  // このテストのようにNavigationContainer/expo-routerのコンテキスト無しで画面を
+  // 単体レンダリングする環境では利用できないため、マウント時に一度だけ発火する
+  // 簡易モックに差し替える。「タブに再フォーカスして読み込み直す」挙動を検証したい
+  // テストでは、下の`persists diary entries...`と同様にunmount/再mountすることで、
+  // このモックからも再度effectを発火させて模倣する。
+  function useFocusEffect(effect: () => void) {
+    ReactForMock.useEffect(effect, [effect]);
+  }
+
+  return { Link, useFocusEffect };
 });
 
 // `jest-expo` が自動生成する expo-crypto のモック(node_modules/expo-crypto/mocks/ExpoCrypto.ts)は
@@ -491,6 +505,40 @@ describe('HomeScreen', () => {
 
       render(<HomeScreen />);
       expect(await screen.findByText('再起動後も読める日記')).toBeTruthy();
+    });
+
+    it('reloads from AsyncStorage when the screen regains focus, so data deleted elsewhere (e.g. from the settings tab) is not resurrected by a later save (regression for Issue #103 tab state bug)', async () => {
+      const now = new Date();
+      const key = await getOrCreateEncryptionKey();
+      const storedEntries = [
+        { id: 'old', text: '削除されるはずの日記', createdAt: isoAt(now, now.getDate(), 0, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(storedEntries), key));
+
+      // 日記タブを開いて表示する(expo-routerのTabsは実機ではこの画面をアンマウントしないが、
+      // このテストのモックではフォーカス再取得を模すために一度unmountし、下で再度renderする)
+      const { unmount } = render(<HomeScreen />);
+      await screen.findByText('削除されるはずの日記');
+      unmount();
+
+      // 設定タブでの「日記データを全件削除」操作を模して、AsyncStorageを直接空にする
+      await AsyncStorage.removeItem(STORAGE_KEY);
+
+      // 日記タブに戻ってくる(再フォーカス)と、保持していたstateではなくAsyncStorageを読み直す
+      render(<HomeScreen />);
+      await waitFor(() => expect(screen.queryByText('削除されるはずの日記')).toBeNull());
+      expect(screen.getByText(EMPTY_STATE_TEXT)).toBeTruthy();
+
+      // 新しい日記を保存しても、stateに残っていた削除済みの古いエントリが復活しない
+      fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '新しい日記');
+      fireEvent.press(screen.getByText('保存'));
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalled());
+      const setItemMock = AsyncStorage.setItem as jest.Mock;
+      const [, value] = setItemMock.mock.calls[setItemMock.mock.calls.length - 1];
+      const persisted = (await decryptPersistedEntries(value)) as { text: string }[];
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0].text).toBe('新しい日記');
     });
 
     it('saves a new entry, persists it to AsyncStorage encrypted, and shows it together with an existing entry for the same day', async () => {
