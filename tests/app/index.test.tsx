@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { randomUUID } from 'expo-crypto';
+import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
@@ -74,6 +75,15 @@ jest.mock('expo-crypto', () => {
 // 状態を永続化しない。そのままだと`getOrCreateEncryptionKey`が呼び出すたびに異なる鍵を
 // 新規生成してしまい、保存→再読み込みの暗号化ラウンドトリップを検証できないため、
 // インメモリでキーと値を保持する独自モックに差し替える。
+// 保存成功時のハプティックフィードバック(Issue #55)を検証しやすくするため、
+// jest-expoのオートモック(実際のネイティブモジュール呼び出しを模した薄いjest.fn())ではなく、
+// 呼び出し引数を明示的にアサートしやすい独自モックに差し替える
+// (他のexpo系モジュールと同様、`jest.mock`の巻き上げの都合によりファクトリ内は自己完結させる)。
+jest.mock('expo-haptics', () => ({
+  notificationAsync: jest.fn(() => Promise.resolve()),
+  NotificationFeedbackType: { Success: 'success' },
+}));
+
 jest.mock('expo-secure-store', () => {
   let store: Record<string, string> = {};
   return {
@@ -142,6 +152,7 @@ jest.mock('react-native/Libraries/Components/Keyboard/KeyboardAvoidingView', () 
 });
 
 const mockRandomUUID = randomUUID as jest.Mock;
+const mockNotificationAsync = Haptics.notificationAsync as jest.Mock;
 // 上で定義した`__reset`にアクセスするための型付け直し
 const secureStoreMock = SecureStore as unknown as { __reset: () => void };
 
@@ -760,6 +771,82 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText('1件目'));
       expect(await screen.findByText('2件目')).toBeTruthy();
       expect(screen.getByText('3件目')).toBeTruthy();
+    });
+  });
+
+  describe('保存成功時のフィードバック(Issue #55)', () => {
+    // 実装(`app/(tabs)/index.tsx`)はハプティックを`process.env.EXPO_OS === 'ios'`の条件下でのみ
+    // 発火させるが、`process.env.EXPO_OS`はbabel-preset-expo(jest-expoのデフォルト設定では
+    // `platform: 'ios'`固定)によってビルド時にリテラル値へインライン化されるため、
+    // テスト実行中に`process.env.EXPO_OS`を書き換えても実装側の分岐には反映されない
+    // (jest-expo/jest-preset.jsのbabelOpts参照)。そのため、iOS向けにインライン化された
+    // 状態(=常にiOS相当として振る舞う)でのハプティック発火のみを検証する。
+    it('shows a toast with a success message, exposed via accessibilityLiveRegion="polite", after a successful save', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      expect(screen.queryByText('保存しました')).toBeNull();
+
+      fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '通知確認用の日記');
+      fireEvent.press(screen.getByText('保存'));
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalled());
+
+      const toastMessage = await screen.findByText('保存しました');
+      expect(toastMessage).toBeTruthy();
+      const toast = screen.getByTestId('save-toast');
+      expect(toast.props.accessibilityLiveRegion).toBe('polite');
+    });
+
+    it('automatically hides the success toast after a few seconds', async () => {
+      jest.useFakeTimers();
+      try {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '自動的に消える日記');
+        fireEvent.press(screen.getByText('保存'));
+
+        await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalled());
+        expect(await screen.findByText('保存しました')).toBeTruthy();
+
+        act(() => {
+          jest.advanceTimersByTime(3000);
+        });
+
+        await waitFor(() => expect(screen.queryByText('保存しました')).toBeNull());
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('triggers a success haptic notification (Haptics.notificationAsync) after a successful save', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), 'ハプティック確認用');
+      fireEvent.press(screen.getByText('保存'));
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalled());
+      await waitFor(() =>
+        expect(mockNotificationAsync).toHaveBeenCalledWith(
+          Haptics.NotificationFeedbackType.Success,
+        ),
+      );
+    });
+
+    it('does not show the success toast or trigger a haptic notification when the save fails', async () => {
+      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '失敗するはずの日記');
+      fireEvent.press(screen.getByText('保存'));
+
+      expect(await screen.findByText('保存に失敗しました。もう一度お試しください。')).toBeTruthy();
+      expect(screen.queryByText('保存しました')).toBeNull();
+      expect(mockNotificationAsync).not.toHaveBeenCalled();
     });
   });
 

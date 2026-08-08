@@ -11,6 +11,7 @@ components/
   hello-wave.tsx             アニメーション付きの手を振るアイコン
   onboarding.tsx             初回起動時に表示する使い方説明のオンボーディング画面
   parallax-scroll-view.tsx   ヘッダーがパララックスするスクロールビュー
+  save-toast.tsx             保存成功時などに一時的なフィードバックを表示するトースト(スナックバー)
   themed-text.tsx            ライト/ダークテーマに対応したTextコンポーネント
   themed-view.tsx             ライト/ダークテーマに対応したViewコンポーネント
   ui/
