@@ -1,10 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { randomUUID } from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
-import { Platform, StyleSheet } from 'react-native';
+import { Alert, Platform, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import HomeScreen from '@/app/(tabs)/index';
@@ -1149,6 +1149,355 @@ describe('HomeScreen', () => {
 
       const expected = `${now.getFullYear()}/${padTwo(now.getMonth() + 1)}/${padTwo(dayWithEntry)} 09:30`;
       expect(await screen.findByText(expected)).toBeTruthy();
+    });
+  });
+
+  describe('日記エントリの編集(Issue #33)', () => {
+    // 編集モーダルの保存ボタンは、メインの入力欄(composer)の保存ボタンと同じ文言「保存」を使うため、
+    // `getByText('保存')`だと2件ヒットしてしまう。JSXの描画順(composerの保存ボタンが先、
+    // 編集モーダルの保存ボタンが後)に依存して2件目を編集モーダル側として取得する。
+    function getEditSaveButton() {
+      const saveButtons = screen.getAllByText('保存');
+      expect(saveButtons).toHaveLength(2);
+      return saveButtons[1];
+    }
+
+    it('opens the edit modal with the existing text prefilled when the edit button is pressed (正常系)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('編集前の日記');
+      fireEvent.press(screen.getByText('編集前の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      fireEvent.press(screen.getByText('編集'));
+
+      expect(await screen.findByText('日記を編集')).toBeTruthy();
+      // 既存の本文が編集用の入力欄にそのまま表示されている
+      expect(screen.getByDisplayValue('編集前の日記')).toBeTruthy();
+    });
+
+    it('closes the edit modal without saving when its close button is pressed', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '編集キャンセル対象', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('編集キャンセル対象');
+      fireEvent.press(screen.getByText('編集キャンセル対象'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      fireEvent.press(screen.getByText('編集'));
+      await screen.findByText('日記を編集');
+
+      // 編集モーダル自身の「閉じる」ボタンを押す(日付一覧モーダルとは別の閉じるボタン)
+      const closeButtons = screen.getAllByText(CLOSE_BUTTON_TEXT);
+      fireEvent.press(closeButtons[closeButtons.length - 1]);
+
+      await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
+      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+      // 変更されずに元のテキストのまま残っている
+      expect(screen.getAllByText('編集キャンセル対象').length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('updates the entry text (keeping createdAt unchanged), refreshes the list, and persists it encrypted when the edit is saved (正常系)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const createdAt = isoAt(now, dayWithEntry, 9, 0);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt }]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('編集前の日記');
+      fireEvent.press(screen.getByText('編集前の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+      fireEvent.press(screen.getByText('編集'));
+      await screen.findByText('日記を編集');
+
+      const editInput = screen.getByDisplayValue('編集前の日記');
+      fireEvent.changeText(editInput, '編集後の日記');
+      fireEvent.press(getEditSaveButton());
+
+      // 保存(AsyncStorageへの暗号化書き込み)が呼ばれる
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+      const [savedKey, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
+      expect(savedKey).toBe(STORAGE_KEY);
+      expect((value as string).startsWith(ENCRYPTED_PREFIX)).toBe(true);
+
+      // 保存が成功すると編集モーダルは閉じ、一覧・カレンダーセルの表示が更新される
+      await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
+      expect(screen.queryByText('編集前の日記')).toBeNull();
+      expect(screen.getAllByText('編集後の日記').length).toBeGreaterThanOrEqual(1);
+
+      // 永続化された内容もtextのみ更新され、createdAtは変わらない
+      const persisted = (await decryptPersistedEntries(value)) as {
+        id: string;
+        text: string;
+        createdAt: string;
+      }[];
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0].id).toBe('1');
+      expect(persisted[0].text).toBe('編集後の日記');
+      expect(persisted[0].createdAt).toBe(createdAt);
+    });
+
+    it('does not save and disables the save button when the edited text is emptied out (defense in depth)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '空にされる日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('空にされる日記');
+      fireEvent.press(screen.getByText('空にされる日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+      fireEvent.press(screen.getByText('編集'));
+      await screen.findByText('日記を編集');
+
+      const editInput = screen.getByDisplayValue('空にされる日記');
+      fireEvent.changeText(editInput, '   ');
+      fireEvent.press(getEditSaveButton());
+
+      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+    });
+
+    it('limits the edit input via maxLength to BODY_MAX_LENGTH (1000 characters, boundary)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '文字数上限確認用', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('文字数上限確認用');
+      fireEvent.press(screen.getByText('文字数上限確認用'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+      fireEvent.press(screen.getByText('編集'));
+      await screen.findByText('日記を編集');
+
+      const editInput = screen.getByDisplayValue('文字数上限確認用');
+      expect(editInput.props.maxLength).toBe(1000);
+    });
+
+    it('rolls back to the previous text and shows an error message when saving the edit fails (異常系)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+      jest.clearAllMocks();
+      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
+
+      render(<HomeScreen />);
+      await screen.findByText('編集前の日記');
+      fireEvent.press(screen.getByText('編集前の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+      fireEvent.press(screen.getByText('編集'));
+      await screen.findByText('日記を編集');
+
+      const editInput = screen.getByDisplayValue('編集前の日記');
+      fireEvent.changeText(editInput, '失敗するはずの編集');
+      fireEvent.press(getEditSaveButton());
+
+      expect(await screen.findByText('更新に失敗しました。もう一度お試しください。')).toBeTruthy();
+
+      // ロールバックにより、一覧・カレンダーセルとも編集前のテキストのまま残る
+      // (編集モーダルは開いたままで、失敗した入力内容自体は消えない)
+      expect(screen.queryByText('失敗するはずの編集')).toBeNull();
+      expect(screen.getAllByText('編集前の日記').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText('日記を編集')).toBeTruthy();
+    });
+  });
+
+  describe('日記エントリの削除(Issue #33)', () => {
+    async function pressAlertButton(label: string) {
+      const alertMock = Alert.alert as jest.Mock;
+      const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
+      const buttons = lastCall[2] as { text: string; onPress?: () => void }[];
+      const button = buttons.find((b) => b.text === label);
+      expect(button).toBeDefined();
+      await act(async () => {
+        button?.onPress?.();
+      });
+    }
+
+    it('shows a confirmation dialog (Alert.alert) with cancel/delete options when the delete button is pressed, without deleting yet (正常系)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '削除確認用の日記', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<HomeScreen />);
+      await screen.findByText('削除確認用の日記');
+      fireEvent.press(screen.getByText('削除確認用の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      fireEvent.press(screen.getByText('削除'));
+
+      expect(Alert.alert).toHaveBeenCalledTimes(1);
+      const [title, message, buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+      expect(title).toBe('日記を削除しますか?');
+      expect(message).toBe('この操作は取り消せません。');
+      expect(buttons).toHaveLength(2);
+      expect(buttons[0]).toMatchObject({ text: 'キャンセル', style: 'cancel' });
+      expect(buttons[1]).toMatchObject({ text: '削除', style: 'destructive' });
+
+      // ダイアログを表示しただけの段階では削除処理はまだ呼ばれていない
+      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+      expect(screen.getAllByText('削除確認用の日記').length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('deletes only the targeted entry from the list and persists the change to AsyncStorage encrypted when "削除" is confirmed (正常系)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const storedEntries = [
+        { id: '1', text: '残る日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
+        { id: '2', text: '削除される日記', createdAt: isoAt(now, dayWithEntry, 12, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      jest.clearAllMocks();
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<HomeScreen />);
+      await screen.findByText('残る日記');
+      fireEvent.press(screen.getByText('残る日記'));
+      await screen.findByText('削除される日記');
+
+      // 時刻昇順で描画されるため、2件目(削除される日記)の削除ボタンは配列の2番目
+      const deleteButtons = screen.getAllByText('削除');
+      expect(deleteButtons).toHaveLength(2);
+      fireEvent.press(deleteButtons[1]);
+      await pressAlertButton('削除');
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+      const [savedKey, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
+      expect(savedKey).toBe(STORAGE_KEY);
+      expect((value as string).startsWith(ENCRYPTED_PREFIX)).toBe(true);
+
+      // 削除された方は一覧から消え、残る方はそのまま表示される
+      expect(screen.queryByText('削除される日記')).toBeNull();
+      expect(screen.getAllByText('残る日記').length).toBeGreaterThanOrEqual(1);
+
+      const persisted = (await decryptPersistedEntries(value)) as { id: string; text: string }[];
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0].id).toBe('1');
+      expect(persisted[0].text).toBe('残る日記');
+    });
+
+    it('does not delete the entry when "キャンセル" is chosen in the confirmation dialog (正常系)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: 'キャンセル対象の日記', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<HomeScreen />);
+      await screen.findByText('キャンセル対象の日記');
+      fireEvent.press(screen.getByText('キャンセル対象の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      fireEvent.press(screen.getByText('削除'));
+      await pressAlertButton('キャンセル');
+
+      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+      expect(screen.getAllByText('キャンセル対象の日記').length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('rolls back the deletion (keeps the entry visible) and does not crash when AsyncStorage.setItem fails during delete (異常系)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '削除失敗する日記', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
+
+      render(<HomeScreen />);
+      await screen.findByText('削除失敗する日記');
+      fireEvent.press(screen.getByText('削除失敗する日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      fireEvent.press(screen.getByText('削除'));
+      await pressAlertButton('削除');
+
+      await waitFor(() =>
+        expect(Alert.alert).toHaveBeenLastCalledWith(
+          '削除に失敗しました',
+          'もう一度お試しください。',
+        ),
+      );
+
+      // ロールバックにより、一覧・カレンダーセルとも元のエントリが残っている
+      expect(screen.getAllByText('削除失敗する日記').length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("removes the day's cell title from the calendar (entriesByDate) when the last remaining entry for that day is deleted (boundary)", async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: 'その日最後の日記', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<HomeScreen />);
+      await screen.findByText('その日最後の日記');
+      // 削除前は、タップ可能な(タイトル付きの)カレンダーセルが1つ存在する
+      expect(screen.queryAllByRole('button')).toHaveLength(1);
+
+      fireEvent.press(screen.getByText('その日最後の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      fireEvent.press(screen.getByText('削除'));
+      await pressAlertButton('削除');
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+      // 一覧モーダルはまだ開いたままだが、日記自体はもう表示されない(entriesByDateから消えた)
+      expect(screen.queryByText('その日最後の日記')).toBeNull();
+
+      // モーダルを閉じると、カレンダー上にもタップ可能なセル(タイトル付き)が無くなっている
+      fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
+      await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
+      expect(screen.queryAllByRole('button')).toHaveLength(0);
     });
   });
 });
