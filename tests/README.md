@@ -7,12 +7,21 @@
 ```
 tests/
   app/
+    _layout.test.tsx      app/_layout.tsx（アプリ全体のレイアウト・オンボーディング表示制御）のテスト
     index.test.tsx      app/(tabs)/index.tsx（日記画面）のテスト
     explore.test.tsx     app/(tabs)/explore.tsx（探索画面）のテスト
     modal.test.tsx        app/modal.tsx（モーダル画面）のテスト
+    settings.test.tsx      app/(tabs)/settings.tsx（設定画面）のテスト
+    oss-licenses.test.tsx など   app/oss-licenses.tsx（OSSライセンス画面）のテスト
+  components/
+    onboarding.test.tsx    components/onboarding.tsx（初回起動時のオンボーディング画面）のテスト
   utils/
     diary-encryption.test.ts   utils/diary-encryption.ts（日記データの暗号化・復号）のテスト
+    diary-storage.test.ts      utils/diary-storage.ts（日記データの全件削除）のテスト
+    onboarding-storage.test.ts   utils/onboarding-storage.ts（オンボーディング表示済みフラグの読み書き）のテスト
 ```
+
+（上記は代表的なファイルの抜粋です。実際の一覧は最新のディレクトリ構成を参照してください。）
 
 ## 配置ルール
 
