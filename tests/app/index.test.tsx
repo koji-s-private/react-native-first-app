@@ -1187,7 +1187,9 @@ describe('HomeScreen', () => {
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '編集キャンセル対象', createdAt: isoAt(now, dayWithEntry) }]),
+        JSON.stringify([
+          { id: '1', text: '編集キャンセル対象', createdAt: isoAt(now, dayWithEntry) },
+        ]),
       );
       jest.clearAllMocks();
 
@@ -1281,7 +1283,9 @@ describe('HomeScreen', () => {
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '文字数上限確認用', createdAt: isoAt(now, dayWithEntry) }]),
+        JSON.stringify([
+          { id: '1', text: '文字数上限確認用', createdAt: isoAt(now, dayWithEntry) },
+        ]),
       );
 
       render(<HomeScreen />);
@@ -1343,7 +1347,9 @@ describe('HomeScreen', () => {
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '削除確認用の日記', createdAt: isoAt(now, dayWithEntry) }]),
+        JSON.stringify([
+          { id: '1', text: '削除確認用の日記', createdAt: isoAt(now, dayWithEntry) },
+        ]),
       );
       jest.clearAllMocks();
       jest.spyOn(Alert, 'alert').mockImplementation(() => {});
@@ -1410,7 +1416,9 @@ describe('HomeScreen', () => {
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: 'キャンセル対象の日記', createdAt: isoAt(now, dayWithEntry) }]),
+        JSON.stringify([
+          { id: '1', text: 'キャンセル対象の日記', createdAt: isoAt(now, dayWithEntry) },
+        ]),
       );
       jest.clearAllMocks();
       jest.spyOn(Alert, 'alert').mockImplementation(() => {});
@@ -1432,7 +1440,9 @@ describe('HomeScreen', () => {
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '削除失敗する日記', createdAt: isoAt(now, dayWithEntry) }]),
+        JSON.stringify([
+          { id: '1', text: '削除失敗する日記', createdAt: isoAt(now, dayWithEntry) },
+        ]),
       );
       jest.clearAllMocks();
       jest.spyOn(Alert, 'alert').mockImplementation(() => {});
@@ -1462,7 +1472,9 @@ describe('HomeScreen', () => {
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: 'その日最後の日記', createdAt: isoAt(now, dayWithEntry) }]),
+        JSON.stringify([
+          { id: '1', text: 'その日最後の日記', createdAt: isoAt(now, dayWithEntry) },
+        ]),
       );
       jest.clearAllMocks();
       jest.spyOn(Alert, 'alert').mockImplementation(() => {});
