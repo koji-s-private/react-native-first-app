@@ -21,23 +21,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useThemeColor } from '@/hooks/use-theme-color';
+import { encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
 import {
-  decryptText,
-  encryptText,
-  getOrCreateEncryptionKey,
-  isEncryptedPayload,
-} from '@/utils/diary-encryption';
-import { DIARY_ENTRIES_STORAGE_KEY } from '@/utils/diary-storage';
+  DIARY_ENTRIES_STORAGE_KEY,
+  getAllDiaryEntries,
+  type DiaryEntry,
+} from '@/utils/diary-storage';
 
 // 日記データのAsyncStorageキーは、設定画面からの全件削除機能(utils/diary-storage.ts)と
 // 共有するため、そちらで定義した定数を参照する
 const STORAGE_KEY = DIARY_ENTRIES_STORAGE_KEY;
-
-type DiaryEntry = {
-  id: string;
-  text: string;
-  createdAt: string;
-};
 
 // カレンダーの日付セルに表示するタイトルの最大文字数(超える場合は省略記号を付ける)
 const TITLE_MAX_LENGTH = 20;
@@ -172,26 +165,10 @@ export default function HomeScreen() {
   const iconColor = useThemeColor({}, 'icon');
 
   const loadEntries = useCallback(async () => {
-    try {
-      const stored = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!stored) {
-        // 他画面(設定タブの全件削除等)によってAsyncStorageが空になっている場合も含めて、
-        // ここで必ず最新の状態(空)にstateを揃える
-        setEntries([]);
-        return;
-      }
-      if (isEncryptedPayload(stored)) {
-        const key = await getOrCreateEncryptionKey();
-        setEntries(JSON.parse(decryptText(stored, key)) as DiaryEntry[]);
-      } else {
-        // 暗号化対応前に保存された平文JSON(後方互換)。そのまま読み込んで表示し、
-        // 次回保存時から暗号化形式に移行する
-        setEntries(JSON.parse(stored) as DiaryEntry[]);
-      }
-    } catch {
-      // ストレージが壊れている・スキーマ不整合・復号失敗の場合は空の状態から始める
-      setEntries([]);
-    }
+    // 復号を含む読み込みロジックはutils/diary-storage.tsの共通関数に集約しており、
+    // 設定画面のエクスポート機能とも共有している。ストレージが空・壊れている場合は
+    // 例外を投げず空配列を返す仕様のため、ここで個別にtry/catchする必要はない
+    setEntries(await getAllDiaryEntries());
   }, []);
 
   // expo-routerの`Tabs`はデフォルトで一度訪れたタブ画面をアンマウントせず保持するため、
