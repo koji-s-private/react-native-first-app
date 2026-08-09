@@ -120,14 +120,33 @@ function toDateKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+// 文字列を「見た目上の1文字」(書記素クラスタ)単位の配列に分割する。
+// 絵文字の家族構成(ZWJで結合された複数コードポイント)やサロゲートペアで表現される
+// 文字を、単純なstring.slice()やArray.from()のコードポイント単位分割で行うと
+// クラスタの途中で分断されてしまうため、Intl.Segmenter(grapheme単位)を優先して使う。
+// Hermesエンジンのバージョンによっては Intl.Segmenter が未実装の場合があるため、
+// 実行時に利用可否をチェックし、非対応の環境ではサロゲートペアのみ考慮した
+// Array.from()によるコードポイント単位の分割にフォールバックする
+// (ZWJ結合までは救えないが、サロゲートペアの分断は避けられる)。
+function splitIntoGraphemes(text: string): string[] {
+  if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    return Array.from(segmenter.segment(text), (segmentData) => segmentData.segment);
+  }
+  return Array.from(text);
+}
+
 // 日記本文からカレンダーセルに表示する短いタイトルを作る
-// (改行があれば最初の行のみを使い、さらに長ければ指定文字数で切り詰める)
+// (改行があれば最初の行のみを使い、さらに長ければ指定文字数で切り詰める)。
+// 文字数のカウント・切り詰めは書記素クラスタ単位で行い、絵文字などの
+// サロゲートペア・結合文字の途中で文字列が分断されないようにする
 function getEntryTitle(text: string): string {
   const firstLine = text.split('\n')[0]?.trim() ?? '';
-  if (firstLine.length <= TITLE_MAX_LENGTH) {
+  const graphemes = splitIntoGraphemes(firstLine);
+  if (graphemes.length <= TITLE_MAX_LENGTH) {
     return firstLine;
   }
-  return `${firstLine.slice(0, TITLE_MAX_LENGTH)}…`;
+  return `${graphemes.slice(0, TITLE_MAX_LENGTH).join('')}…`;
 }
 
 // 'YYYY-MM-DD'形式の日付キーをモーダルの見出し用に整形する
