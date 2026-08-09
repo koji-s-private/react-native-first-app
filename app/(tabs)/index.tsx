@@ -156,6 +156,10 @@ export default function HomeScreen() {
   const [saveToastMessage, setSaveToastMessage] = useState<string | null>(null);
   // 一覧表示用にタップされた日付('YYYY-MM-DD')。nullの間はモーダルを閉じている
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  // handleSave(新規保存)の実行中かどうか。保存ボタンの連打(またはタップと同時に発生する
+  // 複数のonPressイベント)によって、同じ内容の日記エントリが重複して保存されてしまうことを防ぐため、
+  // 実行中は早期returnし、保存ボタンもdisabledにする
+  const [isSaving, setIsSaving] = useState(false);
   // 編集中のエントリのid。nullの間は編集モーダルを閉じている
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
@@ -193,11 +197,18 @@ export default function HomeScreen() {
   );
 
   const handleSave = useCallback(async () => {
+    // 既に保存処理が進行中であれば、連打による重複保存を防ぐため何もしない
+    if (isSaving) {
+      return;
+    }
+
     const trimmed = draft.trim();
     // 万が一上限を超えたテキストが渡ってきても保存しない(TextInput側のmaxLengthが主な防御線)
     if (!trimmed || trimmed.length > BODY_MAX_LENGTH) {
       return;
     }
+
+    setIsSaving(true);
 
     const newEntry: DiaryEntry = {
       // Date.now().toString() は同一ミリ秒での衝突リスクがあるため、
@@ -235,8 +246,11 @@ export default function HomeScreen() {
       setEntries(previousEntries);
       setDraft((current) => (current === '' ? previousDraft : current));
       setSaveError('保存に失敗しました。もう一度お試しください。');
+    } finally {
+      // 成功・失敗いずれの場合も、次の保存を行えるよう必ず実行中フラグを戻す
+      setIsSaving(false);
     }
-  }, [draft, entries]);
+  }, [draft, entries, isSaving]);
 
   // 編集モーダルを開き、対象エントリの本文を編集用の下書きにセットする
   const handleStartEdit = useCallback((entry: DiaryEntry) => {
@@ -463,7 +477,7 @@ export default function HomeScreen() {
             <Pressable
               style={[styles.saveButton, { backgroundColor: tintColor }]}
               onPress={handleSave}
-              disabled={!draft.trim()}
+              disabled={!draft.trim() || isSaving}
             >
               <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
                 保存
