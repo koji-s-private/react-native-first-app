@@ -1745,9 +1745,8 @@ describe('HomeScreen', () => {
       expect(saveButtons).toHaveLength(2);
       fireEvent.press(saveButtons[1]);
 
-      const editErrorMessage = await screen.findByText(
-        '更新に失敗しました。もう一度お試しください。',
-      );
+      const editErrorMessage =
+        await screen.findByText('更新に失敗しました。もう一度お試しください。');
       expect(StyleSheet.flatten(editErrorMessage.props.style).color).toBe(Colors.dark.error);
     });
 
