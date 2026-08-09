@@ -1135,6 +1135,56 @@ describe('HomeScreen', () => {
       expect(await screen.findByText(truncated)).toBeTruthy();
     });
 
+    it('does not split a ZWJ-joined family emoji in the middle when truncating (regression: Issue #71)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      // '👨\u200d👩\u200d👧\u200d👦'(家族)はZWJ(Zero Width Joiner)で複数の絵文字コードポイントを
+      // 結合した単一の書記素クラスタ。サロゲートペアのみを考慮するArray.from()による
+      // コードポイント単位の分割だと、ZWJや個別の絵文字コードポイントの境目で
+      // 途中が分断されてしまう(Intl.Segmenterのgrapheme単位分割でのみ正しく1文字として扱える)
+      const family = '👨\u200d👩\u200d👧\u200d👦';
+      const text = `${'う'.repeat(19)}${family}途中で切れたら文字化け`;
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text, createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+
+      // ZWJ結合絵文字が途中で壊れず、丸ごと1文字(書記素クラスタ)として20文字目に含まれる
+      const truncated = `${'う'.repeat(19)}${family}…`;
+      expect(await screen.findByText(truncated)).toBeTruthy();
+    });
+
+    it('shows a very short (1 character) diary entry as its title as-is, without truncation or an ellipsis (boundary)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: 'あ', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+
+      expect(await screen.findByText('あ')).toBeTruthy();
+      expect(screen.queryByText('あ…')).toBeNull();
+    });
+
+    it('renders no title (and disables the cell) for an entry whose text is an empty string after the first line is trimmed (defensive boundary for directly-corrupted/legacy storage data, since the composer itself never saves an empty/whitespace-only entry)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '   ', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      // タイトルが空文字列になるため、そのセルはタップ可能な要素として描画されない
+      expect(screen.queryAllByRole('button')).toHaveLength(0);
+    });
+
     it('shows nothing in a day cell that has no diary entries', async () => {
       const now = new Date();
       const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
