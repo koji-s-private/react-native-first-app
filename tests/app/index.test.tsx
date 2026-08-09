@@ -1115,6 +1115,26 @@ describe('HomeScreen', () => {
       expect(screen.queryByText(twentyOneChars)).toBeNull();
     });
 
+    it('does not split a surrogate-pair emoji in the middle when truncating (regression: Issue #71)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      // '😀'はサロゲートペア(UTF-16で2コードユニット)で表現される絵文字。
+      // 19文字の通常文字 + 絵文字1つ(見た目上20文字)+ 文字化けを誘発しやすい末尾の文字、
+      // という構成で、単純なUTF-16コードユニット単位のslice(0, 20)だと絵文字の
+      // 途中(サロゲートの片割れ)で切れてしまう境界を狙う
+      const text = `${'あ'.repeat(19)}😀切れたら文字化け`;
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text, createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+
+      // 絵文字がサロゲートペアの片割れで壊れず、丸ごと1文字として20文字目に含まれる
+      const truncated = `${'あ'.repeat(19)}😀…`;
+      expect(await screen.findByText(truncated)).toBeTruthy();
+    });
+
     it('shows nothing in a day cell that has no diary entries', async () => {
       const now = new Date();
       const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
