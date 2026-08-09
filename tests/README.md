@@ -16,6 +16,8 @@ tests/
   components/
     onboarding.test.tsx    components/onboarding.tsx（初回起動時のオンボーディング画面）のテスト
     save-toast.test.tsx    components/save-toast.tsx（保存成功時に表示する一時的なトースト）のテスト
+  constants/
+    theme.test.ts        constants/theme.ts（ライト/ダークモードの色定義）のテスト
   utils/
     diary-encryption.test.ts   utils/diary-encryption.ts（日記データの暗号化・復号）のテスト
     diary-storage.test.ts      utils/diary-storage.ts（日記データの全件削除）のテスト

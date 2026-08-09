@@ -5,10 +5,11 @@ import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
-import { Alert, Platform, StyleSheet } from 'react-native';
+import { Alert, Platform, StyleSheet, useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import HomeScreen from '@/app/(tabs)/index';
+import { Colors } from '@/constants/theme';
 import { decryptText, encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
 
 // `expo-router`'s `Link` (with its `Trigger`/`Preview`/`Menu` compound API) requires a
@@ -410,12 +411,12 @@ describe('HomeScreen', () => {
       // 上限の1文字手前(999文字)では強調色にならない
       fireEvent.changeText(input, 'あ'.repeat(999));
       const counterBelowLimit = screen.getByText('999/1000');
-      expect(StyleSheet.flatten(counterBelowLimit.props.style).color).not.toBe('#d32f2f');
+      expect(StyleSheet.flatten(counterBelowLimit.props.style).color).not.toBe(Colors.light.error);
 
-      // 上限ちょうど(1000文字)では赤字で強調される
+      // 上限ちょうど(1000文字)では、テーマ定数化されたエラー色(Colors.light.error)で強調される
       fireEvent.changeText(input, 'あ'.repeat(1000));
       const counterAtLimit = screen.getByText('1000/1000');
-      expect(StyleSheet.flatten(counterAtLimit.props.style).color).toBe('#d32f2f');
+      expect(StyleSheet.flatten(counterAtLimit.props.style).color).toBe(Colors.light.error);
     });
 
     it('disables the save button while the input is empty and enables it once text is entered', async () => {
@@ -627,7 +628,10 @@ describe('HomeScreen', () => {
       fireEvent.changeText(input, '今日の日記');
       fireEvent.press(screen.getByText('保存'));
 
-      expect(await screen.findByText('保存に失敗しました。もう一度お試しください。')).toBeTruthy();
+      const errorMessage = await screen.findByText('保存に失敗しました。もう一度お試しください。');
+      expect(errorMessage).toBeTruthy();
+      // エラーメッセージの文字色は、ハードコードではなくテーマ定数化されたColors.light.errorを使う(Issue #58)
+      expect(StyleSheet.flatten(errorMessage.props.style).color).toBe(Colors.light.error);
 
       // 保存前の状態にロールバックされているため、新しい日記のタイトルはどこにも表示されない
       expect(screen.queryByText('今日の日記')).toBeNull();
@@ -1482,7 +1486,11 @@ describe('HomeScreen', () => {
       fireEvent.changeText(editInput, '失敗するはずの編集');
       fireEvent.press(getEditSaveButton());
 
-      expect(await screen.findByText('更新に失敗しました。もう一度お試しください。')).toBeTruthy();
+      const editErrorMessage =
+        await screen.findByText('更新に失敗しました。もう一度お試しください。');
+      expect(editErrorMessage).toBeTruthy();
+      // 編集モーダルのエラーメッセージも、テーマ定数化されたColors.light.errorを使う(Issue #58)
+      expect(StyleSheet.flatten(editErrorMessage.props.style).color).toBe(Colors.light.error);
 
       // ロールバックにより、一覧・カレンダーセルとも編集前のテキストのまま残る
       // (編集モーダルは開いたままで、失敗した入力内容自体は消えない)
@@ -1521,7 +1529,10 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText('削除確認用の日記'));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
-      fireEvent.press(screen.getByText('削除'));
+      const deleteLink = screen.getByText('削除');
+      // 削除リンクの文字色も、テーマ定数化されたColors.light.errorを使う(Issue #58)
+      expect(StyleSheet.flatten(deleteLink.props.style).color).toBe(Colors.light.error);
+      fireEvent.press(deleteLink);
 
       expect(Alert.alert).toHaveBeenCalledTimes(1);
       const [title, message, buttons] = (Alert.alert as jest.Mock).mock.calls[0];
@@ -1660,6 +1671,104 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
       await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
       expect(screen.queryAllByRole('button')).toHaveLength(0);
+    });
+  });
+
+  describe('テーマに応じたエラー色(Issue #58)', () => {
+    // `hooks/use-color-scheme.ts`はreact-nativeの`useColorScheme`をそのままre-exportしているため、
+    // jest-expo(react-native)のオートモック(常に'light'を返すjest.fn)を直接上書きすることで
+    // ダークモードをシミュレートできる
+    const mockedUseColorScheme = useColorScheme as jest.Mock;
+
+    afterEach(() => {
+      // このdescribe内で上書きしたダークモードの戻り値が他のテスト(既定のライトモード想定)に
+      // 波及しないよう明示的に戻す。beforeEachの`jest.clearAllMocks()`は呼び出し履歴のみをクリアし、
+      // `mockReturnValue`で差し替えた実装自体はクリアされないため、ここで戻す必要がある
+      mockedUseColorScheme.mockReturnValue('light');
+    });
+
+    it('sanity check: Colors.light.error and Colors.dark.error are different values', () => {
+      // ライト/ダークで同じ値だと、以下のテストが誤って"たまたま"パスしてしまう
+      // (ライトモードの色のままでもテストが通ってしまう)ことを防ぐための前提確認
+      expect(Colors.dark.error).not.toBe(Colors.light.error);
+    });
+
+    it('renders the character counter in Colors.dark.error once the max length is reached, when in dark mode', async () => {
+      mockedUseColorScheme.mockReturnValue('dark');
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+      fireEvent.changeText(input, 'あ'.repeat(1000));
+      const counterAtLimit = screen.getByText('1000/1000');
+      expect(StyleSheet.flatten(counterAtLimit.props.style).color).toBe(Colors.dark.error);
+    });
+
+    it('shows the save-failure error message in Colors.dark.error when in dark mode', async () => {
+      mockedUseColorScheme.mockReturnValue('dark');
+      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+      fireEvent.changeText(input, '今日の日記');
+      fireEvent.press(screen.getByText('保存'));
+
+      const errorMessage = await screen.findByText('保存に失敗しました。もう一度お試しください。');
+      expect(StyleSheet.flatten(errorMessage.props.style).color).toBe(Colors.dark.error);
+    });
+
+    it('shows the edit-failure error message in Colors.dark.error when in dark mode', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+      jest.clearAllMocks();
+      mockedUseColorScheme.mockReturnValue('dark');
+      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
+
+      render(<HomeScreen />);
+      await screen.findByText('編集前の日記');
+      fireEvent.press(screen.getByText('編集前の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+      fireEvent.press(screen.getByText('編集'));
+      await screen.findByText('日記を編集');
+
+      const editInput = screen.getByDisplayValue('編集前の日記');
+      fireEvent.changeText(editInput, '失敗するはずの編集');
+      // 編集モーダルの保存ボタンは、メインの入力欄(composer)の保存ボタンと同じ文言「保存」を
+      // 使うため2件ヒットする。JSXの描画順(composerが先、編集モーダルが後)に依存して2件目を使う
+      const saveButtons = screen.getAllByText('保存');
+      expect(saveButtons).toHaveLength(2);
+      fireEvent.press(saveButtons[1]);
+
+      const editErrorMessage =
+        await screen.findByText('更新に失敗しました。もう一度お試しください。');
+      expect(StyleSheet.flatten(editErrorMessage.props.style).color).toBe(Colors.dark.error);
+    });
+
+    it('shows the delete link in Colors.dark.error when in dark mode', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '削除確認用の日記', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+      mockedUseColorScheme.mockReturnValue('dark');
+
+      render(<HomeScreen />);
+      await screen.findByText('削除確認用の日記');
+      fireEvent.press(screen.getByText('削除確認用の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      const deleteLink = screen.getByText('削除');
+      expect(StyleSheet.flatten(deleteLink.props.style).color).toBe(Colors.dark.error);
     });
   });
 });

@@ -16,6 +16,8 @@ export const Colors = {
     icon: '#687076',
     tabIconDefault: '#687076',
     tabIconSelected: tintColorLight,
+    // エラー/警告/削除など注意喚起の意味を持つ赤系の色。白背景(#fff)に対して十分なコントラストを確保する
+    error: '#d32f2f',
   },
   dark: {
     text: '#ECEDEE',
@@ -24,6 +26,9 @@ export const Colors = {
     icon: '#9BA1A6',
     tabIconDefault: '#9BA1A6',
     tabIconSelected: tintColorDark,
+    // ダークモードの背景(#151718)に対して、ライトモードと同じ#d32f2fでは彩度・明度が
+    // やや暗く沈みコントラストが不足するため、明るめの赤(#ff6b6b)を使いWCAG的な視認性を確保する
+    error: '#ff6b6b',
   },
 };
 
