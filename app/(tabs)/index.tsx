@@ -170,6 +170,7 @@ export default function HomeScreen() {
   const tintColor = useThemeColor({}, 'tint');
   const backgroundColor = useThemeColor({}, 'background');
   const iconColor = useThemeColor({}, 'icon');
+  const errorColor = useThemeColor({}, 'error');
 
   const loadEntries = useCallback(async () => {
     // 復号を含む読み込みロジックはutils/diary-storage.tsの共通関数に集約しており、
@@ -454,7 +455,7 @@ export default function HomeScreen() {
             <ThemedText
               style={[
                 styles.charCount,
-                draft.length >= BODY_MAX_LENGTH ? { color: '#d32f2f' } : { color: iconColor },
+                draft.length >= BODY_MAX_LENGTH ? { color: errorColor } : { color: iconColor },
               ]}
             >
               {draft.length}/{BODY_MAX_LENGTH}
@@ -469,7 +470,9 @@ export default function HomeScreen() {
               </ThemedText>
             </Pressable>
           </View>
-          {saveError ? <ThemedText style={styles.errorText}>{saveError}</ThemedText> : null}
+          {saveError ? (
+            <ThemedText style={[styles.errorText, { color: errorColor }]}>{saveError}</ThemedText>
+          ) : null}
           {saveToastMessage ? (
             <SaveToast message={saveToastMessage} onHide={handleHideSaveToast} />
           ) : null}
@@ -550,7 +553,13 @@ export default function HomeScreen() {
                           </ThemedText>
                         </Pressable>
                         <Pressable onPress={() => handleDeletePress(item)} hitSlop={8}>
-                          <ThemedText style={[styles.entryActionText, styles.entryDeleteText]}>
+                          <ThemedText
+                            style={[
+                              styles.entryActionText,
+                              styles.entryDeleteText,
+                              { color: errorColor },
+                            ]}
+                          >
                             削除
                           </ThemedText>
                         </Pressable>
@@ -592,7 +601,7 @@ export default function HomeScreen() {
                   style={[
                     styles.charCount,
                     editDraft.length >= BODY_MAX_LENGTH
-                      ? { color: '#d32f2f' }
+                      ? { color: errorColor }
                       : { color: iconColor },
                   ]}
                 >
@@ -608,7 +617,11 @@ export default function HomeScreen() {
                   </ThemedText>
                 </Pressable>
               </View>
-              {editError ? <ThemedText style={styles.errorText}>{editError}</ThemedText> : null}
+              {editError ? (
+                <ThemedText style={[styles.errorText, { color: errorColor }]}>
+                  {editError}
+                </ThemedText>
+              ) : null}
             </ThemedView>
           </View>
         </Modal>
@@ -660,7 +673,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   errorText: {
-    color: '#d32f2f',
+    // 色はテーマ(ライト/ダーク)に応じてJSX側でuseThemeColorから取得した値を上書き適用する
     fontSize: 14,
   },
   emptyState: {
@@ -746,6 +759,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   entryDeleteText: {
-    color: '#d32f2f',
+    // 色はテーマ(ライト/ダーク)に応じてJSX側でuseThemeColorから取得した値を上書き適用する
   },
 });

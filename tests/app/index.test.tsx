@@ -9,6 +9,7 @@ import { Alert, Platform, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import HomeScreen from '@/app/(tabs)/index';
+import { Colors } from '@/constants/theme';
 import { decryptText, encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
 
 // `expo-router`'s `Link` (with its `Trigger`/`Preview`/`Menu` compound API) requires a
@@ -410,12 +411,12 @@ describe('HomeScreen', () => {
       // 上限の1文字手前(999文字)では強調色にならない
       fireEvent.changeText(input, 'あ'.repeat(999));
       const counterBelowLimit = screen.getByText('999/1000');
-      expect(StyleSheet.flatten(counterBelowLimit.props.style).color).not.toBe('#d32f2f');
+      expect(StyleSheet.flatten(counterBelowLimit.props.style).color).not.toBe(Colors.light.error);
 
-      // 上限ちょうど(1000文字)では赤字で強調される
+      // 上限ちょうど(1000文字)では、テーマ定数化されたエラー色(Colors.light.error)で強調される
       fireEvent.changeText(input, 'あ'.repeat(1000));
       const counterAtLimit = screen.getByText('1000/1000');
-      expect(StyleSheet.flatten(counterAtLimit.props.style).color).toBe('#d32f2f');
+      expect(StyleSheet.flatten(counterAtLimit.props.style).color).toBe(Colors.light.error);
     });
 
     it('disables the save button while the input is empty and enables it once text is entered', async () => {
@@ -627,7 +628,10 @@ describe('HomeScreen', () => {
       fireEvent.changeText(input, '今日の日記');
       fireEvent.press(screen.getByText('保存'));
 
-      expect(await screen.findByText('保存に失敗しました。もう一度お試しください。')).toBeTruthy();
+      const errorMessage = await screen.findByText('保存に失敗しました。もう一度お試しください。');
+      expect(errorMessage).toBeTruthy();
+      // エラーメッセージの文字色は、ハードコードではなくテーマ定数化されたColors.light.errorを使う(Issue #58)
+      expect(StyleSheet.flatten(errorMessage.props.style).color).toBe(Colors.light.error);
 
       // 保存前の状態にロールバックされているため、新しい日記のタイトルはどこにも表示されない
       expect(screen.queryByText('今日の日記')).toBeNull();
@@ -1482,7 +1486,11 @@ describe('HomeScreen', () => {
       fireEvent.changeText(editInput, '失敗するはずの編集');
       fireEvent.press(getEditSaveButton());
 
-      expect(await screen.findByText('更新に失敗しました。もう一度お試しください。')).toBeTruthy();
+      const editErrorMessage =
+        await screen.findByText('更新に失敗しました。もう一度お試しください。');
+      expect(editErrorMessage).toBeTruthy();
+      // 編集モーダルのエラーメッセージも、テーマ定数化されたColors.light.errorを使う(Issue #58)
+      expect(StyleSheet.flatten(editErrorMessage.props.style).color).toBe(Colors.light.error);
 
       // ロールバックにより、一覧・カレンダーセルとも編集前のテキストのまま残る
       // (編集モーダルは開いたままで、失敗した入力内容自体は消えない)
@@ -1521,7 +1529,10 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText('削除確認用の日記'));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
-      fireEvent.press(screen.getByText('削除'));
+      const deleteLink = screen.getByText('削除');
+      // 削除リンクの文字色も、テーマ定数化されたColors.light.errorを使う(Issue #58)
+      expect(StyleSheet.flatten(deleteLink.props.style).color).toBe(Colors.light.error);
+      fireEvent.press(deleteLink);
 
       expect(Alert.alert).toHaveBeenCalledTimes(1);
       const [title, message, buttons] = (Alert.alert as jest.Mock).mock.calls[0];
