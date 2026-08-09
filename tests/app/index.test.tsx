@@ -734,6 +734,50 @@ describe('HomeScreen', () => {
       expect(screen.queryByText('保存に失敗しました。もう一度お試しください。')).toBeNull();
     });
 
+    it('ignores a second press of the save button while a save is still in flight, preventing a duplicate entry (Issue #70)', async () => {
+      // 保存ボタンの連打(タップと同時に発生する複数のonPressイベントを含む)によって
+      // 同一内容の日記が重複保存されないことを確認する。AsyncStorage.setItemの解決を
+      // 意図的に遅延させ、その完了前に2回目のpressを発火させる
+      let resolveSetItem: () => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSetItem = resolve;
+          }),
+      );
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+      const saveButton = screen.getByText('保存');
+
+      fireEvent.changeText(input, '連打される日記');
+      fireEvent.press(saveButton);
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      // 1回目の保存(AsyncStorage.setItem)がまだpendingの間に、続けて保存ボタンを連打する
+      fireEvent.press(saveButton);
+      fireEvent.press(saveButton);
+
+      // pending中の連打はガードされ、AsyncStorage.setItemは追加で呼ばれない
+      expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+      expect(mockRandomUUID).toHaveBeenCalledTimes(1);
+
+      resolveSetItem();
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      // 永続化された内容にも1件のみ含まれ、重複していない
+      const [, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
+      const persisted = (await decryptPersistedEntries(value)) as { text: string }[];
+      expect(persisted).toHaveLength(1);
+
+      // pending解消後は再度保存できる(実行中フラグが正しく戻っている)
+      fireEvent.changeText(input, '次の日記');
+      fireEvent.press(saveButton);
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(2));
+    });
+
     it('assigns a unique id (via expo-crypto randomUUID) to each entry saved consecutively', async () => {
       // `randomUUID` を呼び出しごとに異なる値を返すようスタブし、
       // 同一ミリ秒での `Date.now().toString()` による衝突が起きないことを検証する。
