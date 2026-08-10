@@ -1301,6 +1301,46 @@ describe('HomeScreen', () => {
         expect(modal.props.navigationBarTranslucent).toBe(true);
       }
     });
+
+    it('keeps statusBarTranslucent and navigationBarTranslucent set to true on each modal even while it is actually open (visible=true), not just at rest (regression for Issue #94)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '編集対象の日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('編集対象の日記');
+
+      // 日付タップ前は両モーダルとも非表示(visible=false)だが、translucent系のpropは
+      // 表示状態に関わらず常に設定されている静的なpropである
+      const [entryListModalBeforeOpen, editModalBeforeOpen] = screen.UNSAFE_getAllByType(Modal);
+      expect(entryListModalBeforeOpen.props.visible).toBe(false);
+      expect(editModalBeforeOpen.props.visible).toBe(false);
+
+      // 一覧モーダルを開いた状態(visible=true)でも維持されていることを確認する
+      fireEvent.press(screen.getByText('編集対象の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      const [entryListModalOpen, editModalStillClosed] = screen.UNSAFE_getAllByType(Modal);
+      expect(entryListModalOpen.props.visible).toBe(true);
+      expect(entryListModalOpen.props.statusBarTranslucent).toBe(true);
+      expect(entryListModalOpen.props.navigationBarTranslucent).toBe(true);
+      expect(editModalStillClosed.props.visible).toBe(false);
+      expect(editModalStillClosed.props.statusBarTranslucent).toBe(true);
+      expect(editModalStillClosed.props.navigationBarTranslucent).toBe(true);
+
+      // 続けて編集モーダルを開いた状態(visible=true)でも維持されていることを確認する
+      fireEvent.press(screen.getByText('編集'));
+      await screen.findByText('日記を編集');
+
+      const [entryListModalStillOpen, editModalOpen] = screen.UNSAFE_getAllByType(Modal);
+      expect(entryListModalStillOpen.props.visible).toBe(true);
+      expect(editModalOpen.props.visible).toBe(true);
+      expect(editModalOpen.props.statusBarTranslucent).toBe(true);
+      expect(editModalOpen.props.navigationBarTranslucent).toBe(true);
+    });
   });
 
   describe('日付セルのフォント拡大率の上限(maxFontSizeMultiplier)', () => {
