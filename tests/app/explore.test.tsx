@@ -5,6 +5,28 @@ import React from 'react';
 import appConfig from '@/app.json';
 import ExploreScreen from '@/app/(tabs)/explore';
 
+// `ExploreScreen` is wrapped in `ParallaxScrollView`, which uses `react-native-reanimated`'s
+// `useAnimatedRef`/`useScrollOffset` to drive the header's scroll-linked parallax animation.
+// `useScrollOffset` observes the animated ref and expects the scrollable component to report
+// its native view tag once mounted. `react-test-renderer` doesn't perform real native view
+// resolution, so the tag never becomes available and `useScrollOffset` logs a
+// "[Reanimated] animatedRef is not initialized in useScrollOffset ..." warning on every render.
+// This test only asserts on the screen's static content, not the scroll-linked animation itself,
+// so we mock `useScrollOffset` to return a plain shared value instead of observing the (never
+// resolved) animated ref, which avoids the warning without touching the rest of the module.
+jest.mock('react-native-reanimated', () => {
+  const actual = jest.requireActual('react-native-reanimated');
+
+  return {
+    ...actual,
+    // `import Animated from 'react-native-reanimated'` (used by `ParallaxScrollView`) relies on
+    // `__esModule` being set so Babel's interop helper resolves `Animated` to `actual.default`
+    // rather than to this whole mocked module object.
+    __esModule: true,
+    useScrollOffset: () => actual.useSharedValue(0),
+  };
+});
+
 // `ExternalLink` (used inside some of the Collapsible sections on this screen) wraps
 // `expo-router`'s `Link`, which requires a navigation/router context that isn't set up
 // when rendering the screen in isolation. We stub it out the same way
