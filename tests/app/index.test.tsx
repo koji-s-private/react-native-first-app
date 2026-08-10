@@ -687,6 +687,49 @@ describe('HomeScreen', () => {
       expect(screen.queryByText('保存中の日記')).toBeNull();
     });
 
+    it('keeps the draft empty (does not roll back) when the user typed something while a save was in flight and then deleted it all themselves, and that save later fails (regression for Issue #110)', async () => {
+      // pending中に一度何か入力したあと、ユーザー自身がそれを全部消して空文字列に戻した場合は
+      // 「何も入力していない」ケースと区別し、ロールバックでpreviousDraftを復活させてはいけない
+      const now = new Date();
+      const storedEntries = [
+        { id: 'old', text: '過去の日記', createdAt: isoAt(now, now.getDate(), 0, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      jest.clearAllMocks();
+
+      let rejectSetItem: (reason: unknown) => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectSetItem = reject;
+          }),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('過去の日記');
+
+      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+      fireEvent.changeText(input, '保存中の日記');
+      fireEvent.press(screen.getByText('保存'));
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+      expect(input.props.value).toBe('');
+
+      // pendingの間にユーザーが新しい下書きを書き始めるが、自分で全部消して空文字列に戻す
+      fireEvent.changeText(input, '書きかけの新しい下書き');
+      fireEvent.changeText(input, '');
+
+      // ここで保存が失敗する
+      rejectSetItem(new Error('write failed'));
+
+      expect(await screen.findByText('保存に失敗しました。もう一度お試しください。')).toBeTruthy();
+
+      // ユーザーが意図的に空にした結果なので、previousDraft(保存中の日記)へロールバックされず
+      // 空文字列のまま維持される
+      expect(input.props.value).toBe('');
+      expect(screen.queryByText('保存中の日記')).toBeNull();
+    });
+
     it('does not clear draft text the user typed while a save was still in flight, when that save later succeeds (boundary)', async () => {
       // 失敗時だけでなく成功時も、保存処理中(pending中)に入力された下書きが
       // 意図せず消されないことを確認する(catch節以外の経路でdraftが上書きされないことの確認)

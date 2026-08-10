@@ -3,7 +3,7 @@ import { randomUUID } from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from 'expo-router';
 import type { ComponentProps } from 'react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -183,6 +183,11 @@ export default function HomeScreen() {
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [editError, setEditError] = useState<string | null>(null);
+  // handleSave内の保存処理(pending中)開始後に、ユーザーがdraft用TextInputへ入力操作を
+  // 行ったかどうかを表すref。「pending開始時にセットした空文字列のまま」なのか
+  // 「pending中に入力した末、自分で全部消して空文字列に戻した」のかを、値の内容(空文字列か
+  // どうか)では区別できないため、編集操作の有無そのものをrefで別途持つ
+  const draftEditedRef = useRef(false);
   // カレンダーの外枠(タイトル・入力欄・保存ボタンの下からタブバーの上までの残りスペースを
   // `flex: 1`で使い切るView)の実測高さ(onLayoutで取得)。この外枠自体に枠線・角丸を付け、
   // 日付グリッドの高さもこの実測値を基準に算出することで、外枠と日付グリッドの基準を一致させる
@@ -242,6 +247,8 @@ export default function HomeScreen() {
 
     setEntries(nextEntries);
     setDraft('');
+    // pending開始時点ではまだ編集操作が発生していないことを表すため、フラグをリセットする
+    draftEditedRef.current = false;
     setSaveError(null);
 
     try {
@@ -260,16 +267,28 @@ export default function HomeScreen() {
       // 永続化に失敗した場合は保存前の状態に戻し、ユーザーにエラーを伝える。
       // ただし、保存処理中(この非同期処理の完了を待つ間)にユーザーが既に次の文章を
       // 入力し始めている場合、previousDraftで単純に上書きすると新しい入力を消してしまう。
-      // 現在値が保存開始時にセットした空文字列のままであれば(=何も入力していなければ)
-      // previousDraftへ戻し、既に何か入力されていればその入力を優先して上書きしない
+      // 現在値が空文字列かどうかでは、「pending開始時のまま何も入力していない」場合と
+      // 「pending中に入力した後、自分で全部消して空文字列に戻した」場合を区別できないため、
+      // draftEditedRef(pending開始後に編集操作があったかどうか)で判定する。
+      // 編集操作が無ければpreviousDraftへ戻し、編集操作があればユーザーが最後に入力した
+      // 内容(空文字列を含む)をそのまま優先して上書きしない
       setEntries(previousEntries);
-      setDraft((current) => (current === '' ? previousDraft : current));
+      if (!draftEditedRef.current) {
+        setDraft(previousDraft);
+      }
       setSaveError('保存に失敗しました。もう一度お試しください。');
     } finally {
       // 成功・失敗いずれの場合も、次の保存を行えるよう必ず実行中フラグを戻す
       setIsSaving(false);
     }
   }, [draft, entries, isSaving]);
+
+  // draft用TextInputのonChangeText。setDraftに加えて、pending中にユーザーが入力操作を
+  // 行ったことをdraftEditedRefへ記録する(handleSaveの保存失敗時ロールバック判定に使う)
+  const handleChangeDraft = useCallback((text: string) => {
+    draftEditedRef.current = true;
+    setDraft(text);
+  }, []);
 
   // 編集モーダルを開き、対象エントリの本文を編集用の下書きにセットする
   const handleStartEdit = useCallback((entry: DiaryEntry) => {
@@ -479,7 +498,7 @@ export default function HomeScreen() {
             placeholder="今日の出来事や気持ちを書いてみましょう"
             placeholderTextColor={iconColor}
             value={draft}
-            onChangeText={setDraft}
+            onChangeText={handleChangeDraft}
             multiline
             maxLength={BODY_MAX_LENGTH}
           />
