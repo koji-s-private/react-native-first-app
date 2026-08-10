@@ -5,23 +5,23 @@ import React from 'react';
 import appConfig from '@/app.json';
 import ExploreScreen from '@/app/(tabs)/explore';
 
-// `ExploreScreen` is wrapped in `ParallaxScrollView`, which uses `react-native-reanimated`'s
-// `useAnimatedRef`/`useScrollOffset` to drive the header's scroll-linked parallax animation.
-// `useScrollOffset` observes the animated ref and expects the scrollable component to report
-// its native view tag once mounted. `react-test-renderer` doesn't perform real native view
-// resolution, so the tag never becomes available and `useScrollOffset` logs a
-// "[Reanimated] animatedRef is not initialized in useScrollOffset ..." warning on every render.
-// This test only asserts on the screen's static content, not the scroll-linked animation itself,
-// so we mock `useScrollOffset` to return a plain shared value instead of observing the (never
-// resolved) animated ref, which avoids the warning without touching the rest of the module.
+// `ExploreScreen` は `ParallaxScrollView` でラップされており、`react-native-reanimated` の
+// `useAnimatedRef`/`useScrollOffset` を使ってヘッダーのスクロール連動パララックスアニメーションを
+// 制御している。`useScrollOffset` はこのanimated refを監視し、マウント後にスクロール対象コンポーネントが
+// ネイティブのview tagを報告することを期待する。`react-test-renderer` は実際のネイティブview解決を
+// 行わないため、view tagが取得できず、`useScrollOffset` が毎回のレンダリングで
+// "[Reanimated] animatedRef is not initialized in useScrollOffset ..." という警告を出力してしまう。
+// このテストではスクロール連動アニメーション自体ではなく画面の静的コンテンツのみを検証しているため、
+// (決して解決されない)animated refを監視する代わりに `useScrollOffset` が単純なshared valueを
+// 返すようにモックし、モジュールの他の部分に手を加えずに警告を回避している。
 jest.mock('react-native-reanimated', () => {
   const actual = jest.requireActual('react-native-reanimated');
 
   return {
     ...actual,
-    // `import Animated from 'react-native-reanimated'` (used by `ParallaxScrollView`) relies on
-    // `__esModule` being set so Babel's interop helper resolves `Animated` to `actual.default`
-    // rather than to this whole mocked module object.
+    // `ParallaxScrollView` が使用している `import Animated from 'react-native-reanimated'`
+    // (デフォルトインポート)を正しく解決するには `__esModule` の付与が必要。これが無いと
+    // Babelのinterop解決によって `Animated` がこのモックオブジェクト全体に解決されてしまう。
     __esModule: true,
     useScrollOffset: () => actual.useSharedValue(0),
   };
