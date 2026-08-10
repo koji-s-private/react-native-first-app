@@ -9,6 +9,7 @@ import { Alert, Modal, Platform, StyleSheet, useColorScheme } from 'react-native
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import HomeScreen from '@/app/(tabs)/index';
+import { TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID } from '@/components/tab-screen-container';
 import { Colors } from '@/constants/theme';
 import { decryptText, encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
 
@@ -255,18 +256,30 @@ describe('HomeScreen', () => {
     await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
   });
 
-  it('falls back to the base top margin (no extra inset) when the safe area top inset is zero (e.g. Android without a notch)', async () => {
+  // Issue #125: セーフエリア対応は共通コンポーネント`TabScreenContainer`に一本化されたため、
+  // タイトル自身の`marginTop`は常にベース余白(8)固定になり、インセットの加算は
+  // `TabScreenContainer`の外側ラッパーの`paddingTop`側で行われる。
+  it('keeps the title margin at the fixed base value regardless of the safe area top inset (spacing is handled by TabScreenContainer)', async () => {
     render(<HomeScreen />);
     await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
     const title = screen.getByText('日記');
     const flattenedStyle = StyleSheet.flatten(title.props.style);
 
-    // insets.top が 0 の場合は、ベースの余白(8)のみが適用される
     expect(flattenedStyle.marginTop).toBe(8);
   });
 
-  it('adds the safe area top inset to the title marginTop so it does not overlap the status bar/notch/Dynamic Island', async () => {
+  it('does not add extra top padding via TabScreenContainer when the safe area top inset is zero (e.g. Android without a notch)', async () => {
+    render(<HomeScreen />);
+    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+    const safeAreaWrapper = screen.getByTestId(TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID);
+    const flattenedStyle = StyleSheet.flatten(safeAreaWrapper.props.style);
+
+    expect(flattenedStyle.paddingTop).toBe(0);
+  });
+
+  it('adds the safe area top inset as paddingTop on TabScreenContainer so content does not overlap the status bar/notch/Dynamic Island', async () => {
     // iPhone 14 Pro (Dynamic Island) 相当のトップインセットを想定
     render(
       <SafeAreaProvider
@@ -280,11 +293,15 @@ describe('HomeScreen', () => {
     );
     await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-    const title = screen.getByText('日記');
-    const flattenedStyle = StyleSheet.flatten(title.props.style);
+    const safeAreaWrapper = screen.getByTestId(TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID);
+    const flattenedStyle = StyleSheet.flatten(safeAreaWrapper.props.style);
 
-    // marginTop はベースの余白(8) + セーフエリアの上端インセット(59) になる
-    expect(flattenedStyle.marginTop).toBe(59 + 8);
+    // paddingTopがセーフエリアの上端インセット(59)そのものになる。タイトル自体の
+    // marginTop(8)と合わせて、リファクタ前と同じ合計の上端余白(59 + 8)を維持する
+    expect(flattenedStyle.paddingTop).toBe(59);
+
+    const title = screen.getByText('日記');
+    expect(StyleSheet.flatten(title.props.style).marginTop).toBe(8);
   });
 
   describe('KeyboardAvoidingView のプラットフォーム別挙動', () => {

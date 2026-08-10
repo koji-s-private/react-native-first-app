@@ -17,9 +17,9 @@ import {
 } from 'react-native';
 import type { CalendarProps, DateData } from 'react-native-calendars';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SaveToast } from '@/components/save-toast';
+import { TabScreenContainer } from '@/components/tab-screen-container';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useThemeColor } from '@/hooks/use-theme-color';
@@ -192,8 +192,6 @@ export default function HomeScreen() {
   // `flex: 1`で使い切るView)の実測高さ(onLayoutで取得)。この外枠自体に枠線・角丸を付け、
   // 日付グリッドの高さもこの実測値を基準に算出することで、外枠と日付グリッドの基準を一致させる
   const [wrapperHeight, setWrapperHeight] = useState(0);
-  // ノッチ/Dynamic Island・ステータスバーとタイトルが重ならないよう、上端のセーフエリアインセットを取得する
-  const insets = useSafeAreaInsets();
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
   const backgroundColor = useThemeColor({}, 'background');
@@ -487,8 +485,10 @@ export default function HomeScreen() {
       // Android, setting behavior is recommended.」と案内されている)
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ThemedView style={styles.container}>
-        <ThemedText type="title" style={[styles.title, { marginTop: insets.top + 8 }]}>
+      {/* ステータスバー/ノッチ領域とタイトルが重ならないよう、TabScreenContainerで
+          セーフエリア上端インセットぶんの余白を自動的に加算する(Issue #125) */}
+      <TabScreenContainer style={styles.container}>
+        <ThemedText type="title" style={styles.title}>
           日記
         </ThemedText>
 
@@ -681,7 +681,7 @@ export default function HomeScreen() {
             </ThemedView>
           </View>
         </Modal>
-      </ThemedView>
+      </TabScreenContainer>
     </KeyboardAvoidingView>
   );
 }
@@ -696,8 +696,8 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   title: {
-    // 実際のmarginTopはセーフエリアの上端インセットを加算してインライン指定するため、
-    // ここでの値はセーフエリア情報が取得できない場合のフォールバック用のベース余白
+    // セーフエリア上端インセットぶんの余白はTabScreenContainer側で加算済みのため、
+    // ここではタイトル自体のベース余白のみを指定する
     marginTop: 8,
   },
   composer: {

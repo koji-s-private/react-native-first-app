@@ -5,6 +5,7 @@ import { useCallback, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet } from 'react-native';
 
 import { ExternalLink } from '@/components/external-link';
+import { TabScreenContainer } from '@/components/tab-screen-container';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { SETTINGS_SECTIONS, type SettingsMenuItem } from '@/constants/settings-menu';
@@ -176,7 +177,9 @@ function ExportDiaryDataButton() {
 
 export default function SettingsScreen() {
   return (
-    <ThemedView style={styles.container}>
+    // ステータスバー/ノッチ領域とコンテンツが重ならないよう、TabScreenContainerで
+    // セーフエリア上端インセットぶんの余白を自動的に加算する(Issue #125)
+    <TabScreenContainer style={styles.container}>
       {SETTINGS_SECTIONS.map((section) => (
         <ThemedView key={section.key} style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
@@ -201,7 +204,7 @@ export default function SettingsScreen() {
           <DeleteAllDiaryDataButton />
         </ThemedView>
       </ThemedView>
-    </ThemedView>
+    </TabScreenContainer>
   );
 }
 
