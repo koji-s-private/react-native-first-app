@@ -557,6 +557,8 @@ export default function HomeScreen() {
           animationType="slide"
           transparent
           onRequestClose={handleCloseDateModal}
+          statusBarTranslucent
+          navigationBarTranslucent
         >
           <View style={styles.modalOverlay}>
             <ThemedView style={[styles.modalContent, { borderColor: iconColor }]}>
@@ -611,6 +613,8 @@ export default function HomeScreen() {
           animationType="slide"
           transparent
           onRequestClose={handleCancelEdit}
+          statusBarTranslucent
+          navigationBarTranslucent
         >
           <View style={styles.modalOverlay}>
             <ThemedView style={[styles.modalContent, { borderColor: iconColor }]}>

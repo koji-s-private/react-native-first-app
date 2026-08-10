@@ -5,7 +5,7 @@ import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
-import { Alert, Platform, StyleSheet, useColorScheme } from 'react-native';
+import { Alert, Modal, Platform, StyleSheet, useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import HomeScreen from '@/app/(tabs)/index';
@@ -1286,6 +1286,60 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
 
       await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
+    });
+
+    it('sets statusBarTranslucent and navigationBarTranslucent on both the entry-list modal and the edit modal, so they match the edge-to-edge display of the screen behind them (Issue #94)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      // 日付タップ時の一覧モーダルと編集モーダルの2つが常にツリーに存在する
+      // (visibleプロパティで表示/非表示を切り替えているだけで、条件付きレンダリングではないため)
+      const modals = screen.UNSAFE_getAllByType(Modal);
+      expect(modals).toHaveLength(2);
+      for (const modal of modals) {
+        expect(modal.props.statusBarTranslucent).toBe(true);
+        expect(modal.props.navigationBarTranslucent).toBe(true);
+      }
+    });
+
+    it('keeps statusBarTranslucent and navigationBarTranslucent set to true on each modal even while it is actually open (visible=true), not just at rest (regression for Issue #94)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '編集対象の日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('編集対象の日記');
+
+      // 日付タップ前は両モーダルとも非表示(visible=false)だが、translucent系のpropは
+      // 表示状態に関わらず常に設定されている静的なpropである
+      const [entryListModalBeforeOpen, editModalBeforeOpen] = screen.UNSAFE_getAllByType(Modal);
+      expect(entryListModalBeforeOpen.props.visible).toBe(false);
+      expect(editModalBeforeOpen.props.visible).toBe(false);
+
+      // 一覧モーダルを開いた状態(visible=true)でも維持されていることを確認する
+      fireEvent.press(screen.getByText('編集対象の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      const [entryListModalOpen, editModalStillClosed] = screen.UNSAFE_getAllByType(Modal);
+      expect(entryListModalOpen.props.visible).toBe(true);
+      expect(entryListModalOpen.props.statusBarTranslucent).toBe(true);
+      expect(entryListModalOpen.props.navigationBarTranslucent).toBe(true);
+      expect(editModalStillClosed.props.visible).toBe(false);
+      expect(editModalStillClosed.props.statusBarTranslucent).toBe(true);
+      expect(editModalStillClosed.props.navigationBarTranslucent).toBe(true);
+
+      // 続けて編集モーダルを開いた状態(visible=true)でも維持されていることを確認する
+      fireEvent.press(screen.getByText('編集'));
+      await screen.findByText('日記を編集');
+
+      const [entryListModalStillOpen, editModalOpen] = screen.UNSAFE_getAllByType(Modal);
+      expect(entryListModalStillOpen.props.visible).toBe(true);
+      expect(editModalOpen.props.visible).toBe(true);
+      expect(editModalOpen.props.statusBarTranslucent).toBe(true);
+      expect(editModalOpen.props.navigationBarTranslucent).toBe(true);
     });
   });
 
