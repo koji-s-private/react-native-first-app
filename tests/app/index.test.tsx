@@ -5,7 +5,7 @@ import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
-import { Alert, Platform, StyleSheet, useColorScheme } from 'react-native';
+import { Alert, Modal, Platform, StyleSheet, useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import HomeScreen from '@/app/(tabs)/index';
@@ -1286,6 +1286,20 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
 
       await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
+    });
+
+    it('sets statusBarTranslucent and navigationBarTranslucent on both the entry-list modal and the edit modal, so they match the edge-to-edge display of the screen behind them (Issue #94)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      // 日付タップ時の一覧モーダルと編集モーダルの2つが常にツリーに存在する
+      // (visibleプロパティで表示/非表示を切り替えているだけで、条件付きレンダリングではないため)
+      const modals = screen.UNSAFE_getAllByType(Modal);
+      expect(modals).toHaveLength(2);
+      for (const modal of modals) {
+        expect(modal.props.statusBarTranslucent).toBe(true);
+        expect(modal.props.navigationBarTranslucent).toBe(true);
+      }
     });
   });
 
