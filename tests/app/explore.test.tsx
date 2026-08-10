@@ -5,6 +5,28 @@ import React from 'react';
 import appConfig from '@/app.json';
 import ExploreScreen from '@/app/(tabs)/explore';
 
+// `ExploreScreen` は `ParallaxScrollView` でラップされており、`react-native-reanimated` の
+// `useAnimatedRef`/`useScrollOffset` を使ってヘッダーのスクロール連動パララックスアニメーションを
+// 制御している。`useScrollOffset` はこのanimated refを監視し、マウント後にスクロール対象コンポーネントが
+// ネイティブのview tagを報告することを期待する。`react-test-renderer` は実際のネイティブview解決を
+// 行わないため、view tagが取得できず、`useScrollOffset` が毎回のレンダリングで
+// "[Reanimated] animatedRef is not initialized in useScrollOffset ..." という警告を出力してしまう。
+// このテストではスクロール連動アニメーション自体ではなく画面の静的コンテンツのみを検証しているため、
+// (決して解決されない)animated refを監視する代わりに `useScrollOffset` が単純なshared valueを
+// 返すようにモックし、モジュールの他の部分に手を加えずに警告を回避している。
+jest.mock('react-native-reanimated', () => {
+  const actual = jest.requireActual('react-native-reanimated');
+
+  return {
+    ...actual,
+    // `ParallaxScrollView` が使用している `import Animated from 'react-native-reanimated'`
+    // (デフォルトインポート)を正しく解決するには `__esModule` の付与が必要。これが無いと
+    // Babelのinterop解決によって `Animated` がこのモックオブジェクト全体に解決されてしまう。
+    __esModule: true,
+    useScrollOffset: () => actual.useSharedValue(0),
+  };
+});
+
 // `ExternalLink` (used inside some of the Collapsible sections on this screen) wraps
 // `expo-router`'s `Link`, which requires a navigation/router context that isn't set up
 // when rendering the screen in isolation. We stub it out the same way
