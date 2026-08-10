@@ -4,11 +4,26 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
-import { Alert, Platform, Text } from 'react-native';
+import { Alert, Platform, StyleSheet, Text } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import SettingsScreen from '@/app/(tabs)/settings';
+import { TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID } from '@/components/tab-screen-container';
 import { SETTINGS_SECTIONS } from '@/constants/settings-menu';
 import { DIARY_ENTRIES_STORAGE_KEY } from '@/utils/diary-storage';
+
+// 実機では`expo-router`の`ExpoRoot`が自動的に`SafeAreaProvider`で全体をラップするが、
+// このテストでは`SettingsScreen`を単体でレンダリングするため、そのラップが存在しない。
+// `useSafeAreaInsets`(内部で`TabScreenContainer`が利用する)は`SafeAreaProvider`配下でないと
+// エラーを投げるため、`tests/app/index.test.tsx`と同様にライブラリ公式のjestモック
+// (常にゼロインセットを返す)に差し替える。
+jest.mock(
+  'react-native-safe-area-context',
+  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
+  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  () => require('react-native-safe-area-context/jest/mock').default,
+);
 
 // `settings.tsx`は削除ボタンから`clearAllDiaryEntries`(内部で`AsyncStorage.removeItem`を呼ぶ)を
 // 利用するようになったため、ネイティブの`AsyncStorage`モジュールが存在しないJest環境では
@@ -157,6 +172,39 @@ describe('SettingsScreen', () => {
 
     // 直接ThemedTextを描画確認するSmokeテスト
     expect(screen.UNSAFE_getAllByType(Text).length).toBeGreaterThan(0);
+  });
+
+  // Issue #125: 設定タブがステータスバー/ノッチ領域と重なる不具合の回帰テスト。
+  // セーフエリア対応は共通コンポーネント`TabScreenContainer`に委ねているため、
+  // ここではその外側ラッパーに正しくインセットが伝播していることのみを検証する。
+  describe('セーフエリア対応(Issue #125: ステータスバー/ノッチ領域との重なり防止)', () => {
+    it('does not add extra top padding via TabScreenContainer when the safe area top inset is zero', () => {
+      render(<SettingsScreen />);
+
+      const safeAreaWrapper = screen.getByTestId(TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID);
+      const flattenedStyle = StyleSheet.flatten(safeAreaWrapper.props.style);
+
+      expect(flattenedStyle.paddingTop).toBe(0);
+    });
+
+    it('adds the safe area top inset as paddingTop on TabScreenContainer so content does not overlap the status bar/notch/Dynamic Island', () => {
+      // iPhone 14 Pro (Dynamic Island) 相当のトップインセットを想定
+      render(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 393, height: 852 },
+            insets: { top: 59, left: 0, right: 0, bottom: 34 },
+          }}
+        >
+          <SettingsScreen />
+        </SafeAreaProvider>,
+      );
+
+      const safeAreaWrapper = screen.getByTestId(TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID);
+      const flattenedStyle = StyleSheet.flatten(safeAreaWrapper.props.style);
+
+      expect(flattenedStyle.paddingTop).toBe(59);
+    });
   });
 });
 
