@@ -1034,7 +1034,7 @@ describe('HomeScreen', () => {
   });
 
   describe('空状態(日記が0件)の案内メッセージ', () => {
-    it('shows the empty state message immediately, even before the async AsyncStorage load resolves (entries starts as an empty array)', () => {
+    it('shows the empty state message immediately, even before the async AsyncStorage load resolves (entries starts as an empty array)', async () => {
       render(<HomeScreen />);
 
       // useEffectによるAsyncStorageからの読み込みが完了する前でも、entriesの初期値は
@@ -1043,6 +1043,11 @@ describe('HomeScreen', () => {
 
       // カレンダー自体は日記が0件でも常に表示され続ける(曜日ヘッダーの存在で確認する)
       expect(screen.getByText('日', { includeHiddenElements: true })).toBeTruthy();
+
+      // 上記のアサーション自体は非同期読み込みの完了を待たずに行うが、テストを終える前に
+      // 読み込み完了(setEntries)まで待機しておかないと、そのstate更新がテスト終了後に
+      // act(...)の外側で発生してしまい、Reactのact()警告が出てしまう(Issue #128)
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
     });
 
     it('keeps showing the empty state message after the async load resolves with no stored entries', async () => {
