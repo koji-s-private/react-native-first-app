@@ -1907,6 +1907,203 @@ describe('HomeScreen', () => {
     });
   });
 
+  describe('保存/編集/削除の書き込み直列化によるレースコンディション対策(Issue #130)', () => {
+    // 日記エントリの削除(Issue #33)のdescribe内にある同名ヘルパーと同じ実装。
+    // このdescribe単体でも複数の非同期操作を絡めたシナリオを組み立てやすくするため、
+    // ここでも同じ内容のヘルパーをローカルに用意する。
+    async function pressAlertButton(label: string) {
+      const alertMock = Alert.alert as jest.Mock;
+      const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
+      const buttons = lastCall[2] as { text: string; onPress?: () => void }[];
+      const button = buttons.find((b) => b.text === label);
+      expect(button).toBeDefined();
+      await act(async () => {
+        button?.onPress?.();
+      });
+    }
+
+    it("persists both a delete of entry A and a concurrent edit of entry B, even though A's persistence write is still pending when B's edit save is requested (regression for Issue #130: without the write queue, A's later-completing write would overwrite B's edit with a stale snapshot)", async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const storedEntries = [
+        { id: 'a', text: 'Aの日記(削除される)', createdAt: isoAt(now, dayWithEntry, 7, 0) },
+        { id: 'b', text: 'Bの日記(編集前)', createdAt: isoAt(now, dayWithEntry, 12, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      jest.clearAllMocks();
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      // 1回目(Aの削除の永続化)と2回目(Bの編集の永続化)のsetItemの解決タイミングを
+      // それぞれ個別に制御できるようにしておく。実際のストレージへの書き込み自体は
+      // 呼び出し直前に捕まえておいた元の実装(spyOnで差し替える前のsetItem)経由で行い、
+      // 「完了タイミングだけを遅延させる」ようにする(単に解決を遅らせるだけだと、
+      // 実際のAsyncStorageへは書き込まれないまま次のタスクが読み直してしまい、
+      // 直列化の検証にならないため)
+      const originalSetItem = AsyncStorage.setItem;
+      let resolveDeleteWrite: () => void = () => {};
+      let resolveEditWrite: () => void = () => {};
+      jest
+        .spyOn(AsyncStorage, 'setItem')
+        .mockImplementationOnce(
+          (key: string, value: string) =>
+            new Promise<void>((resolve) => {
+              resolveDeleteWrite = () => {
+                originalSetItem(key, value).then(resolve);
+              };
+            }),
+        )
+        .mockImplementationOnce(
+          (key: string, value: string) =>
+            new Promise<void>((resolve) => {
+              resolveEditWrite = () => {
+                originalSetItem(key, value).then(resolve);
+              };
+            }),
+        );
+
+      render(<HomeScreen />);
+      await screen.findByText('Aの日記(削除される)');
+
+      fireEvent.press(screen.getByText('Aの日記(削除される)'));
+      await screen.findByText('Bの日記(編集前)');
+
+      // Aの削除を確定する。楽観的UI更新は同期的に反映されるが、AsyncStorageへの
+      // 実際の書き込み(enqueueDiaryWrite内)は1回目のsetItemがpendingのまま止まる
+      const deleteButtons = screen.getAllByText('削除');
+      expect(deleteButtons).toHaveLength(2);
+      fireEvent.press(deleteButtons[0]);
+      await pressAlertButton('削除');
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1), {
+        timeout: 5000,
+      });
+      // 楽観的UI更新により、Aは一覧からすでに消えている
+      expect(screen.queryByText('Aの日記(削除される)')).toBeNull();
+
+      // Aの書き込みがまだpendingのうちに、Bの編集保存を開始する
+      fireEvent.press(screen.getByText('編集'));
+      await screen.findByText('日記を編集');
+      const editInput = screen.getByDisplayValue('Bの日記(編集前)');
+      fireEvent.changeText(editInput, 'Bの日記(編集後)');
+      const saveButtons = screen.getAllByText('保存');
+      expect(saveButtons).toHaveLength(2);
+      fireEvent.press(saveButtons[1]);
+
+      // 書き込みキューによって直列化されているため、Aの書き込みが完了する前に
+      // Bの書き込み(2回目のsetItem呼び出し)が発生することはない
+      // (このアサーションは、直列化前の実装では2回目のsetItemが即座に発生してしまい失敗する)
+      expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+
+      // Aの書き込みを完了させると、キューの次のタスク(Bの編集)がAsyncStorageから
+      // 最新データ(Aがすでに削除された状態)を読み直してから書き込みを開始する
+      resolveDeleteWrite();
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(2), {
+        timeout: 5000,
+      });
+
+      // Bの書き込みも完了させる
+      resolveEditWrite();
+      await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull(), {
+        timeout: 5000,
+      });
+
+      // 最終的にAsyncStorageへ永続化された内容には、Aの削除とBの編集の両方が反映されている
+      // (完了順序が入れ替わっても、どちらか一方が古いスナップショットで上書きされて消えない)
+      const setItemMock = AsyncStorage.setItem as jest.Mock;
+      const [, lastValue] = setItemMock.mock.calls[setItemMock.mock.calls.length - 1];
+      const persisted = (await decryptPersistedEntries(lastValue)) as {
+        id: string;
+        text: string;
+      }[];
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0].id).toBe('b');
+      expect(persisted[0].text).toBe('Bの日記(編集後)');
+
+      // 画面上の表示にも両方の変更が反映されている
+      expect(screen.queryByText('Aの日記(削除される)')).toBeNull();
+      expect(screen.getAllByText('Bの日記(編集後)').length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('persists a newly saved entry together with a concurrent deletion of a different entry, even though the deletion write is still pending when the new save is requested (regression for Issue #130, covering handleSave alongside handleDeleteEntry)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const storedEntries = [
+        { id: 'keep', text: '残る日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
+        { id: 'todelete', text: '削除される日記', createdAt: isoAt(now, dayWithEntry, 12, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      jest.clearAllMocks();
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      // 同上の理由により、実際の書き込みは元の実装経由で行い完了タイミングのみを遅延させる
+      const originalSetItem = AsyncStorage.setItem;
+      let resolveDeleteWrite: () => void = () => {};
+      let resolveSaveWrite: () => void = () => {};
+      jest
+        .spyOn(AsyncStorage, 'setItem')
+        .mockImplementationOnce(
+          (key: string, value: string) =>
+            new Promise<void>((resolve) => {
+              resolveDeleteWrite = () => {
+                originalSetItem(key, value).then(resolve);
+              };
+            }),
+        )
+        .mockImplementationOnce(
+          (key: string, value: string) =>
+            new Promise<void>((resolve) => {
+              resolveSaveWrite = () => {
+                originalSetItem(key, value).then(resolve);
+              };
+            }),
+        );
+
+      render(<HomeScreen />);
+      await screen.findByText('残る日記');
+
+      fireEvent.press(screen.getByText('残る日記'));
+      await screen.findByText('削除される日記');
+
+      const deleteButtons = screen.getAllByText('削除');
+      expect(deleteButtons).toHaveLength(2);
+      fireEvent.press(deleteButtons[1]);
+      await pressAlertButton('削除');
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1), {
+        timeout: 5000,
+      });
+
+      // 削除の書き込みがまだpendingのうちに、新規エントリの保存を開始する
+      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+      fireEvent.changeText(input, '新しい日記');
+      fireEvent.press(screen.getByText('保存'));
+
+      // 書き込みキューにより、削除の書き込みが完了するまで新規保存の書き込み
+      // (2回目のsetItem呼び出し)は発生しない
+      expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+
+      resolveDeleteWrite();
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(2), {
+        timeout: 5000,
+      });
+
+      resolveSaveWrite();
+      expect(await screen.findByText('保存しました', {}, { timeout: 5000 })).toBeTruthy();
+
+      const setItemMock = AsyncStorage.setItem as jest.Mock;
+      const [, lastValue] = setItemMock.mock.calls[setItemMock.mock.calls.length - 1];
+      const persisted = (await decryptPersistedEntries(lastValue)) as {
+        id: string;
+        text: string;
+      }[];
+      // 削除されたエントリを含まず、既存の1件+新規保存した1件の合計2件が残っている
+      expect(persisted).toHaveLength(2);
+      expect(persisted.some((entry) => entry.id === 'keep')).toBe(true);
+      expect(persisted.some((entry) => entry.text === '新しい日記')).toBe(true);
+      expect(persisted.some((entry) => entry.id === 'todelete')).toBe(false);
+    });
+  });
+
   describe('テーマに応じたエラー色(Issue #58)', () => {
     // `hooks/use-color-scheme.ts`はreact-nativeの`useColorScheme`をそのままre-exportしているため、
     // jest-expo(react-native)のオートモック(常に'light'を返すjest.fn)を直接上書きすることで
