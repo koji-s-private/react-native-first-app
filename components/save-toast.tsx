@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 
@@ -21,6 +21,17 @@ export function SaveToast({ message, onHide }: SaveToastProps) {
     return () => clearTimeout(timer);
     // messageが変わる(=新しいトーストが表示される)たびにタイマーを張り直す
   }, [message, onHide]);
+
+  useEffect(() => {
+    // `accessibilityLiveRegion="polite"`はAndroid専用のpropであり、iOS(VoiceOver)には
+    // 効果がない。iOSでも保存成功などの状態変化を確実に読み上げさせるため、
+    // 表示のたびに`AccessibilityInfo.announceForAccessibility`を明示的に呼び出す。
+    // (このAPIはAndroidでも動作するが、Android側は既存の`accessibilityLiveRegion`に任せ、
+    // 既存のHapticsの実装パターン(`process.env.EXPO_OS === 'ios'`)に合わせてiOS限定で呼ぶ)
+    if (process.env.EXPO_OS === 'ios') {
+      AccessibilityInfo.announceForAccessibility(message);
+    }
+  }, [message]);
 
   return (
     <View
