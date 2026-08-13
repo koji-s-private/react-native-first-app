@@ -5,6 +5,7 @@ import { useFocusEffect } from 'expo-router';
 import type { ComponentProps } from 'react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   KeyboardAvoidingView,
@@ -169,6 +170,12 @@ function formatEntryDateTime(isoString: string): string {
 
 export default function HomeScreen() {
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
+  // 初回のloadEntries完了までの間だけtrueにする読み込み中フラグ。
+  // useFocusEffectによりloadEntriesはタブへフォーカスが当たるたびに毎回呼ばれるが、
+  // その都度trueへ戻してしまうと空状態メッセージの代わりに表示するローディング表示が
+  // 毎回ちらついてしまうため、初期値true→初回読み込み完了時にfalseの一方向にのみ遷移させる
+  // (falseになった後は二度とtrueへ戻さない)
+  const [isLoading, setIsLoading] = useState(true);
   const [draft, setDraft] = useState('');
   const [saveError, setSaveError] = useState<string | null>(null);
   // 保存成功時に一時的に表示するトーストのメッセージ。nullの間は非表示
@@ -203,6 +210,9 @@ export default function HomeScreen() {
     // 設定画面のエクスポート機能とも共有している。ストレージが空・壊れている場合は
     // 例外を投げず空配列を返す仕様のため、ここで個別にtry/catchする必要はない
     setEntries(await getAllDiaryEntries());
+    // 初回読み込みが完了したことを示す(既にfalseの場合でも呼び出し自体は無害)。
+    // isLoadingをtrueへ戻す処理はどこにも無いため、一方向にのみ遷移する
+    setIsLoading(false);
   }, []);
 
   // 新規保存・編集・削除の永続化処理を直列化するためのキュー。
@@ -574,7 +584,13 @@ export default function HomeScreen() {
           ) : null}
         </ThemedView>
 
-        {entries.length === 0 ? (
+        {isLoading ? (
+          // 初回読み込み中は、まだentriesが空配列なだけなのに空状態メッセージが
+          // 一瞬誤って表示されてしまわないよう、代わりにローディング表示を出す
+          <ThemedView style={styles.emptyState}>
+            <ActivityIndicator color={tintColor} />
+          </ThemedView>
+        ) : entries.length === 0 ? (
           // 日記が1件も保存されていない場合、ラベルの無いカレンダーだけが表示されて
           // 何をすればよいか分かりにくくならないよう、案内メッセージを表示する
           // (カレンダー自体は今後日記を書く導線として引き続き表示しておく)
