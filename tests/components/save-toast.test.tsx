@@ -34,18 +34,26 @@ describe('SaveToast', () => {
   // (jest-expo/jest-preset.jsのbabelOpts参照)。そのため、iOS向けにインライン化された状態
   // (=常にiOS相当として振る舞う)でのアナウンス呼び出しのみを検証する。
   describe('iOSでのVoiceOverアナウンス(Issue #134)', () => {
-    it('calls AccessibilityInfo.announceForAccessibility with the message when the toast is shown', () => {
+    // react-native標準のjestプリセットにより`AccessibilityInfo.announceForAccessibility`は
+    // 既に自動モック化されたjest.fn()であり、その呼び出し履歴はこのdescribeブロックの外を
+    // 含む他のテストから引き継がれてしまう。`spyOn`だけでは既存の呼び出し履歴はクリアされない
+    // ため、各テストの検証対象になる呼び出しだけを正確にカウントできるよう
+    // `mockClear()`を明示的に呼んでいる。
+    it('calls AccessibilityInfo.announceForAccessibility with the message exactly once when the toast is shown', () => {
       const announceSpy = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+      announceSpy.mockClear();
 
       render(<SaveToast message="保存しました" onHide={jest.fn()} />);
 
       expect(announceSpy).toHaveBeenCalledWith('保存しました');
+      expect(announceSpy).toHaveBeenCalledTimes(1);
 
       announceSpy.mockRestore();
     });
 
     it('announces again when the message changes while still mounted', () => {
       const announceSpy = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+      announceSpy.mockClear();
 
       const { rerender } = render(<SaveToast message="1件目のメッセージ" onHide={jest.fn()} />);
       expect(announceSpy).toHaveBeenCalledWith('1件目のメッセージ');
@@ -53,6 +61,36 @@ describe('SaveToast', () => {
       rerender(<SaveToast message="2件目のメッセージ" onHide={jest.fn()} />);
       expect(announceSpy).toHaveBeenCalledWith('2件目のメッセージ');
       expect(announceSpy).toHaveBeenCalledTimes(2);
+
+      announceSpy.mockRestore();
+    });
+
+    it('does not announce again when re-rendered with the same message (only onHide changes)', () => {
+      // messageが変わっていない再レンダリングでは、依存配列(`[message]`)により
+      // アナウンスのuseEffectが再実行されず、余計な読み上げが発生しないことを確認する
+      // (境界値: `onHide`だけが変化するケース)。
+      const announceSpy = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+      announceSpy.mockClear();
+
+      const { rerender } = render(<SaveToast message="保存しました" onHide={jest.fn()} />);
+      expect(announceSpy).toHaveBeenCalledTimes(1);
+
+      rerender(<SaveToast message="保存しました" onHide={jest.fn()} />);
+      expect(announceSpy).toHaveBeenCalledTimes(1);
+
+      announceSpy.mockRestore();
+    });
+
+    it('does not throw and does not announce when the toast is unmounted', () => {
+      // アンマウント後にタイマー等の副作用で余計な呼び出しが発生しないことを確認する(異常系)
+      const announceSpy = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+      announceSpy.mockClear();
+
+      const { unmount } = render(<SaveToast message="保存しました" onHide={jest.fn()} />);
+      expect(announceSpy).toHaveBeenCalledTimes(1);
+
+      expect(() => unmount()).not.toThrow();
+      expect(announceSpy).toHaveBeenCalledTimes(1);
 
       announceSpy.mockRestore();
     });
