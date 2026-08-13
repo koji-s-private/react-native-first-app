@@ -5,7 +5,14 @@ import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
-import { Alert, Modal, Platform, StyleSheet, useColorScheme } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Platform,
+  StyleSheet,
+  useColorScheme,
+} from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import HomeScreen from '@/app/(tabs)/index';
@@ -49,11 +56,31 @@ jest.mock('expo-router', () => {
   // 簡易モックに差し替える。「タブに再フォーカスして読み込み直す」挙動を検証したい
   // テストでは、下の`persists diary entries...`と同様にunmount/再mountすることで、
   // このモックからも再度effectを発火させて模倣する。
+  //
+  // ただし、画面をアンマウントせずに保持したまま(=Reactのstateを保ったまま)
+  // 再フォーカスだけを模したいテスト(Issue #39: isLoadingがfalseになった後は
+  // 再フォーカスしてもtrueへ戻らないことの検証)向けに、現在マウント中の全effectを
+  // 保持しておき、`__triggerRefocus()`で明示的に再発火できるようにしておく
+  // (実際のexpo-routerには存在しないテスト専用のヘルパー)。
+  const activeFocusEffects = new Set<() => void>();
+
   function useFocusEffect(effect: () => void) {
-    ReactForMock.useEffect(effect, [effect]);
+    ReactForMock.useEffect(() => {
+      activeFocusEffects.add(effect);
+      effect();
+      return () => {
+        activeFocusEffects.delete(effect);
+      };
+    }, [effect]);
   }
 
-  return { Link, useFocusEffect };
+  function __triggerRefocus() {
+    for (const effect of activeFocusEffects) {
+      effect();
+    }
+  }
+
+  return { Link, useFocusEffect, __triggerRefocus };
 });
 
 // `jest-expo` が自動生成する expo-crypto のモック(node_modules/expo-crypto/mocks/ExpoCrypto.ts)は
@@ -157,6 +184,11 @@ const mockRandomUUID = randomUUID as jest.Mock;
 const mockNotificationAsync = Haptics.notificationAsync as jest.Mock;
 // 上で定義した`__reset`にアクセスするための型付け直し
 const secureStoreMock = SecureStore as unknown as { __reset: () => void };
+// 上で定義した`expo-router`モックの`__triggerRefocus`にアクセスするための型付け直し
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { __triggerRefocus: triggerRefocus } = require('expo-router') as {
+  __triggerRefocus: () => void;
+};
 
 const STORAGE_KEY = 'diary-entries';
 const ENCRYPTED_PREFIX = 'encrypted:v1:';
@@ -1034,20 +1066,117 @@ describe('HomeScreen', () => {
   });
 
   describe('空状態(日記が0件)の案内メッセージ', () => {
-    it('shows the empty state message immediately, even before the async AsyncStorage load resolves (entries starts as an empty array)', async () => {
+    // Issue #39: 初回読み込み中(AsyncStorage.getItemがまだ解決していない間)は、
+    // entriesの初期値が空配列であることに起因して空状態メッセージが一瞬誤って
+    // 表示されてしまわないよう、代わりにローディング表示(ActivityIndicator)を出す。
+    it('shows a loading indicator instead of the empty state message before the async AsyncStorage load resolves (regression for Issue #39: prevents the empty state from flashing)', async () => {
+      // AsyncStorage.getItemの解決タイミングを呼び出し側から制御できるようにし、
+      // 読み込みが完了する前の状態を確実に検証できるようにする
+      let resolveGetItem: (value: string | null) => void = () => {};
+      jest.spyOn(AsyncStorage, 'getItem').mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveGetItem = resolve;
+          }),
+      );
+
       render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      // useEffectによるAsyncStorageからの読み込みが完了する前でも、entriesの初期値は
-      // 空配列であるため、案内メッセージは最初のレンダリングから既に表示されている
-      expect(screen.getByText(EMPTY_STATE_TEXT)).toBeTruthy();
+      // 読み込みが完了するまでの間は、空状態メッセージの代わりにローディング表示が出る
+      expect(screen.queryByText(EMPTY_STATE_TEXT)).toBeNull();
+      expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(1);
 
-      // カレンダー自体は日記が0件でも常に表示され続ける(曜日ヘッダーの存在で確認する)
+      // カレンダー自体は読み込み中でも常に表示され続ける(曜日ヘッダーの存在で確認する)
       expect(screen.getByText('日', { includeHiddenElements: true })).toBeTruthy();
 
-      // 上記のアサーション自体は非同期読み込みの完了を待たずに行うが、テストを終える前に
-      // 読み込み完了(setEntries)まで待機しておかないと、そのstate更新がテスト終了後に
-      // act(...)の外側で発生してしまい、Reactのact()警告が出てしまう(Issue #128)
+      // 読み込みを完了させ、テスト終了後にact()の外側でstate更新が起きないようにする(Issue #128)
+      await act(async () => {
+        resolveGetItem(null);
+      });
+    });
+
+    it('hides the loading indicator and shows the empty state message once the async load resolves with no stored entries', async () => {
+      let resolveGetItem: (value: string | null) => void = () => {};
+      jest.spyOn(AsyncStorage, 'getItem').mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveGetItem = resolve;
+          }),
+      );
+
+      render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(1);
+
+      await act(async () => {
+        resolveGetItem(null);
+      });
+
+      // 読み込み完了後はローディング表示が消え、代わりに空状態メッセージが表示される
+      expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
+      expect(screen.getByText(EMPTY_STATE_TEXT)).toBeTruthy();
+    });
+
+    it('shows neither the loading indicator nor the empty state message once the async load resolves with existing entries', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '既存の日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+
+      expect(await screen.findByText('既存の日記')).toBeTruthy();
+      expect(screen.queryByText(EMPTY_STATE_TEXT)).toBeNull();
+      expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
+    });
+
+    // Issue #39: isLoadingは初回読み込み完了時にfalseへ遷移した後は二度とtrueへ戻らない仕様。
+    // useFocusEffectによりタブへ再フォーカスするたびにloadEntriesは再実行されるが、
+    // その都度ローディング表示がちらつかないことを確認する
+    // (expo-routerのuseFocusEffectモックはマウント時に一度だけ発火するため、
+    // 再フォーカスはunmount/再mountすることで模す。既存の同種のテストと同じ手法)。
+    it('does not show the loading indicator again on a subsequent focus refetch (regression for Issue #39: isLoading only ever transitions true -> false, never back to true)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '既存の日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      // 1回目のフォーカス(初回マウント)。ここで画面はアンマウントせず、そのまま
+      // Reactのstate(isLoading)を保持し続ける(実機のexpo-router Tabsが
+      // タブ画面をアンマウントしないのと同じ状況を再現する)
+      render(<HomeScreen />);
+      expect(await screen.findByText('既存の日記')).toBeTruthy();
+      expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
+
+      // 2回目の読み込み(再フォーカス時)がまだpending中の間の表示を検証できるようにする
+      let resolveGetItem: (value: string | null) => void = () => {};
+      jest.spyOn(AsyncStorage, 'getItem').mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveGetItem = resolve;
+          }),
+      );
+
+      // 画面をアンマウントせずに、タブへの再フォーカス(useFocusEffectの再実行)のみを模す
+      act(() => {
+        (triggerRefocus as () => void)();
+      });
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledTimes(2));
+
+      // isLoadingは既にfalseのまま維持されるため、読み込みがまだpending中でも
+      // ローディング表示は再度出ない(空状態メッセージも、既存のentriesがまだ残っているため出ない)
+      expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
+      expect(screen.queryByText(EMPTY_STATE_TEXT)).toBeNull();
+      expect(screen.getByText('既存の日記')).toBeTruthy();
+
+      await act(async () => {
+        resolveGetItem(JSON.stringify([]));
+      });
     });
 
     it('keeps showing the empty state message after the async load resolves with no stored entries', async () => {
