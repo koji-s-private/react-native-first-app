@@ -567,7 +567,12 @@ export default function HomeScreen() {
               {draft.length}/{BODY_MAX_LENGTH}
             </ThemedText>
             <Pressable
-              style={[styles.saveButton, { backgroundColor: tintColor }]}
+              style={[
+                styles.saveButton,
+                { backgroundColor: tintColor },
+                // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
+                { opacity: !draft.trim() || isSaving ? 0.5 : 1 },
+              ]}
               onPress={handleSave}
               disabled={!draft.trim() || isSaving}
             >
@@ -724,7 +729,12 @@ export default function HomeScreen() {
                   {editDraft.length}/{BODY_MAX_LENGTH}
                 </ThemedText>
                 <Pressable
-                  style={[styles.saveButton, { backgroundColor: tintColor }]}
+                  style={[
+                    styles.saveButton,
+                    { backgroundColor: tintColor },
+                    // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
+                    { opacity: !editDraft.trim() ? 0.5 : 1 },
+                  ]}
                   onPress={handleSaveEdit}
                   disabled={!editDraft.trim()}
                 >

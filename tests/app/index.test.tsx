@@ -483,6 +483,62 @@ describe('HomeScreen', () => {
       expect(saveButton?.props.accessibilityState?.disabled).toBe(false);
     });
 
+    it('renders the save button at reduced opacity (0.5) while the input is empty, and at full opacity (1) once text is entered, so the disabled state is also visible (正常系/境界値, Issue #42)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const saveButton = screen.getByText('保存').parent?.parent?.parent;
+      expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(0.5);
+
+      fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '何か書く');
+      expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(1);
+
+      // 入力欄を再び空に戻すと、半透明表示にも戻る
+      fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '');
+      expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(0.5);
+    });
+
+    it('keeps the save button at reduced opacity (0.5) when the input contains only whitespace, matching the disabled condition (異常系, Issue #42)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const saveButton = screen.getByText('保存').parent?.parent?.parent;
+      fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '   \n   ');
+
+      expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(0.5);
+    });
+
+    it('keeps the save button at reduced opacity (0.5) while a save is in flight (isSaving), even once the user has typed a new non-empty draft, and restores full opacity once the save completes (境界値: isSaving overrides draft content in the opacity condition, Issue #42)', async () => {
+      let resolveSetItem: () => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSetItem = resolve;
+          }),
+      );
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+      const saveButton = screen.getByText('保存').parent?.parent?.parent;
+
+      fireEvent.changeText(input, '保存中の日記');
+      fireEvent.press(screen.getByText('保存'));
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      // pending中(isSaving=true)にユーザーが新しい非空の下書きを入力しても、
+      // isSavingがtrueである限りボタンは半透明のまま(disabled={!draft.trim() || isSaving}と対応)
+      fireEvent.changeText(input, '書きかけの新しい下書き');
+      expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(0.5);
+
+      resolveSetItem();
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      // isSavingがfalseに戻ると、非空の下書きが残っているため通常の不透明度に戻る
+      await waitFor(() => expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(1));
+    });
+
     it('restores previously saved plaintext entries (from before encryption was introduced) from AsyncStorage and shows them when the day is tapped', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
@@ -1804,6 +1860,34 @@ describe('HomeScreen', () => {
       fireEvent.press(getEditSaveButton());
 
       expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+    });
+
+    it('renders the edit save button at full opacity (1) when opened with prefilled text (正常系), and reduces it to 0.5 once the text is cleared to whitespace only (異常系), matching disabled={!editDraft.trim()} (Issue #42)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('編集前の日記');
+      fireEvent.press(screen.getByText('編集前の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+      fireEvent.press(screen.getByText('編集'));
+      await screen.findByText('日記を編集');
+
+      const editSaveButton = getEditSaveButton().parent?.parent?.parent;
+      // 編集モーダルは既存の本文が入った状態で開くため、初期表示から通常の不透明度になる
+      expect(StyleSheet.flatten(editSaveButton?.props.style).opacity).toBe(1);
+
+      const editInput = screen.getByDisplayValue('編集前の日記');
+      fireEvent.changeText(editInput, '   ');
+      expect(StyleSheet.flatten(editSaveButton?.props.style).opacity).toBe(0.5);
+
+      // 再度文字を入力すると通常の不透明度に戻る(境界値: 空⇔非空の切り替わり)
+      fireEvent.changeText(editInput, '編集後の日記');
+      expect(StyleSheet.flatten(editSaveButton?.props.style).opacity).toBe(1);
     });
 
     it('limits the edit input via maxLength to BODY_MAX_LENGTH (1000 characters, boundary)', async () => {
