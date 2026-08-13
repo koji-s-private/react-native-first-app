@@ -128,7 +128,7 @@
 
 | ライブラリ | 用途 | 主な使用箇所 |
 | --- | --- | --- |
-| [react-native-reanimated](https://docs.swmansion.com/react-native-reanimated/) | 高性能なアニメーションを実現する | `components/hello-wave.tsx`、`components/parallax-scroll-view.tsx` など |
+| [react-native-reanimated](https://docs.swmansion.com/react-native-reanimated/) | 高性能なアニメーションを実現する | `app/_layout.tsx` など |
 | [react-native-worklets](https://docs.swmansion.com/react-native-reanimated/) | Reanimatedが利用するワークレット（UIスレッド上で実行される関数）の基盤 | Reanimated関連の内部依存 |
 | [react-native-gesture-handler](https://docs.swmansion.com/react-native-gesture-handler/) | ジェスチャー（タップ・スワイプなど）のハンドリング | ナビゲーション・タブ操作の内部依存 |
 | [react-native-safe-area-context](https://docs.expo.dev/versions/v54.0.0/sdk/safe-area-context/) | ノッチ・ステータスバーなどを避けた安全領域の取得 | `components/themed-view.tsx` など画面レイアウト全般 |
@@ -214,7 +214,7 @@ erDiagram
 
 ```
 app/                 画面（expo-router によるファイルベースルーティング）
-  (tabs)/            タブ画面（index.tsx: 日記画面、explore.tsx: 探索画面）
+  (tabs)/            タブ画面（index.tsx: 日記画面）
   _layout.tsx         アプリ全体のレイアウト・初期化処理
   modal.tsx           モーダル画面
 assets/              画像などの静的アセット（アイコン・スプラッシュ画像など）

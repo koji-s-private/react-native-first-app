@@ -27,7 +27,7 @@ assets/
 - React Native/Expoでは、同じ画像の高解像度版を `@2x`・`@3x` サフィックスを付けたファイル名で並べて置くと、端末の画面密度に応じて自動的に使い分けられます。
   - 例: `react-logo.png`（標準解像度）、`react-logo@2x.png`（2倍解像度）、`react-logo@3x.png`（3倍解像度）
   - 新しい画像を追加する場合も、必要に応じてこの3種類（無印/`@2x`/`@3x`）を用意してください。
-- コンポーネント側からは `require('@/assets/images/xxx.png')` の形で読み込みます（[`app/(tabs)/explore.tsx`](../app/(tabs)/explore.tsx) を参照）。表示には [`expo-image`](https://docs.expo.dev/versions/v54.0.0/sdk/image/) を利用してください。
+- コンポーネント側からは `require('@/assets/images/xxx.png')` の形で読み込みます。表示には [`expo-image`](https://docs.expo.dev/versions/v54.0.0/sdk/image/) を利用してください。
 - `app.json` から参照するアイコン・スプラッシュ画像のサイズ要件は、[Expo SDK 54 のアプリアイコン設定ドキュメント](https://docs.expo.dev/versions/v54.0.0/) を確認してください。
 
 ## 関連ドキュメント
