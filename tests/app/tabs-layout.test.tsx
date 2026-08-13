@@ -44,3 +44,19 @@ describe('TabLayout のタブタイトル(Issue #10)', () => {
     expect(screen.getByTestId('tab-screen-settings')).toHaveTextContent('設定');
   });
 });
+
+describe('TabLayout のタブ構成(Issue #38: Exploreタブ削除)', () => {
+  it('does not render an "explore" tab screen anymore', () => {
+    render(<TabLayout />);
+
+    expect(screen.queryByTestId('tab-screen-explore')).toBeNull();
+  });
+
+  it('renders exactly two tab screens ("index" and "settings")', () => {
+    render(<TabLayout />);
+
+    expect(screen.getAllByTestId(/^tab-screen-/)).toHaveLength(2);
+    expect(screen.getByTestId('tab-screen-index')).toBeTruthy();
+    expect(screen.getByTestId('tab-screen-settings')).toBeTruthy();
+  });
+});
