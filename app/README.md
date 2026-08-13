@@ -14,7 +14,6 @@ app/
   (tabs)/
     _layout.tsx          タブナビゲーションの定義
     index.tsx            日記画面（ホームタブ）
-    explore.tsx           探索画面（Exploreタブ）
 ```
 
 ## `_layout.tsx` の役割
@@ -33,7 +32,6 @@ app/
 `(tabs)` のように名前を丸括弧で囲んだディレクトリは、expo-routerの[グループ機能](https://docs.expo.dev/router/basics/common-navigation-patterns/)です。URLパス（画面遷移のパス）には反映されず、あくまで「タブナビゲーションでまとめる画面群」を整理するためのフォルダになっています。
 
 - `(tabs)/index.tsx` … タブの「Home」に対応する画面（日記の一覧・入力画面）
-- `(tabs)/explore.tsx` … タブの「Explore」に対応する画面
 
 タブを追加したい場合は、`(tabs)/` ディレクトリに新しい画面ファイルを追加し、`(tabs)/_layout.tsx` の `Tabs.Screen` に対応する設定（`name`、`title`、`tabBarIcon` など）を追記してください。
 
