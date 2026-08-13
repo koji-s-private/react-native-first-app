@@ -24,6 +24,24 @@ export type DiaryEntry = {
 };
 
 /**
+ * 与えられた値が`DiaryEntry`として妥当な形をしているかどうかを判定する型ガード。
+ * `id`, `text`, `createdAt`のいずれもstring型であることを確認する
+ * (AsyncStorageから読み込んだJSONは実行時に型が保証されないため、`JSON.parse`結果を
+ * そのまま`as DiaryEntry`で扱わずここで検証する)。
+ */
+function isDiaryEntry(value: unknown): value is DiaryEntry {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.text === 'string' &&
+    typeof candidate.createdAt === 'string'
+  );
+}
+
+/**
  * 保存済みの日記データをAsyncStorageから全件削除する。
  * ストアのデータ削除要件(Google Play/Apple双方でユーザーによるデータ削除手段の提供が
  * 求められる)に対応するための機能で、設定画面から呼び出される想定。
@@ -49,14 +67,22 @@ export async function getAllDiaryEntries(): Promise<DiaryEntry[]> {
     if (!stored) {
       return [];
     }
+    let parsed: unknown;
     if (isEncryptedPayload(stored)) {
       const key = await getOrCreateEncryptionKey();
-      return JSON.parse(decryptText(stored, key)) as DiaryEntry[];
+      parsed = JSON.parse(decryptText(stored, key));
+    } else {
+      // 暗号化対応前に保存された平文JSON(後方互換)。そのまま読み込む
+      parsed = JSON.parse(stored);
     }
-    // 暗号化対応前に保存された平文JSON(後方互換)。そのまま読み込んで返す
-    return JSON.parse(stored) as DiaryEntry[];
+    // パース結果自体が配列でない場合は空配列を返す
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    // 配列の要素のうち型ガードを通らない不正な要素はスキップし、有効なエントリのみを返す
+    return parsed.filter(isDiaryEntry);
   } catch {
-    // ストレージが壊れている・スキーマ不整合・復号失敗の場合は空配列を返す
+    // ストレージが壊れている・復号失敗の場合は空配列を返す
     return [];
   }
 }

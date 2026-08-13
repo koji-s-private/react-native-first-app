@@ -186,14 +186,35 @@ describe('getAllDiaryEntries', () => {
     await expect(getAllDiaryEntries()).resolves.toEqual([]);
   });
 
-  it('returns an empty array instead of throwing when the decrypted payload is not a valid diary entry array (異常系: スキーマ不整合)', async () => {
+  it('returns an empty array instead of throwing when the decrypted payload is not an array at all (異常系: スキーマ不整合)', async () => {
     const key = await getOrCreateEncryptionKey();
     // 日記データではない別のJSON構造(オブジェクト)を暗号化して保存する
     const encrypted = encryptText(JSON.stringify({ unexpected: 'shape' }), key);
     await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, encrypted);
 
-    // JSON.parse自体は成功するため例外にはならず、型どおりでない値がそのまま返る
-    // (呼び出し元は配列であることを前提にしているが、この関数自体は実行時の型検証まではしない)
-    await expect(getAllDiaryEntries()).resolves.toEqual({ unexpected: 'shape' });
+    // JSON.parse自体は成功するが、配列でないため型ガードにより空配列が返る
+    await expect(getAllDiaryEntries()).resolves.toEqual([]);
+  });
+
+  it('filters out elements that do not match the DiaryEntry shape while keeping valid ones (異常系: 一部エントリのスキーマ不整合)', async () => {
+    const key = await getOrCreateEncryptionKey();
+    const mixed = [
+      sampleEntries[0],
+      { id: '2', text: '欠損データ' }, // createdAtが欠けている
+      { id: 3, text: '型違い', createdAt: '2026-01-03T00:00:00.000Z' }, // idが数値
+      null,
+      sampleEntries[1],
+    ];
+    const encrypted = encryptText(JSON.stringify(mixed), key);
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, encrypted);
+
+    // 不正な要素のみがスキップされ、有効なエントリだけが返る
+    await expect(getAllDiaryEntries()).resolves.toEqual(sampleEntries);
+  });
+
+  it('returns an empty array when the stored plain JSON is not an array (異常系: 後方互換データのスキーマ不整合)', async () => {
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, JSON.stringify({ unexpected: 'shape' }));
+
+    await expect(getAllDiaryEntries()).resolves.toEqual([]);
   });
 });
