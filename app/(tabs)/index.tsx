@@ -205,6 +205,34 @@ export default function HomeScreen() {
     setEntries(await getAllDiaryEntries());
   }, []);
 
+  // 新規保存・編集・削除の永続化処理を直列化するためのキュー。
+  // 各処理はReact stateのentries(古いレンダー時点のスナップショットの可能性がある)ではなく、
+  // 実行の順番が回ってきた時点でAsyncStorageから読み直した最新データをもとに次の内容を計算するため、
+  // 「Aの削除確定→保存処理中に、Bの編集保存が先に完了→Aの書き込みが後から古いスナップショットで
+  // 上書きしてBの編集が消える」といったレースコンディションを防ぐ
+  const writeQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  // mutateは「読み直した最新entries」を受け取り、実際に書き込むべき次のentriesを返す。
+  // 戻り値のPromiseは実際に永続化された(=書き込みに使われた)entriesで解決する
+  const enqueueDiaryWrite = useCallback(
+    (mutate: (latestEntries: DiaryEntry[]) => DiaryEntry[]): Promise<DiaryEntry[]> => {
+      const task = writeQueueRef.current.then(async () => {
+        const latestEntries = await getAllDiaryEntries();
+        const nextEntries = mutate(latestEntries);
+        const key = await getOrCreateEncryptionKey();
+        await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(nextEntries), key));
+        return nextEntries;
+      });
+      // キュー自体は個々のタスクの成否に関わらず先に進める(失敗はtask側のcatchで呼び出し元に伝える)
+      writeQueueRef.current = task.then(
+        () => undefined,
+        () => undefined,
+      );
+      return task;
+    },
+    [],
+  );
+
   // expo-routerの`Tabs`はデフォルトで一度訪れたタブ画面をアンマウントせず保持するため、
   // マウント時に一度だけ読み込む`useEffect`だと、設定タブでの全件削除のように他画面から
   // AsyncStorageが書き換えられても、この画面のstateには反映されないまま残ってしまう
@@ -241,9 +269,9 @@ export default function HomeScreen() {
     };
     const previousEntries = entries;
     const previousDraft = draft;
-    const nextEntries = [newEntry, ...entries];
-
-    setEntries(nextEntries);
+    // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
+    // (実際にAsyncStorageへ書き込む内容はenqueueDiaryWrite内で読み直した最新データを元にする)
+    setEntries([newEntry, ...entries]);
     setDraft('');
     // pending開始時点ではまだ編集操作が発生していないことを表すため、フラグをリセットする
     draftEditedRef.current = false;
@@ -251,9 +279,14 @@ export default function HomeScreen() {
 
     try {
       // 日記本文を平文のままAsyncStorageに保存しないよう、SecureStoreで保護した鍵で
-      // AES-256-GCM暗号化してから保存する
-      const key = await getOrCreateEncryptionKey();
-      await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(nextEntries), key));
+      // AES-256-GCM暗号化してから保存する。他の保存/編集/削除処理と競合しないよう、
+      // 書き込みはキュー経由で直列化し、実行直前に読み直した最新データに新規エントリを追加する
+      const persistedEntries = await enqueueDiaryWrite((latestEntries) => [
+        newEntry,
+        ...latestEntries,
+      ]);
+      // 実際に永続化された内容でUIを真の永続化状態と一致させる
+      setEntries(persistedEntries);
 
       // 保存成功をユーザーに明示するため、一時的なトーストとハプティックフィードバックを発火する。
       // 保存失敗時はsaveErrorでエラーメッセージを表示しており、成功時も対称的にフィードバックする
@@ -279,7 +312,7 @@ export default function HomeScreen() {
       // 成功・失敗いずれの場合も、次の保存を行えるよう必ず実行中フラグを戻す
       setIsSaving(false);
     }
-  }, [draft, entries, isSaving]);
+  }, [draft, entries, isSaving, enqueueDiaryWrite]);
 
   // draft用TextInputのonChangeText。setDraftに加えて、pending中にユーザーが入力操作を
   // 行ったことをdraftEditedRefへ記録する(handleSaveの保存失敗時ロールバック判定に使う)
@@ -310,17 +343,23 @@ export default function HomeScreen() {
     }
 
     const previousEntries = entries;
-    // 対象エントリのtextのみを更新する(createdAtは変更しない)
-    const nextEntries = entries.map((entry) =>
-      entry.id === editingEntryId ? { ...entry, text: trimmed } : entry,
+    // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
+    // (実際にAsyncStorageへ書き込む内容はenqueueDiaryWrite内で読み直した最新データを元にする)
+    setEntries(
+      entries.map((entry) => (entry.id === editingEntryId ? { ...entry, text: trimmed } : entry)),
     );
-
-    setEntries(nextEntries);
     setEditError(null);
 
     try {
-      const key = await getOrCreateEncryptionKey();
-      await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(nextEntries), key));
+      // 他の保存/編集/削除処理と競合しないよう、書き込みはキュー経由で直列化し、
+      // 実行直前に読み直した最新データに対して対象エントリのtextのみを更新する(createdAtは変更しない)
+      const persistedEntries = await enqueueDiaryWrite((latestEntries) =>
+        latestEntries.map((entry) =>
+          entry.id === editingEntryId ? { ...entry, text: trimmed } : entry,
+        ),
+      );
+      // 実際に永続化された内容でUIを真の永続化状態と一致させる
+      setEntries(persistedEntries);
       // 永続化に成功した場合のみ編集モーダルを閉じる
       setEditingEntryId(null);
       setEditDraft('');
@@ -329,7 +368,7 @@ export default function HomeScreen() {
       setEntries(previousEntries);
       setEditError('更新に失敗しました。もう一度お試しください。');
     }
-  }, [editDraft, editingEntryId, entries]);
+  }, [editDraft, editingEntryId, entries, enqueueDiaryWrite]);
 
   // 日付一覧モーダルを閉じる(開いていた編集モーダルがあれば合わせて閉じる)
   const handleCloseDateModal = useCallback(() => {
@@ -342,20 +381,25 @@ export default function HomeScreen() {
   const handleDeleteEntry = useCallback(
     async (entryId: string) => {
       const previousEntries = entries;
-      const nextEntries = entries.filter((entry) => entry.id !== entryId);
-
-      setEntries(nextEntries);
+      // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
+      // (実際にAsyncStorageへ書き込む内容はenqueueDiaryWrite内で読み直した最新データを元にする)
+      setEntries(entries.filter((entry) => entry.id !== entryId));
 
       try {
-        const key = await getOrCreateEncryptionKey();
-        await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(nextEntries), key));
+        // 他の保存/編集/削除処理と競合しないよう、書き込みはキュー経由で直列化し、
+        // 実行直前に読み直した最新データから対象エントリを取り除く
+        const persistedEntries = await enqueueDiaryWrite((latestEntries) =>
+          latestEntries.filter((entry) => entry.id !== entryId),
+        );
+        // 実際に永続化された内容でUIを真の永続化状態と一致させる
+        setEntries(persistedEntries);
       } catch {
         // 永続化に失敗した場合は削除前の状態に戻す
         setEntries(previousEntries);
         Alert.alert('削除に失敗しました', 'もう一度お試しください。');
       }
     },
-    [entries],
+    [entries, enqueueDiaryWrite],
   );
 
   // トーストを非表示にする(SaveToastのuseEffectの依存配列に含まれるため、毎レンダーで
