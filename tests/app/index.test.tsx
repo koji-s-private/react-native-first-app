@@ -12,6 +12,7 @@ import {
   Platform,
   StyleSheet,
   useColorScheme,
+  View,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -1885,6 +1886,188 @@ describe('HomeScreen', () => {
       expect(editModalOpen.props.visible).toBe(true);
       expect(editModalOpen.props.statusBarTranslucent).toBe(true);
       expect(editModalOpen.props.navigationBarTranslucent).toBe(true);
+    });
+  });
+
+  describe('カレンダーセルの複数件数バッジ(Issue #72)', () => {
+    // 同じ日に2件以上の日記がある場合、カレンダーセルの右上に「+N」(2件目以降の件数)の
+    // バッジを表示する。実装(renderDay)の`extraEntryCount = dayEntries.length - 1`を
+    // ホワイトボックスで踏まえつつ、実際のレンダリング結果(バッジのテキスト有無・内容)を
+    // ブラックボックスに検証する。バッジの本体View(styles.entryCountBadge)は
+    // `minWidth: 16, height: 16`という一意な組み合わせのスタイルを持つため、
+    // それを目印にView自体を特定するヘルパーを用意する。
+    function findEntryCountBadgeViews() {
+      return screen.UNSAFE_getAllByType(View).filter((node) => {
+        const flattened = StyleSheet.flatten(node.props.style ?? {});
+        return flattened.minWidth === 16 && flattened.height === 16;
+      });
+    }
+
+    it('does not show a count badge when a day has exactly 1 diary entry (正常系/境界値: 単一件数)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '1件のみの日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('1件のみの日記');
+
+      expect(screen.queryByText(/^\+\d+$/)).toBeNull();
+      expect(findEntryCountBadgeViews()).toHaveLength(0);
+    });
+
+    it('shows a "+1" badge when a day has exactly 2 diary entries (正常系)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const storedEntries = [
+        { id: '1', text: '朝の日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
+        { id: '2', text: '夜の日記', createdAt: isoAt(now, dayWithEntry, 21, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+
+      render(<HomeScreen />);
+      await screen.findByText('朝の日記');
+
+      expect(screen.getByText('+1')).toBeTruthy();
+      // セル自体には先頭(最も時刻が早い)の日記のタイトルのみが表示され、2件目は表示されない
+      expect(screen.queryByText('夜の日記')).toBeNull();
+    });
+
+    it('shows a "+2" badge when a day has exactly 3 diary entries (正常系)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const storedEntries = [
+        { id: '1', text: '朝の日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
+        { id: '2', text: '昼の日記', createdAt: isoAt(now, dayWithEntry, 12, 0) },
+        { id: '3', text: '夜の日記', createdAt: isoAt(now, dayWithEntry, 21, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+
+      render(<HomeScreen />);
+      await screen.findByText('朝の日記');
+
+      expect(screen.getByText('+2')).toBeTruthy();
+    });
+
+    it('shows a "+3" badge when a day has 4 diary entries (正常系: 最小の複数件数境界(2件)より先まで正しくスケールすることの確認)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const storedEntries = [0, 1, 2, 3].map((i) => ({
+        id: `${i}`,
+        text: `${i}件目の日記`,
+        createdAt: isoAt(now, dayWithEntry, 6 + i * 4, 0),
+      }));
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+
+      render(<HomeScreen />);
+      await screen.findByText('0件目の日記');
+
+      expect(screen.getByText('+3')).toBeTruthy();
+      expect(findEntryCountBadgeViews()).toHaveLength(1);
+    });
+
+    it('shows no badge anywhere when there are no diary entries at all (境界値: 0件)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      expect(screen.queryByText(/^\+\d+$/)).toBeNull();
+      expect(findEntryCountBadgeViews()).toHaveLength(0);
+    });
+
+    it('does not show a badge on a day with no entries (entriesByDate has no key for it), even while another day in the same month has multiple entries (境界値: entriesByDateにキーが無い日付)', async () => {
+      const now = new Date();
+      const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
+      const storedEntries = [
+        { id: '1', text: '朝の日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
+        { id: '2', text: '夜の日記', createdAt: isoAt(now, dayWithEntry, 21, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+
+      render(<HomeScreen />);
+      await screen.findByText('朝の日記');
+
+      // 複数件の日には1つだけバッジが表示され、日記の無い日(dayWithoutEntry)には表示されない。
+      // dayWithEntryとdayWithoutEntryの範囲は重複しないため、バッジが1個のみであることの確認は
+      // dayWithoutEntry側にバッジが無いことの確認を兼ねる
+      expect(screen.getByText('+1')).toBeTruthy();
+      expect(screen.getAllByText(/^\+\d+$/)).toHaveLength(1);
+      expect(findEntryCountBadgeViews()).toHaveLength(1);
+
+      // 日記の無い日のセルは押せない(タップしても一覧モーダルが開かない)ことも合わせて確認する
+      fireEvent.press(screen.getByText(String(dayWithoutEntry)));
+      expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull();
+    });
+
+    it('renders the badge with tintColor as its background and backgroundColor as its text color, following the same theme-color convention as the today badge (異常系/回帰防止: テーマ色の取り違え防止)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const storedEntries = [
+        { id: '1', text: '朝の日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
+        { id: '2', text: '夜の日記', createdAt: isoAt(now, dayWithEntry, 21, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+
+      render(<HomeScreen />);
+      await screen.findByText('朝の日記');
+
+      const badgeText = screen.getByText('+1');
+      expect(StyleSheet.flatten(badgeText.props.style).color).toBe(Colors.light.background);
+
+      const [badgeView] = findEntryCountBadgeViews();
+      expect(StyleSheet.flatten(badgeView.props.style).backgroundColor).toBe(Colors.light.tint);
+    });
+
+    it('keeps the count badge visible after the day-entry modal for that date is opened and closed (regression: badge does not disappear due to modal interaction)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const storedEntries = [
+        { id: '1', text: '朝の日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
+        { id: '2', text: '夜の日記', createdAt: isoAt(now, dayWithEntry, 21, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+
+      render(<HomeScreen />);
+      await screen.findByText('朝の日記');
+      expect(screen.getByText('+1')).toBeTruthy();
+
+      fireEvent.press(screen.getByText('朝の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+      fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
+      await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
+
+      expect(screen.getByText('+1')).toBeTruthy();
+    });
+
+    it('updates the badge from "+1" to "+2" once a third entry is saved for a day that already had 2 entries (正常系: 動的な件数増加への追従)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const storedEntries = [
+        { id: '1', text: '朝の日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
+        { id: '2', text: '昼の日記', createdAt: isoAt(now, dayWithEntry, 12, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+
+      render(<HomeScreen />);
+      await screen.findByText('朝の日記');
+      expect(screen.getByText('+1')).toBeTruthy();
+
+      // 同じ日の日記を新たに保存すると、保存対象の日付は今日(now)なので、
+      // dayWithEntryが今日自身の場合のみ検証可能。保存欄からの追加は
+      // 「今日」の日付にしか保存できない実装のため、pickTestDaysが選ぶ範囲(10〜20日)と
+      // 実行日が一致しない限りこのテストでは直接は再現できない。
+      // そのため、AsyncStorageへ直接3件目を追記して再フォーカス相当の再読み込みを模す。
+      const key = await getOrCreateEncryptionKey();
+      const threeEntries = [
+        ...storedEntries,
+        { id: '3', text: '夜の日記', createdAt: isoAt(now, dayWithEntry, 21, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(threeEntries), key));
+      triggerRefocus();
+
+      await waitFor(() => expect(screen.getByText('+2')).toBeTruthy());
+      expect(screen.queryByText('+1')).toBeNull();
     });
   });
 
