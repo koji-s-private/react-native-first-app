@@ -551,6 +551,9 @@ export default function HomeScreen() {
       const dayEntries = entriesByDate[date.dateString];
       // その日に書かれた日記のうち最初の1件のタイトルのみをセルに表示する
       const title = dayEntries?.length ? getEntryTitle(dayEntries[0].text) : null;
+      // 同じ日に2件以上の日記がある場合、2件目以降の件数を「+N」バッジで表示する
+      // (モーダルを開かなくても複数件あることに気づけるようにするため)
+      const extraEntryCount = dayEntries && dayEntries.length > 1 ? dayEntries.length - 1 : 0;
       const isDisabled = state === 'disabled' || state === 'inactive';
       const isToday = state === 'today';
 
@@ -561,6 +564,16 @@ export default function HomeScreen() {
           disabled={!title}
           accessibilityRole={title ? 'button' : undefined}
         >
+          {extraEntryCount > 0 ? (
+            <View style={[styles.entryCountBadge, { backgroundColor: tintColor }]}>
+              <ThemedText
+                style={[styles.entryCountText, { color: backgroundColor }]}
+                maxFontSizeMultiplier={DAY_CELL_MAX_FONT_SCALE}
+              >
+                +{extraEntryCount}
+              </ThemedText>
+            </View>
+          ) : null}
           {isToday ? (
             // 今日のセルは数字を丸背景で囲んで強調する(一般的なカレンダーアプリの表現に合わせる)
             <View style={[styles.todayBadge, { backgroundColor: tintColor }]}>
@@ -892,6 +905,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 4,
     gap: 2,
+    // 件数バッジ(entryCountBadge)をセル右上に絶対配置するための基準にする
+    position: 'relative',
   },
   dayNumber: {
     fontSize: 14,
@@ -909,6 +924,21 @@ const styles = StyleSheet.create({
   dayEntryTitle: {
     fontSize: 10,
     paddingHorizontal: 2,
+  },
+  entryCountBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  entryCountText: {
+    fontSize: 9,
+    fontWeight: '700',
   },
   modalOverlay: {
     flex: 1,
