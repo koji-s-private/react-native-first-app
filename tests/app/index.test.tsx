@@ -1830,7 +1830,7 @@ describe('HomeScreen', () => {
     // それらのセルは常に日記が無い(entriesByDateには当月のキーしか存在しない)ため、
     // 実装が`title`のみを見てdisabled判定していることを踏まえ、はみ出しセルでも
     // 正しい年月日のaccessibilityLabelとaccessibilityState.disabled=trueが付くことを確認する
-    it('sets a correct accessibilityLabel (with that day\'s own year/month, not the currently displayed month) and marks it as accessibility-disabled on overflow day cells belonging to an adjacent month', async () => {
+    it("sets a correct accessibilityLabel (with that day's own year/month, not the currently displayed month) and marks it as accessibility-disabled on overflow day cells belonging to an adjacent month", async () => {
       const now = new Date();
 
       render(<HomeScreen />);
