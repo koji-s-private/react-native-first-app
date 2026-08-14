@@ -17,9 +17,13 @@ tests/
     save-toast.test.tsx    components/save-toast.tsx（保存成功時に表示する一時的なトースト）のテスト
   constants/
     theme.test.ts        constants/theme.ts（ライト/ダークモードの色定義）のテスト
+  contexts/
+    theme-preference-context.test.tsx   contexts/theme-preference-context.tsx（配色設定）のテスト
+    diary-reminder-context.test.tsx   contexts/diary-reminder-context.tsx（日記リマインダー通知の設定・永続化）のテスト
   utils/
     diary-encryption.test.ts   utils/diary-encryption.ts（日記データの暗号化・復号）のテスト
     diary-storage.test.ts      utils/diary-storage.ts（日記データの全件削除）のテスト
+    diary-reminder-notifications.test.ts   utils/diary-reminder-notifications.ts（expo-notificationsラッパー。許可リクエスト・日次スケジュール登録/キャンセル）のテスト
     onboarding-storage.test.ts   utils/onboarding-storage.ts（オンボーディング表示済みフラグの読み書き）のテスト
 ```
 
@@ -53,6 +57,14 @@ npm test
 - `expo-secure-store`: インメモリの `Record<string, string>` で `getItemAsync` / `setItemAsync` / `deleteItemAsync` を実装し、テスト間の状態分離のための `__reset()` ヘルパーを追加する。
 
 具体的な実装は [tests/utils/diary-encryption.test.ts](utils/diary-encryption.test.ts) と [tests/app/index.test.tsx](app/index.test.tsx) を参照してください。
+
+### expo-notifications のモックについて
+
+`utils/diary-reminder-notifications.ts` は `expo-notifications` の許可リクエスト・日次スケジュール登録/キャンセルAPIをそのまま呼び出します。`jest-expo` が自動生成するモックは存在せず、そのままimportするとExpo Go上のPush通知サポート終了に関する警告ログが出るだけで許可状態やスケジュール登録を検証できないため、`expo-crypto`/`expo-secure-store`と同様に`jest.mock('expo-notifications', () => ({ ... }))`で各関数を`jest.fn()`に差し替える必要があります。
+
+- `contexts/diary-reminder-context.tsx` のテストでは、コンテキスト自体の状態管理・永続化ロジックを検証したいため、`expo-notifications`ではなく一段上の`utils/diary-reminder-notifications.ts`ごとモック化しています。
+
+具体的な実装は [tests/utils/diary-reminder-notifications.test.ts](utils/diary-reminder-notifications.test.ts) と [tests/contexts/diary-reminder-context.test.tsx](contexts/diary-reminder-context.test.tsx) を参照してください。
 
 ## 関連ドキュメント
 
