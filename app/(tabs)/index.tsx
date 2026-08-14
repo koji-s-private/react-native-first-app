@@ -3,7 +3,7 @@ import { randomUUID } from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from 'expo-router';
 import type { ComponentProps } from 'react';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -34,6 +34,17 @@ import {
 // 日記データのAsyncStorageキーは、設定画面からの全件削除機能(utils/diary-storage.ts)と
 // 共有するため、そちらで定義した定数を参照する
 const STORAGE_KEY = DIARY_ENTRIES_STORAGE_KEY;
+
+// 保存前の下書き(draft)を自動保存するためのAsyncStorageキー。日記本文の保存キー(STORAGE_KEY)とは
+// 別キーにすることで、保存済みエントリの一覧データとは独立して読み書きできるようにする(Issue #54)。
+// 「保存」ボタンを押すまで下書きが永続化されないと、入力途中でアプリがバックグラウンド化・
+// 強制終了された場合に内容が失われてしまうため、入力が止まってから一定時間後に自動保存し、
+// 次回起動時・画面マウント時に復元する
+const DIARY_DRAFT_STORAGE_KEY = 'diary-draft';
+
+// 下書きの自動保存をデバウンスする間隔(ミリ秒)。1文字入力するたびにAsyncStorageへ書き込むと
+// 頻度が高すぎるため、入力が一定時間止まってからまとめて保存する
+const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
 
 // カレンダーの日付セルに表示するタイトルの最大文字数(超える場合は省略記号を付ける)
 const TITLE_MAX_LENGTH = 20;
@@ -177,6 +188,10 @@ export default function HomeScreen() {
   // (falseになった後は二度とtrueへ戻さない)
   const [isLoading, setIsLoading] = useState(true);
   const [draft, setDraft] = useState('');
+  // 起動時・画面マウント時にAsyncStorageからの下書き復元が完了したかどうか。復元が完了する前に
+  // 自動保存用のeffectを動かしてしまうと、まだ何も読み込んでいない初期値(空文字列)で
+  // 保存済みの下書きを誤って上書き・削除してしまうため、復元完了までは自動保存の対象外にする
+  const [isDraftRestored, setIsDraftRestored] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   // 保存成功時に一時的に表示するトーストのメッセージ。nullの間は非表示
   const [saveToastMessage, setSaveToastMessage] = useState<string | null>(null);
@@ -256,6 +271,44 @@ export default function HomeScreen() {
     }, [loadEntries]),
   );
 
+  // 起動時・画面マウント時に、自動保存されていた下書きが残っていればTextInputへ復元する(Issue #54)。
+  // タブの再フォーカスのたびに実行されるuseFocusEffectとは異なり、マウント時に一度だけ読めばよい
+  // (この画面がアンマウントされずに保持される間は、draft自体が引き続きReact stateとして残るため)。
+  useEffect(() => {
+    let isCancelled = false;
+    (async () => {
+      const storedDraft = await AsyncStorage.getItem(DIARY_DRAFT_STORAGE_KEY);
+      if (!isCancelled && storedDraft) {
+        setDraft(storedDraft);
+      }
+      if (!isCancelled) {
+        setIsDraftRestored(true);
+      }
+    })();
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  // draftの変更をデバウンスし、入力が一定時間止まってからAsyncStorageへ自動保存する(Issue #54)。
+  // 入力途中でアプリがバックグラウンド化・強制終了された場合でも、次回起動時に下書きを復元できる
+  useEffect(() => {
+    // 下書きの復元が完了する前は、まだ何も読み込んでいない初期値(空文字列)で
+    // 保存済みの下書きを誤って上書き・削除してしまわないよう、何もしない
+    if (!isDraftRestored) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      const persist = draft
+        ? AsyncStorage.setItem(DIARY_DRAFT_STORAGE_KEY, draft)
+        : AsyncStorage.removeItem(DIARY_DRAFT_STORAGE_KEY);
+      // 下書きの自動保存はバックグラウンドでの補助的な処理のため、失敗してもユーザーの入力自体には
+      // 影響させず、静かに無視する(本保存の失敗はhandleSave側でsaveErrorとして明示的に伝える)
+      persist.catch(() => {});
+    }, DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [draft, isDraftRestored]);
+
   const handleSave = useCallback(async () => {
     // 既に保存処理が進行中であれば、連打による重複保存を防ぐため何もしない
     if (isSaving) {
@@ -297,6 +350,15 @@ export default function HomeScreen() {
       ]);
       // 実際に永続化された内容でUIを真の永続化状態と一致させる
       setEntries(persistedEntries);
+
+      // 保存に成功したので、自動保存していた下書き(Issue #54)は不要になったためクリアする。
+      // draft自体は既にsetDraft('')で空にしているが、AsyncStorage側に下書きキーが残ったままだと
+      // 次回起動時に既に保存済みの内容を誤って復元してしまうため、明示的に削除する
+      try {
+        await AsyncStorage.removeItem(DIARY_DRAFT_STORAGE_KEY);
+      } catch {
+        // 下書きキーのクリアに失敗しても、日記本体は既に保存済みで致命的ではないため無視する
+      }
 
       // 保存成功をユーザーに明示するため、一時的なトーストとハプティックフィードバックを発火する。
       // 保存失敗時はsaveErrorでエラーメッセージを表示しており、成功時も対称的にフィードバックする

@@ -970,6 +970,139 @@ describe('HomeScreen', () => {
     });
   });
 
+  describe('下書きの自動保存(Issue #54)', () => {
+    // 実装(`app/(tabs)/index.tsx`)の`diary-draft`キー・デバウンス間隔(1000ms)と対応させる
+    const DRAFT_STORAGE_KEY = 'diary-draft';
+    const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
+
+    it('does not immediately persist the draft key when the user types (debounced)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '書きかけの下書き');
+
+      // デバウンス時間が経過するまでは、下書きキーへの書き込みはまだ発生しない
+      expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(DRAFT_STORAGE_KEY, expect.any(String));
+    });
+
+    it('auto-saves the draft under a separate AsyncStorage key once the debounce interval elapses', async () => {
+      jest.useFakeTimers();
+      try {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '書きかけの下書き');
+
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        await waitFor(() =>
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY, '書きかけの下書き'),
+        );
+        // 日記本文の保存キー(diary-entries)とは別キーで保存されている
+        expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(STORAGE_KEY, expect.any(String));
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('coalesces rapid successive edits into a single debounced write of the latest content', async () => {
+      jest.useFakeTimers();
+      try {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+        fireEvent.changeText(input, '書');
+        act(() => {
+          jest.advanceTimersByTime(500);
+        });
+        fireEvent.changeText(input, '書き');
+        act(() => {
+          jest.advanceTimersByTime(500);
+        });
+        fireEvent.changeText(input, '書きか');
+
+        // 連続した編集の間隔がデバウンス時間(1000ms)未満のため、まだ書き込まれていない
+        expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(
+          DRAFT_STORAGE_KEY,
+          expect.any(String),
+        );
+
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        const draftWrites = (AsyncStorage.setItem as jest.Mock).mock.calls.filter(
+          ([key]) => key === DRAFT_STORAGE_KEY,
+        );
+        expect(draftWrites).toHaveLength(1);
+        expect(draftWrites[0][1]).toBe('書きか');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('restores a previously auto-saved draft into the text input on mount', async () => {
+      await AsyncStorage.setItem(DRAFT_STORAGE_KEY, '前回の続きから書きかけの下書き');
+
+      render(<HomeScreen />);
+
+      const input = await screen.findByPlaceholderText(INPUT_PLACEHOLDER);
+      await waitFor(() => expect(input.props.value).toBe('前回の続きから書きかけの下書き'));
+    });
+
+    it('clears the auto-saved draft key once the entry is successfully saved', async () => {
+      jest.useFakeTimers();
+      try {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+        fireEvent.changeText(input, '保存される日記');
+
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+        await waitFor(() =>
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY, '保存される日記'),
+        );
+
+        fireEvent.press(screen.getByText('保存'));
+
+        await waitFor(() =>
+          expect(AsyncStorage.removeItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('removes the draft key once the input is cleared back to empty and the debounce interval elapses', async () => {
+      await AsyncStorage.setItem(DRAFT_STORAGE_KEY, '消される下書き');
+
+      jest.useFakeTimers();
+      try {
+        render(<HomeScreen />);
+        const input = await screen.findByPlaceholderText(INPUT_PLACEHOLDER);
+        await waitFor(() => expect(input.props.value).toBe('消される下書き'));
+
+        fireEvent.changeText(input, '');
+
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        await waitFor(() =>
+          expect(AsyncStorage.removeItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+  });
+
   describe('保存成功時のフィードバック(Issue #55)', () => {
     // 実装(`app/(tabs)/index.tsx`)はハプティックを`process.env.EXPO_OS === 'ios'`の条件下でのみ
     // 発火させるが、`process.env.EXPO_OS`はbabel-preset-expo(jest-expoのデフォルト設定では
@@ -1218,11 +1351,13 @@ describe('HomeScreen', () => {
           }),
       );
 
-      // 画面をアンマウントせずに、タブへの再フォーカス(useFocusEffectの再実行)のみを模す
+      // 画面をアンマウントせずに、タブへの再フォーカス(useFocusEffectの再実行)のみを模す。
+      // なお、マウント時には日記本文(STORAGE_KEY)に加えて下書き復元用(diary-draft)の
+      // AsyncStorage.getItemも1回呼ばれているため(Issue #54)、再フォーカス後の合計は3回になる
       act(() => {
         (triggerRefocus as () => void)();
       });
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledTimes(3));
 
       // isLoadingは既にfalseのまま維持されるため、読み込みがまだpending中でも
       // ローディング表示は再度出ない(空状態メッセージも、既存のentriesがまだ残っているため出ない)
