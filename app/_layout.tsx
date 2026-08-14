@@ -5,15 +5,17 @@ import { useCallback, useEffect, useState } from 'react';
 import 'react-native-reanimated';
 
 import { Onboarding } from '@/components/onboarding';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { ThemePreferenceProvider, useThemePreference } from '@/contexts/theme-preference-context';
 import { hasCompletedOnboarding, markOnboardingCompleted } from '@/utils/onboarding-storage';
 
 export const unstable_settings = {
   anchor: '(tabs)',
 };
 
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
+function RootLayoutContent() {
+  // OSの設定だけでなく、アプリ内(設定画面)で選択されたテーマ設定(#91)も反映した
+  // 解決済みのカラースキームを使う
+  const { colorScheme } = useThemePreference();
   // アプリ初回起動時のみオンボーディングを表示するためのフラグ。
   // AsyncStorageの確認が終わるまではfalseのままにしておき、
   // 2回目以降の起動で一瞬だけ誤って表示されてしまうのを防ぐ
@@ -48,5 +50,14 @@ export default function RootLayout() {
       <StatusBar style="auto" />
       <Onboarding visible={showOnboarding} onFinish={handleFinishOnboarding} />
     </ThemeProvider>
+  );
+}
+
+export default function RootLayout() {
+  // アプリ内で選択されたテーマ設定(#91)を全体に配線するため、最上位でラップする
+  return (
+    <ThemePreferenceProvider>
+      <RootLayoutContent />
+    </ThemePreferenceProvider>
   );
 }
