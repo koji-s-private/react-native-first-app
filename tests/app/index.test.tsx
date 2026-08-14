@@ -3063,5 +3063,108 @@ describe('HomeScreen', () => {
         screen.getByText(`${now.getFullYear()}年${now.getMonth() + 1}月${dayWithEntry}日`),
       ).toBeTruthy();
     });
+
+    it('matches regardless of ASCII letter case (真の大文字小文字混在ケース。日本語の文字自体には大文字小文字の区別が無いため、既存テストとは別にASCII文字で検証する)', async () => {
+      const now = new Date();
+      const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '今日はAppleパイを食べた', createdAt: isoAt(now, dayWithEntry) },
+          { id: '2', text: '仕事で疲れた一日だった', createdAt: isoAt(now, dayWithoutEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('今日はAppleパイを食べた');
+
+      const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
+
+      // 本文中は先頭大文字の"Apple"だが、全て小文字の"apple"で検索してもヒットする
+      fireEvent.changeText(searchInput, 'apple');
+      expect(await screen.findByText(/Apple/)).toBeTruthy();
+      expect(screen.queryByText(/仕事で疲れた/)).toBeNull();
+
+      // 全て大文字の"APPLE"でもヒットする
+      fireEvent.changeText(searchInput, 'APPLE');
+      expect(await screen.findByText(/Apple/)).toBeTruthy();
+    });
+
+    it('treats a whitespace-only search query the same as an empty query (regular calendar view stays shown, no results list)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '今日は公園を散歩した', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('今日は公園を散歩した');
+
+      // 空白のみのキーワードはtrim後に空文字列として扱われ、検索結果一覧(0件メッセージ含む)は表示されない
+      fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '   ');
+
+      expect(screen.queryByText('見つかりませんでした')).toBeNull();
+      expect(screen.getByText('今日は公園を散歩した')).toBeTruthy();
+    });
+
+    it('sorts multiple matching search results by date, newest first', async () => {
+      const now = new Date();
+      const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: 'old', text: '古い日の公園散歩の記録', createdAt: isoAt(now, dayWithEntry, 8, 0) },
+          {
+            id: 'new',
+            text: '新しい日の公園散歩の記録',
+            createdAt: isoAt(now, dayWithoutEntry, 8, 0),
+          },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園散歩');
+      await screen.findByText(/新しい日の公園散歩/);
+      expect(screen.getByText(/古い日の公園散歩/)).toBeTruthy();
+
+      // 新しい日付のエントリ(dayWithoutEntry)が、古い日付のエントリ(dayWithEntry)より先に表示される
+      const texts = flattenTexts(screen.toJSON());
+      expect(texts.indexOf('新しい日の公園散歩の記録')).toBeLessThan(
+        texts.indexOf('古い日の公園散歩の記録'),
+      );
+    });
+
+    it('truncates the excerpt with an ellipsis (…) on both sides when the match is surrounded by more than the context length on each side (boundary)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      // マッチ箇所(りんご)の前後にSEARCH_EXCERPT_CONTEXT_LENGTH(20文字)を超える文字を配置し、
+      // 抜粋の前後両方が切り詰められて省略記号が付くケースを検証する
+      const longEntryText = 'あ'.repeat(30) + 'りんご' + 'い'.repeat(30);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: longEntryText, createdAt: isoAt(now, dayWithEntry) }]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'りんご');
+
+      const resultText = await screen.findByText(/りんご/);
+      const excerpt = resultText.props.children as string;
+      expect(excerpt.startsWith('…')).toBe(true);
+      expect(excerpt.endsWith('…')).toBe(true);
+      // マッチ全体(前後の文脈込み)は元の本文よりも短く切り詰められている
+      expect(excerpt.length).toBeLessThan(longEntryText.length);
+    });
   });
 });
