@@ -1790,6 +1790,66 @@ describe('HomeScreen', () => {
       expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull();
     });
 
+    // Issue #114: スクリーンリーダー(VoiceOver/TalkBack)利用者にも、日付セルの数字だけでなく
+    // 「何年何月何日か」と「その日に日記があるかどうか」が伝わるよう、accessibilityLabel/
+    // accessibilityStateを検証する
+    it('sets an accessibilityLabel with the full date and "日記あり" on a day cell that has a diary entry, and does not mark it as accessibility-disabled', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '日記あり', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('日記あり');
+
+      const expectedLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${dayWithEntry}日、日記あり`;
+      const dayCell = screen.getByLabelText(expectedLabel);
+      expect(dayCell.props.accessibilityRole).toBe('button');
+      expect(dayCell.props.accessibilityState?.disabled).toBe(false);
+    });
+
+    it('sets an accessibilityLabel with the full date and "日記なし" on a day cell without a diary entry, and marks it as accessibility-disabled so screen readers announce it as non-interactive', async () => {
+      const now = new Date();
+      const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '日記あり', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('日記あり');
+
+      const expectedLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${dayWithoutEntry}日、日記なし`;
+      const dayCell = screen.getByLabelText(expectedLabel);
+      expect(dayCell.props.accessibilityState?.disabled).toBe(true);
+    });
+
+    // Issue #114(境界値): showSixWeeksにより前後月の「はみ出し」日付セルも描画される。
+    // それらのセルは常に日記が無い(entriesByDateには当月のキーしか存在しない)ため、
+    // 実装が`title`のみを見てdisabled判定していることを踏まえ、はみ出しセルでも
+    // 正しい年月日のaccessibilityLabelとaccessibilityState.disabled=trueが付くことを確認する
+    it("sets a correct accessibilityLabel (with that day's own year/month, not the currently displayed month) and marks it as accessibility-disabled on overflow day cells belonging to an adjacent month", async () => {
+      const now = new Date();
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const noEntryCells = screen.getAllByLabelText(/^\d{4}年\d{1,2}月\d{1,2}日、日記なし$/);
+      const currentMonthPrefix = `${now.getFullYear()}年${now.getMonth() + 1}月`;
+      const overflowCells = noEntryCells.filter(
+        (cell) => !(cell.props.accessibilityLabel as string).startsWith(currentMonthPrefix),
+      );
+
+      // showSixWeeksで常に6週(42セル)分描画され、当月の日数は最大でも31日のため、
+      // 前月または翌月のはみ出しセルが必ず1つ以上存在する
+      expect(overflowCells.length).toBeGreaterThan(0);
+      overflowCells.forEach((cell) => {
+        expect(cell.props.accessibilityState?.disabled).toBe(true);
+      });
+    });
+
     it('does nothing (does not open the modal) when tapping a day without any diary entries', async () => {
       const now = new Date();
       const { dayWithoutEntry } = pickTestDays(now);

@@ -613,6 +613,10 @@ export default function HomeScreen() {
       const extraEntryCount = dayEntries && dayEntries.length > 1 ? dayEntries.length - 1 : 0;
       const isDisabled = state === 'disabled' || state === 'inactive';
       const isToday = state === 'today';
+      // スクリーンリーダー(VoiceOver/TalkBack)利用者にも、セルの数字だけでなく
+      // 「何年何月何日か」と「その日に日記があるかどうか」が伝わるようラベルを組み立てる
+      // (フォーマットはモーダル見出しと同じformatDateHeadingを再利用する)
+      const accessibilityLabel = `${formatDateHeading(date.dateString)}、${title ? '日記あり' : '日記なし'}`;
 
       return (
         <Pressable
@@ -620,6 +624,10 @@ export default function HomeScreen() {
           onPress={() => onPress?.(date)}
           disabled={!title}
           accessibilityRole={title ? 'button' : undefined}
+          accessibilityLabel={accessibilityLabel}
+          // 日記が無い日はタップしても反応しないため、スクリーンリーダーにも
+          // 操作不可であることを明示的に伝える
+          accessibilityState={{ disabled: !title }}
         >
           {extraEntryCount > 0 ? (
             <View style={[styles.entryCountBadge, { backgroundColor: tintColor }]}>
