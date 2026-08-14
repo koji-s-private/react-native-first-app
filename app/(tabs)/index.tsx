@@ -277,12 +277,19 @@ export default function HomeScreen() {
   useEffect(() => {
     let isCancelled = false;
     (async () => {
-      const storedDraft = await AsyncStorage.getItem(DIARY_DRAFT_STORAGE_KEY);
-      if (!isCancelled && storedDraft) {
-        setDraft(storedDraft);
-      }
-      if (!isCancelled) {
-        setIsDraftRestored(true);
+      try {
+        const storedDraft = await AsyncStorage.getItem(DIARY_DRAFT_STORAGE_KEY);
+        if (!isCancelled && storedDraft) {
+          setDraft(storedDraft);
+        }
+      } catch {
+        // 下書きの読み込みに失敗した場合は復元を諦めるだけにとどめ、未処理のPromise
+        // rejectionを発生させない。ここで早期returnせずisDraftRestoredをtrueにすることで、
+        // 以降のデバウンス自動保存(下のuseEffect)が無効化されたままにならないようにする
+      } finally {
+        if (!isCancelled) {
+          setIsDraftRestored(true);
+        }
       }
     })();
     return () => {

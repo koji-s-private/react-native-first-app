@@ -1101,6 +1101,105 @@ describe('HomeScreen', () => {
         jest.useRealTimers();
       }
     });
+
+    it('does not persist the debounced draft write once the screen unmounts before the debounce interval elapses', async () => {
+      jest.useFakeTimers();
+      try {
+        const { unmount } = render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(
+          screen.getByPlaceholderText(INPUT_PLACEHOLDER),
+          'アンマウント直前まで入力していた下書き',
+        );
+
+        // デバウンスのタイマーが発火する前に画面がアンマウントされる
+        // (例: タブを離れて別のタブへ遷移する等)
+        unmount();
+
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        // クリーンアップ(clearTimeout)により、アンマウント後にタイマーが発火して
+        // 書き込みが発生することはない
+        expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(
+          DRAFT_STORAGE_KEY,
+          expect.any(String),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('does not warn about updating state after unmount when the initial draft restore resolves after the screen has already been unmounted', async () => {
+      // マウント時の下書き復元(AsyncStorage.getItem)がまだ解決していないうちに
+      // 画面がアンマウントされ、その後に解決した場合の挙動を検証する
+      let resolveDraftRead: (value: string | null) => void = () => {};
+      // `@react-native-async-storage/async-storage/jest/async-storage-mock`の各メソッドは
+      // 元々jest.fn()として定義されているため、`jest.spyOn`はそれを新規にラップし直さず
+      // 既存のmock関数をそのまま返す。その状態で`mockRestore()`を呼んでも「スパイ前の
+      // 実装」には戻らず、常に`undefined`を返す空のmockにリセットされてしまう
+      // (`jest.spyOn`は非mock関数に対して使う場合のみ本来の意味で機能する既知の挙動)。
+      // そのため、他のテストへ実装を安全に戻すには、上書き前の実装を明示的に保存しておき、
+      // finallyで`mockImplementation(元の実装)`により復元する
+      const originalGetItemImpl = (AsyncStorage.getItem as jest.Mock).getMockImplementation();
+      const getItemSpy = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key: string) => {
+        if (key === DRAFT_STORAGE_KEY) {
+          return new Promise<string | null>((resolve) => {
+            resolveDraftRead = resolve;
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const { unmount } = render(<HomeScreen />);
+        unmount();
+
+        await act(async () => {
+          resolveDraftRead('マウント解除後に届いた下書き');
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        // isCancelledフラグにより、アンマウント後に届いた読み込み結果でsetState(setDraft/
+        // setIsDraftRestored)を呼び出さないため、Reactの「アンマウント済みコンポーネントへの
+        // state更新」警告は発生しない
+        const unmountWarning = consoleErrorSpy.mock.calls.some(
+          ([message]) =>
+            typeof message === 'string' &&
+            message.includes("Can't perform a React state update on an unmounted component"),
+        );
+        expect(unmountWarning).toBe(false);
+      } finally {
+        if (originalGetItemImpl) {
+          getItemSpy.mockImplementation(originalGetItemImpl);
+        }
+        consoleErrorSpy.mockRestore();
+      }
+    });
+
+    it('does not clear the auto-saved draft key when saving the diary entry fails, so it remains recoverable on next launch', async () => {
+      // Issue #54の実装では、下書きキーのクリア(removeItem)はhandleSave成功時のみ
+      // 実行される(enqueueDiaryWriteが失敗した場合はcatch節に分岐しremoveItemへ到達しない)。
+      // 保存に失敗したのに下書きが消えてしまうと、ユーザーが再入力した内容も次回起動時の
+      // 復元対象も両方失われてしまうため、この境界を明示的に検証する
+      await AsyncStorage.setItem(DRAFT_STORAGE_KEY, '保存に失敗する日記');
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      const input = await screen.findByPlaceholderText(INPUT_PLACEHOLDER);
+      await waitFor(() => expect(input.props.value).toBe('保存に失敗する日記'));
+
+      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
+      fireEvent.press(screen.getByText('保存'));
+
+      await screen.findByText('保存に失敗しました。もう一度お試しください。');
+
+      expect(AsyncStorage.removeItem).not.toHaveBeenCalledWith(DRAFT_STORAGE_KEY);
+    });
   });
 
   describe('保存成功時のフィードバック(Issue #55)', () => {
