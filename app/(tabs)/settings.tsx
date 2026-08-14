@@ -9,12 +9,66 @@ import { TabScreenContainer } from '@/components/tab-screen-container';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { SETTINGS_SECTIONS, type SettingsMenuItem } from '@/constants/settings-menu';
+import { useThemePreference, type ThemePreference } from '@/contexts/theme-preference-context';
+import { useThemeColor } from '@/hooks/use-theme-color';
 import { buildDiaryExportFileName, serializeDiaryEntriesForExport } from '@/utils/diary-export';
 import { clearAllDiaryEntries, getAllDiaryEntries } from '@/utils/diary-storage';
 
 // 破壊的な操作(データ削除)であることを示す強調色。app/(tabs)/index.tsxのerrorTextと同じ色を使い、
 // アプリ内での「注意喚起色」の表現を統一する
 const DANGER_COLOR = '#d32f2f';
+
+// 「外観」セクションで選べる配色設定の選択肢。表示順もこの配列の並び順に従う
+const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
+  { value: 'light', label: 'ライト' },
+  { value: 'dark', label: 'ダーク' },
+  { value: 'system', label: '端末に合わせる' },
+];
+
+// アプリ内で配色(ライト/ダーク/端末に合わせる)を選択する操作導線(Issue #91)。
+// OSの設定に関わらずアプリ内だけで見た目を固定したい、というニーズに対応する。
+function AppearanceSection() {
+  const { preference, setPreference } = useThemePreference();
+  const tintColor = useThemeColor({}, 'tint');
+  // 選択中のボタンはtintColorを背景に敷くため、文字色は背景色(ライト/ダークで反転する色)を使い
+  // コントラストを確保する
+  const selectedTextColor = useThemeColor({}, 'background');
+
+  return (
+    <ThemedView style={styles.section}>
+      <ThemedText type="subtitle" style={styles.sectionTitle}>
+        外観
+      </ThemedText>
+      <ThemedView style={styles.themeOptionsRow}>
+        {THEME_OPTIONS.map((option) => {
+          const isSelected = preference === option.value;
+          return (
+            <Pressable
+              key={option.value}
+              onPress={() => setPreference(option.value)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isSelected }}
+              style={[
+                styles.themeOptionButton,
+                { borderColor: tintColor },
+                isSelected && { backgroundColor: tintColor },
+              ]}
+            >
+              <ThemedText
+                style={[
+                  styles.themeOptionText,
+                  isSelected ? { color: selectedTextColor } : { color: tintColor },
+                ]}
+              >
+                {option.label}
+              </ThemedText>
+            </Pressable>
+          );
+        })}
+      </ThemedView>
+    </ThemedView>
+  );
+}
 
 // メニュー項目の種類に応じて、外部ブラウザ/アプリ内遷移/メールアプリのいずれかで開くリンクを描画する
 function SettingsMenuLink({ item }: { item: SettingsMenuItem }) {
@@ -180,6 +234,8 @@ export default function SettingsScreen() {
     // ステータスバー/ノッチ領域とコンテンツが重ならないよう、TabScreenContainerで
     // セーフエリア上端インセットぶんの余白を自動的に加算する(Issue #125)
     <TabScreenContainer style={styles.container}>
+      <AppearanceSection />
+
       {SETTINGS_SECTIONS.map((section) => (
         <ThemedView key={section.key} style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
@@ -221,6 +277,20 @@ const styles = StyleSheet.create({
   },
   item: {
     marginBottom: 12,
+  },
+  themeOptionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  themeOptionButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  themeOptionText: {
+    fontWeight: '600',
   },
   exportButton: {
     alignSelf: 'flex-start',

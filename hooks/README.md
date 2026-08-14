@@ -15,7 +15,7 @@ hooks/
 
 - `use-color-scheme.ts`: `react-native` の `useColorScheme` をそのまま re-export しているだけのフックです。iOS/Androidではこれで端末のカラースキームを取得できます。
 - `use-color-scheme.web.ts`: Web版の実装です。Webでは静的レンダリング（サーバー側で生成したHTMLをクライアントで再利用する仕組み）に対応するため、初回描画時は常に `'light'` を返し、クライアント側でのマウント完了後（`useEffect` 実行後）に実際のカラースキームへ切り替えます。
-- `use-theme-color.ts`: [`constants/theme.ts`](../constants/theme.ts) の `Colors` と `use-color-scheme.ts` を組み合わせ、現在のテーマ（ライト/ダーク）に応じた色を返すフックです。`props.light` / `props.dark` で個別の色指定を上書きすることもできます。[`components/themed-text.tsx`](../components/themed-text.tsx) や [`components/themed-view.tsx`](../components/themed-view.tsx) から利用されています。
+- `use-theme-color.ts`: [`constants/theme.ts`](../constants/theme.ts) の `Colors` と [`contexts/theme-preference-context.tsx`](../contexts/theme-preference-context.tsx) の `useThemePreference`（OSのカラースキームに加えて、アプリ内で選択されたライト/ダーク/端末に合わせる設定も反映した解決済みのテーマ）を組み合わせ、現在のテーマ（ライト/ダーク）に応じた色を返すフックです。`props.light` / `props.dark` で個別の色指定を上書きすることもできます。[`components/themed-text.tsx`](../components/themed-text.tsx) や [`components/themed-view.tsx`](../components/themed-view.tsx) から利用されています。
 
 ## 命名規則
 

@@ -4,15 +4,17 @@ import React from 'react';
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useThemePreference } from '@/contexts/theme-preference-context';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
+  // OSの設定だけでなく、アプリ内(設定画面)で選択されたテーマ設定(#91)も反映した
+  // 解決済みのカラースキームを使う
+  const { colorScheme } = useThemePreference();
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        tabBarActiveTintColor: Colors[colorScheme].tint,
         headerShown: false,
         tabBarButton: HapticTab,
       }}

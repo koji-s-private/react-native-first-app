@@ -220,6 +220,7 @@ app/                 画面（expo-router によるファイルベースルー�
 assets/              画像などの静的アセット（アイコン・スプラッシュ画像など）
 components/          再利用可能なUIコンポーネント
 constants/           テーマなどの定数
+contexts/            アプリ全体で共有するReact Context（theme-preference-context.tsx: テーマ設定）
 hooks/               カスタムフック
 utils/               画面から独立した純粋なユーティリティ関数（diary-encryption.ts: 日記データの暗号化・復号）
 tests/               Jest + Testing Library によるテストコード
