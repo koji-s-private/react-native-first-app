@@ -36,7 +36,7 @@ import {
 const STORAGE_KEY = DIARY_ENTRIES_STORAGE_KEY;
 
 // 保存前の下書き(draft)を自動保存するためのAsyncStorageキー。日記本文の保存キー(STORAGE_KEY)とは
-// 別キーにすることで、保存済みエントリの一覧データとは独立して読み書きできるようにする(Issue #54)。
+// 別キーにすることで、保存済みエントリの一覧データとは独立して読み書きできるようにする。
 // 「保存」ボタンを押すまで下書きが永続化されないと、入力途中でアプリがバックグラウンド化・
 // 強制終了された場合に内容が失われてしまうため、入力が止まってから一定時間後に自動保存し、
 // 次回起動時・画面マウント時に復元する
@@ -228,7 +228,7 @@ export default function HomeScreen() {
   const [saveToastMessage, setSaveToastMessage] = useState<string | null>(null);
   // 一覧表示用にタップされた日付('YYYY-MM-DD')。nullの間はモーダルを閉じている
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  // 日記本文のキーワード検索用の入力値(Issue #81)。既存の「今日の出来事を書く」入力欄(composer)や
+  // 日記本文のキーワード検索用の入力値。既存の「今日の出来事を書く」入力欄(composer)や
   // 編集用のeditDraftとは独立した、検索専用のstate
   const [searchQuery, setSearchQuery] = useState('');
   // handleSave(新規保存)の実行中かどうか。保存ボタンの連打(またはタップと同時に発生する
@@ -305,7 +305,7 @@ export default function HomeScreen() {
     }, [loadEntries]),
   );
 
-  // 起動時・画面マウント時に、自動保存されていた下書きが残っていればTextInputへ復元する(Issue #54)。
+  // 起動時・画面マウント時に、自動保存されていた下書きが残っていればTextInputへ復元する。
   // タブの再フォーカスのたびに実行されるuseFocusEffectとは異なり、マウント時に一度だけ読めばよい
   // (この画面がアンマウントされずに保持される間は、draft自体が引き続きReact stateとして残るため)。
   useEffect(() => {
@@ -331,7 +331,7 @@ export default function HomeScreen() {
     };
   }, []);
 
-  // draftの変更をデバウンスし、入力が一定時間止まってからAsyncStorageへ自動保存する(Issue #54)。
+  // draftの変更をデバウンスし、入力が一定時間止まってからAsyncStorageへ自動保存する。
   // 入力途中でアプリがバックグラウンド化・強制終了された場合でも、次回起動時に下書きを復元できる
   useEffect(() => {
     // 下書きの復元が完了する前は、まだ何も読み込んでいない初期値(空文字列)で
@@ -392,7 +392,7 @@ export default function HomeScreen() {
       // 実際に永続化された内容でUIを真の永続化状態と一致させる
       setEntries(persistedEntries);
 
-      // 保存に成功したので、自動保存していた下書き(Issue #54)は不要になったためクリアする。
+      // 保存に成功したので、自動保存していた下書きは不要になったためクリアする。
       // draft自体は既にsetDraft('')で空にしているが、AsyncStorage側に下書きキーが残ったままだと
       // 次回起動時に既に保存済みの内容を誤って復元してしまうため、明示的に削除する
       try {
@@ -556,7 +556,7 @@ export default function HomeScreen() {
 
   // 検索キーワードに本文が部分一致する(大文字小文字を区別しない)エントリの一覧。
   // 全文検索エンジンのような大掛かりな仕組みは使わず、既存のentries stateに対する
-  // クライアントサイドの単純なフィルタリングで実現する(Issue #81)。
+  // クライアントサイドの単純なフィルタリングで実現する。
   // 新しく書かれたものほど見つけやすいよう、日時の降順(新しい順)に並べ替える
   const searchResults = useMemo(() => {
     if (!trimmedSearchQuery) {
@@ -679,7 +679,7 @@ export default function HomeScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       {/* ステータスバー/ノッチ領域とタイトルが重ならないよう、TabScreenContainerで
-          セーフエリア上端インセットぶんの余白を自動的に加算する(Issue #125) */}
+          セーフエリア上端インセットぶんの余白を自動的に加算する */}
       <TabScreenContainer style={styles.container}>
         <ThemedText type="title" style={styles.title}>
           日記
@@ -728,7 +728,7 @@ export default function HomeScreen() {
           ) : null}
         </ThemedView>
 
-        {/* 日記本文のキーワード検索用の入力欄(Issue #81)。「今日の出来事を書く」入力欄(composer)とは
+        {/* 日記本文のキーワード検索用の入力欄。「今日の出来事を書く」入力欄(composer)とは
             独立した検索専用の入力欄で、キーワードが入力されている間だけ下に検索結果一覧を表示する */}
         <View style={styles.searchContainer}>
           <TextInput
@@ -827,7 +827,7 @@ export default function HomeScreen() {
           statusBarTranslucent
           navigationBarTranslucent
         >
-          {/* 背景の半透明オーバーレイをタップした場合はモーダルを閉じる(Issue #84)。
+          {/* 背景の半透明オーバーレイをタップした場合はモーダルを閉じる。
               modalContent側は下でonStartShouldSetResponderによりタッチの伝播を止めているため、
               一覧内の項目をタップしても意図せず閉じてしまうことはない */}
           <Pressable style={styles.modalOverlay} onPress={handleCloseDateModal}>
