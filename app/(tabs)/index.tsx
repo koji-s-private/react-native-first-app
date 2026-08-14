@@ -179,6 +179,37 @@ function formatEntryDateTime(isoString: string): string {
   return `${year}/${month}/${day} ${hours}:${minutes}`;
 }
 
+// 検索結果の抜粋で、マッチ箇所の前後何文字を表示するか
+const SEARCH_EXCERPT_CONTEXT_LENGTH = 20;
+
+// 検索キーワードにマッチした日記本文から、マッチ箇所を中心とした抜粋を作る。
+// 改行を挟むと一覧上で見づらくなるため空白に置き換え、前後を切り詰めた場合は省略記号を付ける。
+// (タイトル表示用のgetEntryTitle/splitIntoGraphemesとは異なり、抜粋位置の計算は
+// 単純な文字列操作で行っている。サロゲートペア境界で万一ズレても表示が多少前後するだけで、
+// 機能上の実害は無いため、既存のタイトル省略ロジックほど厳密なgrapheme単位分割はしていない)
+function getSearchExcerpt(text: string, query: string): string {
+  const normalizedText = text.replace(/\n+/g, ' ');
+  const lowerText = normalizedText.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const matchIndex = lowerText.indexOf(lowerQuery);
+
+  // 通常は呼び出し元でマッチ済みのエントリのみ渡されるため到達しないはずだが、
+  // 念のためフォールバックとして先頭部分を返す
+  if (matchIndex === -1) {
+    return getEntryTitle(normalizedText);
+  }
+
+  const start = Math.max(0, matchIndex - SEARCH_EXCERPT_CONTEXT_LENGTH);
+  const end = Math.min(
+    normalizedText.length,
+    matchIndex + lowerQuery.length + SEARCH_EXCERPT_CONTEXT_LENGTH,
+  );
+  const excerpt = normalizedText.slice(start, end);
+  const prefix = start > 0 ? '…' : '';
+  const suffix = end < normalizedText.length ? '…' : '';
+  return `${prefix}${excerpt}${suffix}`;
+}
+
 export default function HomeScreen() {
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
   // 初回のloadEntries完了までの間だけtrueにする読み込み中フラグ。
@@ -197,6 +228,9 @@ export default function HomeScreen() {
   const [saveToastMessage, setSaveToastMessage] = useState<string | null>(null);
   // 一覧表示用にタップされた日付('YYYY-MM-DD')。nullの間はモーダルを閉じている
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  // 日記本文のキーワード検索用の入力値(Issue #81)。既存の「今日の出来事を書く」入力欄(composer)や
+  // 編集用のeditDraftとは独立した、検索専用のstate
+  const [searchQuery, setSearchQuery] = useState('');
   // handleSave(新規保存)の実行中かどうか。保存ボタンの連打(またはタップと同時に発生する
   // 複数のonPressイベント)によって、同じ内容の日記エントリが重複して保存されてしまうことを防ぐため、
   // 実行中は早期returnし、保存ボタンもdisabledにする
@@ -517,6 +551,29 @@ export default function HomeScreen() {
     return map;
   }, [entries]);
 
+  // 検索キーワードの前後の空白を除いたもの。空文字列の間は「検索していない」状態として扱う
+  const trimmedSearchQuery = searchQuery.trim();
+
+  // 検索キーワードに本文が部分一致する(大文字小文字を区別しない)エントリの一覧。
+  // 全文検索エンジンのような大掛かりな仕組みは使わず、既存のentries stateに対する
+  // クライアントサイドの単純なフィルタリングで実現する(Issue #81)。
+  // 新しく書かれたものほど見つけやすいよう、日時の降順(新しい順)に並べ替える
+  const searchResults = useMemo(() => {
+    if (!trimmedSearchQuery) {
+      return [];
+    }
+    const lowerQuery = trimmedSearchQuery.toLowerCase();
+    return entries
+      .filter((entry) => entry.text.toLowerCase().includes(lowerQuery))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [entries, trimmedSearchQuery]);
+
+  // 検索結果の項目がタップされたら、そのエントリが書かれた日付の一覧モーダルを開く
+  // (既存のselectedDate stateをそのまま使い、日付タップ時と同じモーダルに誘導する)
+  const handleSearchResultPress = useCallback((entry: DiaryEntry) => {
+    setSelectedDate(toDateKey(new Date(entry.createdAt)));
+  }, []);
+
   // 外枠の実測高さ(wrapperHeight)からヘッダー+曜日行のおおよその高さと6週分の行マージンを差し引き、
   // 残りを6週で均等に割ることで、外枠いっぱいに日付グリッドが広がる日付セルの高さを算出する。
   // (カレンダー本体側の実測値を使って反復的に補正する方式も試したが、react-native-calendarsの
@@ -671,52 +728,96 @@ export default function HomeScreen() {
           ) : null}
         </ThemedView>
 
-        {isLoading ? (
-          // 初回読み込み中は、まだentriesが空配列なだけなのに空状態メッセージが
-          // 一瞬誤って表示されてしまわないよう、代わりにローディング表示を出す
-          <ThemedView style={styles.emptyState}>
-            <ActivityIndicator color={tintColor} />
-          </ThemedView>
-        ) : entries.length === 0 ? (
-          // 日記が1件も保存されていない場合、ラベルの無いカレンダーだけが表示されて
-          // 何をすればよいか分かりにくくならないよう、案内メッセージを表示する
-          // (カレンダー自体は今後日記を書く導線として引き続き表示しておく)
-          <ThemedView style={styles.emptyState}>
-            <ThemedText style={styles.emptyStateText}>
-              まだ日記がありません。最初の日記を書いてみましょう。
-            </ThemedText>
-          </ThemedView>
-        ) : null}
-
-        <View
-          style={[styles.calendarWrapper, { borderColor: iconColor, backgroundColor }]}
-          onLayout={(event) => setWrapperHeight(event.nativeEvent.layout.height)}
-        >
-          <Calendar
-            theme={{
-              backgroundColor,
-              calendarBackground: backgroundColor,
-              // 曜日行はtextColorを使い、アイコン色より高いコントラストで視認性を確保する
-              textSectionTitleColor: textColor,
-              textDayHeaderFontWeight: '600',
-              dayTextColor: textColor,
-              // 月・年の見出しも大きく太字にして、矢印の間で確実に視認できるようにする
-              monthTextColor: textColor,
-              textMonthFontWeight: '700',
-              textMonthFontSize: 18,
-              arrowColor: tintColor,
-              todayTextColor: tintColor,
-            }}
-            // 「2026年8月」のように年→月の順で表示する(デフォルトの'MMMM yyyy'は英語の語順のまま
-            // 月名だけ日本語化されてしまい不自然なため)
-            monthFormat="yyyy年M月"
-            dayComponent={renderDay}
-            onDayPress={handleDayPress}
-            enableSwipeMonths
-            // 月によって行数(4〜6週)が変わって高さがガタつかないよう、常に6週分の高さで揃える
-            showSixWeeks
+        {/* 日記本文のキーワード検索用の入力欄(Issue #81)。「今日の出来事を書く」入力欄(composer)とは
+            独立した検索専用の入力欄で、キーワードが入力されている間だけ下に検索結果一覧を表示する */}
+        <View style={styles.searchContainer}>
+          <TextInput
+            style={[styles.searchInput, { color: textColor, borderColor: iconColor }]}
+            placeholder="日記を検索"
+            placeholderTextColor={iconColor}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            returnKeyType="search"
+            accessibilityLabel="日記を検索"
           />
         </View>
+
+        {trimmedSearchQuery ? (
+          // 検索キーワードが入力されている間は、通常のカレンダー表示の代わりに検索結果一覧を表示する
+          <FlatList
+            style={styles.searchResultsList}
+            data={searchResults}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <Pressable
+                style={[styles.searchResultItem, { borderBottomColor: iconColor }]}
+                onPress={() => handleSearchResultPress(item)}
+              >
+                <ThemedText style={[styles.searchResultDate, { color: iconColor }]}>
+                  {formatDateHeading(toDateKey(new Date(item.createdAt)))}
+                </ThemedText>
+                <ThemedText numberOfLines={2}>
+                  {getSearchExcerpt(item.text, trimmedSearchQuery)}
+                </ThemedText>
+              </Pressable>
+            )}
+            ListEmptyComponent={
+              // 検索結果が0件のときは、カレンダーが何も表示されず戸惑わないよう明示的に案内する
+              <ThemedView style={styles.emptyState}>
+                <ThemedText style={styles.emptyStateText}>見つかりませんでした</ThemedText>
+              </ThemedView>
+            }
+          />
+        ) : (
+          <>
+            {isLoading ? (
+              // 初回読み込み中は、まだentriesが空配列なだけなのに空状態メッセージが
+              // 一瞬誤って表示されてしまわないよう、代わりにローディング表示を出す
+              <ThemedView style={styles.emptyState}>
+                <ActivityIndicator color={tintColor} />
+              </ThemedView>
+            ) : entries.length === 0 ? (
+              // 日記が1件も保存されていない場合、ラベルの無いカレンダーだけが表示されて
+              // 何をすればよいか分かりにくくならないよう、案内メッセージを表示する
+              // (カレンダー自体は今後日記を書く導線として引き続き表示しておく)
+              <ThemedView style={styles.emptyState}>
+                <ThemedText style={styles.emptyStateText}>
+                  まだ日記がありません。最初の日記を書いてみましょう。
+                </ThemedText>
+              </ThemedView>
+            ) : null}
+
+            <View
+              style={[styles.calendarWrapper, { borderColor: iconColor, backgroundColor }]}
+              onLayout={(event) => setWrapperHeight(event.nativeEvent.layout.height)}
+            >
+              <Calendar
+                theme={{
+                  backgroundColor,
+                  calendarBackground: backgroundColor,
+                  // 曜日行はtextColorを使い、アイコン色より高いコントラストで視認性を確保する
+                  textSectionTitleColor: textColor,
+                  textDayHeaderFontWeight: '600',
+                  dayTextColor: textColor,
+                  // 月・年の見出しも大きく太字にして、矢印の間で確実に視認できるようにする
+                  monthTextColor: textColor,
+                  textMonthFontWeight: '700',
+                  textMonthFontSize: 18,
+                  arrowColor: tintColor,
+                  todayTextColor: tintColor,
+                }}
+                // 「2026年8月」のように年→月の順で表示する(デフォルトの'MMMM yyyy'は英語の語順のまま
+                // 月名だけ日本語化されてしまい不自然なため)
+                monthFormat="yyyy年M月"
+                dayComponent={renderDay}
+                onDayPress={handleDayPress}
+                enableSwipeMonths
+                // 月によって行数(4〜6週)が変わって高さがガタつかないよう、常に6週分の高さで揃える
+                showSixWeeks
+              />
+            </View>
+          </>
+        )}
 
         <Modal
           visible={selectedDate !== null}
@@ -867,6 +968,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  searchContainer: {
+    gap: 8,
+  },
+  searchInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    fontSize: 16,
+  },
+  searchResultsList: {
+    flex: 1,
+  },
+  searchResultItem: {
+    gap: 4,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  searchResultDate: {
+    fontSize: 12,
   },
   charCount: {
     fontSize: 12,

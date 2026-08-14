@@ -194,6 +194,8 @@ const { __triggerRefocus: triggerRefocus } = require('expo-router') as {
 const STORAGE_KEY = 'diary-entries';
 const ENCRYPTED_PREFIX = 'encrypted:v1:';
 const INPUT_PLACEHOLDER = '今日の出来事や気持ちを書いてみましょう';
+// 日記本文のキーワード検索用の入力欄(composerとは別の検索専用入力欄、Issue #81)
+const SEARCH_INPUT_PLACEHOLDER = '日記を検索';
 const CLOSE_BUTTON_TEXT = '閉じる';
 // 日記が0件のときにカレンダーの上に表示される案内メッセージ
 const EMPTY_STATE_TEXT = 'まだ日記がありません。最初の日記を書いてみましょう。';
@@ -244,6 +246,18 @@ function pickNonTodayDayInRange(now: Date): number {
 // 日付がずれる恐れがあるため、必ずDateのローカルコンストラクタ経由で作成する)。
 function isoAt(now: Date, day: number, hour = 9, minute = 0): string {
   return new Date(now.getFullYear(), now.getMonth(), day, hour, minute, 0).toISOString();
+}
+
+// 実装側(`app/(tabs)/index.tsx`)の非公開関数`formatEntryDateTime`と同じ'YYYY/MM/DD HH:mm'形式で
+// 日時を整形するテスト用ヘルパー。エントリ一覧モーダル内の時刻表示を検証するために使う
+function formatEntryDateTimeForTest(isoString: string): string {
+  const date = new Date(isoString);
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  const hours = `${date.getHours()}`.padStart(2, '0');
+  const minutes = `${date.getMinutes()}`.padStart(2, '0');
+  return `${year}/${month}/${day} ${hours}:${minutes}`;
 }
 
 // レンダリング結果(`screen.toJSON()`)から、画面に出現するテキストを出現順に一次元配列へ展開する。
@@ -2890,6 +2904,164 @@ describe('HomeScreen', () => {
 
       const deleteLink = screen.getByText('削除');
       expect(StyleSheet.flatten(deleteLink.props.style).color).toBe(Colors.dark.error);
+    });
+  });
+
+  describe('日記のキーワード検索(Issue #81)', () => {
+    it('does not show the search results list while the search input is empty (regular calendar view is shown)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '今日は公園を散歩した', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('今日は公園を散歩した');
+
+      // 検索欄は表示されているが、キーワード未入力のうちは検索結果一覧(「見つかりませんでした」等)は表示されない
+      expect(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER)).toBeTruthy();
+      expect(screen.queryByText('見つかりませんでした')).toBeNull();
+    });
+
+    it('shows matching entries (case-insensitive, partial match) as a search results list once a keyword is entered', async () => {
+      const now = new Date();
+      const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '今日は公園を散歩した', createdAt: isoAt(now, dayWithEntry) },
+          { id: '2', text: '仕事で疲れた一日だった', createdAt: isoAt(now, dayWithoutEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('今日は公園を散歩した');
+
+      const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
+      // 大文字小文字を区別しない部分一致であることを確認するため、あえて半角大文字を混ぜる
+      fireEvent.changeText(searchInput, '公園');
+
+      expect(await screen.findByText(/公園/)).toBeTruthy();
+      expect(screen.queryByText(/仕事で疲れた/)).toBeNull();
+    });
+
+    it('shows a "見つかりませんでした" message when no entry matches the keyword', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '今日は公園を散歩した', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('今日は公園を散歩した');
+
+      fireEvent.changeText(
+        screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER),
+        '該当しないはずのキーワード',
+      );
+
+      expect(await screen.findByText('見つかりませんでした')).toBeTruthy();
+    });
+
+    it('restores the normal calendar view once the search keyword is cleared back to empty', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '今日は公園を散歩した', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('今日は公園を散歩した');
+
+      const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
+      fireEvent.changeText(searchInput, '該当しないはずのキーワード');
+      expect(await screen.findByText('見つかりませんでした')).toBeTruthy();
+
+      fireEvent.changeText(searchInput, '');
+      await waitFor(() => expect(screen.queryByText('見つかりませんでした')).toBeNull());
+      // 通常のカレンダー表示(セル)に戻っている
+      expect(screen.getByText('今日は公園を散歩した')).toBeTruthy();
+    });
+
+    it('opens the day-entry modal for the tapped search result, using the existing selectedDate modal', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '今日は公園を散歩した', createdAt: isoAt(now, dayWithEntry, 9, 0) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('今日は公園を散歩した');
+
+      fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
+      const resultItem = await screen.findByText(/公園/);
+      fireEvent.press(resultItem);
+
+      // タップ後、その日付のエントリ一覧モーダルが開き、日付見出し・閉じるボタン・
+      // エントリの時刻表示(検索結果一覧には出ない書式)が表示される
+      expect(await screen.findByText(CLOSE_BUTTON_TEXT)).toBeTruthy();
+      expect(
+        screen.getByText(formatEntryDateTimeForTest(isoAt(now, dayWithEntry, 9, 0))),
+      ).toBeTruthy();
+    });
+
+    it('excerpts the matched portion of the entry text (with surrounding context) rather than only the first line, unlike the calendar cell title', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      // 1行目には検索キーワードを含めず、本文の途中(2行目以降)にキーワードを配置する。
+      // カレンダーセルのタイトル(1行目のみ)には現れないキーワードで検索結果に表示されることを確認する
+      const longEntryText = 'あ'.repeat(30) + '\n' + 'ここに検索キーワードのりんごが登場する';
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: longEntryText, createdAt: isoAt(now, dayWithEntry) }]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'りんご');
+
+      expect(await screen.findByText(/りんご/)).toBeTruthy();
+    });
+
+    it('shows the diary date above each search result excerpt', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '今日は公園を散歩した', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('今日は公園を散歩した');
+
+      fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
+      await screen.findByText(/公園/);
+
+      expect(
+        screen.getByText(`${now.getFullYear()}年${now.getMonth() + 1}月${dayWithEntry}日`),
+      ).toBeTruthy();
     });
   });
 });
