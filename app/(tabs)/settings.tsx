@@ -2,13 +2,14 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Link } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useCallback, useState } from 'react';
-import { Alert, Platform, Pressable, StyleSheet } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Switch } from 'react-native';
 
 import { ExternalLink } from '@/components/external-link';
 import { TabScreenContainer } from '@/components/tab-screen-container';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { SETTINGS_SECTIONS, type SettingsMenuItem } from '@/constants/settings-menu';
+import { useDiaryReminder } from '@/contexts/diary-reminder-context';
 import { useThemePreference, type ThemePreference } from '@/contexts/theme-preference-context';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { buildDiaryExportFileName, serializeDiaryEntriesForExport } from '@/utils/diary-export';
@@ -66,6 +67,138 @@ function AppearanceSection() {
           );
         })}
       </ThemedView>
+    </ThemedView>
+  );
+}
+
+// 時刻の「時」「分」を1つずつ調整するためのステッパー(−/+ボタン)。
+// 端末に標準搭載のネイティブなタイムピッカーは使わず、外部ライブラリを追加せずに実装するため、
+// シンプルな増減ボタンで時刻を選べるようにしている
+function TimeStepper({
+  label,
+  value,
+  onDecrease,
+  onIncrease,
+  disabled,
+}: {
+  label: string;
+  value: number;
+  onDecrease: () => void;
+  onIncrease: () => void;
+  disabled: boolean;
+}) {
+  const tintColor = useThemeColor({}, 'tint');
+  const formattedValue = String(value).padStart(2, '0');
+
+  return (
+    <ThemedView style={styles.reminderStepperGroup}>
+      <ThemedText style={styles.reminderStepperLabel}>{label}</ThemedText>
+      <Pressable
+        onPress={onDecrease}
+        disabled={disabled}
+        accessibilityRole="button"
+        accessibilityLabel={`${label}を減らす`}
+        style={[styles.reminderStepButton, { borderColor: tintColor }]}
+      >
+        <ThemedText style={[styles.reminderStepButtonText, { color: tintColor }]}>−</ThemedText>
+      </Pressable>
+      <ThemedText style={styles.reminderStepperValue}>{formattedValue}</ThemedText>
+      <Pressable
+        onPress={onIncrease}
+        disabled={disabled}
+        accessibilityRole="button"
+        accessibilityLabel={`${label}を増やす`}
+        style={[styles.reminderStepButton, { borderColor: tintColor }]}
+      >
+        <ThemedText style={[styles.reminderStepButtonText, { color: tintColor }]}>+</ThemedText>
+      </Pressable>
+    </ThemedView>
+  );
+}
+
+// 分は1分刻みで細かく調整できてもあまり意味がないため、5分刻みで調整できるようにする
+const REMINDER_MINUTE_STEP = 5;
+
+// 日記を書き忘れないよう、毎日決まった時刻に端末通知でリマインドする機能の設定導線(Issue #92)。
+// 外部のPush通知サービスは使わず、expo-notificationsによる端末内のローカル通知スケジューリングのみで
+// 完結させている。通知が許可されていない場合は、その旨をこの画面内で案内する(フォールバック表示)。
+function DiaryReminderSection() {
+  const { enabled, hour, minute, permissionStatus, setEnabled, setTime } = useDiaryReminder();
+  // ON/OFF切り替え(通知許可のリクエストを伴う非同期処理)が完了するまで、
+  // 誤って連続でタップされないようにするための状態
+  const [isTogglePending, setIsTogglePending] = useState(false);
+
+  const handleToggle = useCallback(
+    (value: boolean) => {
+      setIsTogglePending(true);
+      setEnabled(value)
+        .catch(() => {
+          // setEnabledがONへの通知スケジュール登録失敗時に例外を投げ直す(enabled自体は
+          // OFFへ戻される)ため、ここで必ず捕捉してユーザーへ失敗を案内する。
+          // 捕捉しないと未処理のPromise rejectionになってしまう
+          Alert.alert(
+            'リマインダーの設定に失敗しました',
+            '通知を設定できませんでした。もう一度お試しください。',
+          );
+        })
+        .finally(() => setIsTogglePending(false));
+    },
+    [setEnabled],
+  );
+
+  const handleHourChange = useCallback(
+    (delta: number) => {
+      setTime((hour + delta + 24) % 24, minute);
+    },
+    [hour, minute, setTime],
+  );
+
+  const handleMinuteChange = useCallback(
+    (delta: number) => {
+      setTime(hour, (minute + delta + 60) % 60);
+    },
+    [hour, minute, setTime],
+  );
+
+  return (
+    <ThemedView style={styles.section}>
+      <ThemedText type="subtitle" style={styles.sectionTitle}>
+        リマインダー
+      </ThemedText>
+      <ThemedView style={styles.reminderToggleRow}>
+        <ThemedText style={styles.reminderToggleLabel}>
+          毎日決まった時刻に日記を書くお知らせをする
+        </ThemedText>
+        <Switch
+          value={enabled}
+          onValueChange={handleToggle}
+          disabled={isTogglePending}
+          accessibilityLabel="日記リマインダー通知"
+        />
+      </ThemedView>
+      <ThemedView style={styles.reminderTimeRow}>
+        <ThemedText style={styles.reminderTimeRowLabel}>通知時刻</ThemedText>
+        <TimeStepper
+          label="時"
+          value={hour}
+          onDecrease={() => handleHourChange(-1)}
+          onIncrease={() => handleHourChange(1)}
+          disabled={isTogglePending}
+        />
+        <ThemedText style={styles.reminderTimeSeparator}>:</ThemedText>
+        <TimeStepper
+          label="分"
+          value={minute}
+          onDecrease={() => handleMinuteChange(-REMINDER_MINUTE_STEP)}
+          onIncrease={() => handleMinuteChange(REMINDER_MINUTE_STEP)}
+          disabled={isTogglePending}
+        />
+      </ThemedView>
+      {permissionStatus === 'denied' && (
+        <ThemedText style={[styles.reminderFallbackText, { color: DANGER_COLOR }]}>
+          通知が許可されていないため、リマインダーを利用できません。端末の設定からこのアプリの通知を許可してください。
+        </ThemedText>
+      )}
     </ThemedView>
   );
 }
@@ -235,6 +368,7 @@ export default function SettingsScreen() {
     // セーフエリア上端インセットぶんの余白を自動的に加算する(Issue #125)
     <TabScreenContainer style={styles.container}>
       <AppearanceSection />
+      <DiaryReminderSection />
 
       {SETTINGS_SECTIONS.map((section) => (
         <ThemedView key={section.key} style={styles.section}>
@@ -291,6 +425,55 @@ const styles = StyleSheet.create({
   },
   themeOptionText: {
     fontWeight: '600',
+  },
+  reminderToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 12,
+  },
+  reminderToggleLabel: {
+    flex: 1,
+  },
+  reminderTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  reminderTimeRowLabel: {
+    marginRight: 4,
+  },
+  reminderTimeSeparator: {
+    fontWeight: '600',
+  },
+  reminderStepperGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  reminderStepperLabel: {
+    fontSize: 13,
+  },
+  reminderStepperValue: {
+    minWidth: 28,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  reminderStepButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reminderStepButtonText: {
+    fontWeight: '600',
+  },
+  reminderFallbackText: {
+    marginTop: 12,
   },
   exportButton: {
     alignSelf: 'flex-start',

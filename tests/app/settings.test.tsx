@@ -11,6 +11,10 @@ import SettingsScreen from '@/app/(tabs)/settings';
 import { TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID } from '@/components/tab-screen-container';
 import { SETTINGS_SECTIONS } from '@/constants/settings-menu';
 import {
+  DIARY_REMINDER_STORAGE_KEY,
+  DiaryReminderProvider,
+} from '@/contexts/diary-reminder-context';
+import {
   THEME_PREFERENCE_STORAGE_KEY,
   ThemePreferenceProvider,
 } from '@/contexts/theme-preference-context';
@@ -39,6 +43,19 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
+
+// `app/(tabs)/settings.tsx`は「リマインダー」セクション(Issue #92)から
+// `contexts/diary-reminder-context.tsx`経由で`utils/diary-reminder-notifications.ts`
+// (expo-notificationsの薄いラッパー)を利用する。実際のネイティブ通知APIを呼ばずに
+// 許可リクエスト・スケジュール登録/キャンセルの呼び出しを検証できるよう、ラッパーごとモック化する
+// (tests/utils/diary-reminder-notifications.test.ts、tests/contexts/diary-reminder-context.test.tsx
+// で個別に検証済みのものを、画面からの結線確認のためにここでも薄く検証する)。
+jest.mock('@/utils/diary-reminder-notifications', () => ({
+  getReminderPermissionStatusAsync: jest.fn(() => Promise.resolve('undetermined')),
+  requestReminderPermissionAsync: jest.fn(() => Promise.resolve('undetermined')),
+  scheduleDailyReminderAsync: jest.fn(() => Promise.resolve()),
+  cancelDailyReminderAsync: jest.fn(() => Promise.resolve()),
+}));
 
 // `expo-file-system/legacy`はJest環境ではネイティブモジュールが存在せず、`cacheDirectory`は
 // 常に`null`になる(実機のiOS/Androidではキャッシュディレクトリのパス文字列が入る)。
@@ -99,6 +116,16 @@ jest.mock('expo-router', () => {
 
   return { Link: MockLink };
 });
+
+// jest.mockしたutils/diary-reminder-notifications.tsの各関数を、テストごとに呼び出し内容を
+// 差し替え・検証するための参照(tests/contexts/diary-reminder-context.test.tsxと同じ方式)
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const mockedDiaryReminderNotifications = require('@/utils/diary-reminder-notifications') as {
+  getReminderPermissionStatusAsync: jest.Mock;
+  requestReminderPermissionAsync: jest.Mock;
+  scheduleDailyReminderAsync: jest.Mock;
+  cancelDailyReminderAsync: jest.Mock;
+};
 
 describe('SettingsScreen', () => {
   it('renders every section title defined in SETTINGS_SECTIONS', () => {
@@ -720,5 +747,293 @@ describe('外観セクション(Issue #91: ライト/ダーク/端末に合わ�
     expect(screen.getByRole('button', { name: LIGHT_LABEL }).props.accessibilityState).toEqual(
       expect.objectContaining({ selected: true }),
     );
+  });
+});
+
+describe('リマインダーセクション(Issue #92: 日記を書く習慣化のためのリマインダー通知)', () => {
+  const REMINDER_SECTION_TITLE = 'リマインダー';
+  const REMINDER_TOGGLE_LABEL = '日記リマインダー通知';
+  const HOUR_DECREASE_LABEL = '時を減らす';
+  const HOUR_INCREASE_LABEL = '時を増やす';
+  const MINUTE_DECREASE_LABEL = '分を減らす';
+  const MINUTE_INCREASE_LABEL = '分を増やす';
+  const FALLBACK_TEXT =
+    '通知が許可されていないため、リマインダーを利用できません。端末の設定からこのアプリの通知を許可してください。';
+
+  // 実機では`app/_layout.tsx`の`RootLayout`が全画面を`DiaryReminderProvider`でラップするが、
+  // このテストでは`SettingsScreen`を単体でレンダリングするため、そのラップが存在しない。
+  // `useDiaryReminder()`は`Provider`配下でない場合`setEnabled`/`setTime`がno-opにフォールバックする
+  // 仕様(tests/contexts/diary-reminder-context.test.tsx参照)のため、ここでは実機と同じ構成を
+  // 再現するために明示的に`DiaryReminderProvider`でラップする。
+  function renderSettingsScreen() {
+    return render(
+      <DiaryReminderProvider>
+        <SettingsScreen />
+      </DiaryReminderProvider>,
+    );
+  }
+
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    jest.clearAllMocks();
+    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
+      'undetermined',
+    );
+    mockedDiaryReminderNotifications.requestReminderPermissionAsync.mockResolvedValue(
+      'undetermined',
+    );
+    mockedDiaryReminderNotifications.scheduleDailyReminderAsync.mockResolvedValue(undefined);
+    mockedDiaryReminderNotifications.cancelDailyReminderAsync.mockResolvedValue(undefined);
+  });
+
+  it('renders the "リマインダー" section with the toggle switch and time stepper, defaulting to OFF/21:00 (操作導線の存在確認・初期値)', () => {
+    renderSettingsScreen();
+
+    expect(screen.getByText(REMINDER_SECTION_TITLE)).toBeTruthy();
+    const toggle = screen.getByLabelText(REMINDER_TOGGLE_LABEL);
+    expect(toggle.props.value).toBe(false);
+    expect(screen.getByText('21')).toBeTruthy();
+    expect(screen.getByText('00')).toBeTruthy();
+  });
+
+  it('requests OS permission, turns ON, and schedules the reminder when the toggle is pressed while permission is undetermined and the user grants it (正常系: 未確認から許可)', async () => {
+    mockedDiaryReminderNotifications.requestReminderPermissionAsync.mockResolvedValue('granted');
+    renderSettingsScreen();
+
+    await act(async () => {
+      fireEvent(screen.getByLabelText(REMINDER_TOGGLE_LABEL), 'valueChange', true);
+    });
+
+    expect(mockedDiaryReminderNotifications.requestReminderPermissionAsync).toHaveBeenCalledTimes(
+      1,
+    );
+    await waitFor(() =>
+      expect(mockedDiaryReminderNotifications.scheduleDailyReminderAsync).toHaveBeenCalledWith(
+        21,
+        0,
+      ),
+    );
+    expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true);
+    expect(screen.queryByText(FALLBACK_TEXT)).toBeNull();
+  });
+
+  it('shows the fallback message and keeps the toggle OFF when the user denies the permission request (異常系: 未確認から拒否)', async () => {
+    mockedDiaryReminderNotifications.requestReminderPermissionAsync.mockResolvedValue('denied');
+    renderSettingsScreen();
+
+    await act(async () => {
+      fireEvent(screen.getByLabelText(REMINDER_TOGGLE_LABEL), 'valueChange', true);
+    });
+
+    expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(false);
+    await waitFor(() => expect(screen.getByText(FALLBACK_TEXT)).toBeTruthy());
+    expect(mockedDiaryReminderNotifications.scheduleDailyReminderAsync).not.toHaveBeenCalled();
+  });
+
+  it('shows the fallback message on mount when the permission is already denied at the OS level (正常系: 起動時点で拒否済み)', async () => {
+    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('denied');
+    renderSettingsScreen();
+
+    await waitFor(() => expect(screen.getByText(FALLBACK_TEXT)).toBeTruthy());
+  });
+
+  it('does not show the fallback message when permission is undetermined or granted (境界値: フォールバック非表示のケース)', async () => {
+    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+    renderSettingsScreen();
+
+    await waitFor(() =>
+      expect(mockedDiaryReminderNotifications.getReminderPermissionStatusAsync).toHaveBeenCalled(),
+    );
+    expect(screen.queryByText(FALLBACK_TEXT)).toBeNull();
+  });
+
+  it('cancels the schedule and turns OFF when the toggle is pressed while ON (正常系: ON→OFF)', async () => {
+    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+    await AsyncStorage.setItem(
+      DIARY_REMINDER_STORAGE_KEY,
+      JSON.stringify({ enabled: true, hour: 21, minute: 0 }),
+    );
+    renderSettingsScreen();
+    await waitFor(() =>
+      expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true),
+    );
+
+    await act(async () => {
+      fireEvent(screen.getByLabelText(REMINDER_TOGGLE_LABEL), 'valueChange', false);
+    });
+
+    expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(false);
+    await waitFor(() =>
+      expect(mockedDiaryReminderNotifications.cancelDailyReminderAsync).toHaveBeenCalledTimes(1),
+    );
+  });
+
+  it('increases/decreases the hour by 1 via the time stepper, wrapping around 0-23 (正常系・境界値: 時のステッパー)', async () => {
+    renderSettingsScreen();
+
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(HOUR_INCREASE_LABEL));
+    });
+    expect(screen.getByText('22')).toBeTruthy();
+
+    // 実機の連続タップは別々の(同期)イベントとして届き、都度再描画が挟まるため、
+    // それぞれを個別の`act`で包んで1回ずつ確実に反映させる
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(HOUR_DECREASE_LABEL));
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(HOUR_DECREASE_LABEL));
+    });
+    expect(screen.getByText('20')).toBeTruthy();
+  });
+
+  it('wraps the hour from 23 to 0 when increased past the maximum (境界値: 時の繰り上がり)', async () => {
+    renderSettingsScreen();
+
+    // 21時(既定値)から+3時間で0時に繰り上がることを確認する(21 -> 22 -> 23 -> 0)
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(HOUR_INCREASE_LABEL));
+      fireEvent.press(screen.getByLabelText(HOUR_INCREASE_LABEL));
+      fireEvent.press(screen.getByLabelText(HOUR_INCREASE_LABEL));
+    });
+
+    expect(screen.getByText('00')).toBeTruthy();
+  });
+
+  it('wraps the hour from 0 to 23 when decreased past the minimum (境界値: 時の繰り下がり)', async () => {
+    renderSettingsScreen();
+
+    // 21時(既定値)から-21時間で0時、さらに-1でと23時に繰り下がることを確認する
+    for (let i = 0; i < 22; i += 1) {
+      await act(async () => {
+        fireEvent.press(screen.getByLabelText(HOUR_DECREASE_LABEL));
+      });
+    }
+
+    expect(screen.getByText('23')).toBeTruthy();
+  });
+
+  it('increases/decreases the minute by 5 via the time stepper, wrapping around 0-59 (正常系・境界値: 分のステッパー)', async () => {
+    renderSettingsScreen();
+
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(MINUTE_INCREASE_LABEL));
+    });
+    expect(screen.getByText('05')).toBeTruthy();
+
+    // 実機の連続タップは別々の(同期)イベントとして届き、都度再描画が挟まるため、
+    // それぞれを個別の`act`で包んで1回ずつ確実に反映させる
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(MINUTE_DECREASE_LABEL));
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(MINUTE_DECREASE_LABEL));
+    });
+    // 0分から-5分で55分に繰り下がる
+    expect(screen.getByText('55')).toBeTruthy();
+  });
+
+  it('re-schedules the reminder with the new time via AsyncStorage persistence when ON and permission is granted (正常系: 通知許可済みでの時刻変更)', async () => {
+    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+    await AsyncStorage.setItem(
+      DIARY_REMINDER_STORAGE_KEY,
+      JSON.stringify({ enabled: true, hour: 21, minute: 0 }),
+    );
+    renderSettingsScreen();
+    await waitFor(() =>
+      expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true),
+    );
+    jest.clearAllMocks();
+
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(HOUR_INCREASE_LABEL));
+    });
+
+    await waitFor(() =>
+      expect(mockedDiaryReminderNotifications.scheduleDailyReminderAsync).toHaveBeenCalledWith(
+        22,
+        0,
+      ),
+    );
+    await waitFor(() =>
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+        DIARY_REMINDER_STORAGE_KEY,
+        JSON.stringify({ enabled: true, hour: 22, minute: 0 }),
+      ),
+    );
+  });
+
+  it('disables the toggle and time steppers while the ON/OFF switch is being processed, to prevent duplicate taps (境界値: 連続タップ防止)', async () => {
+    // `setEnabled`が完了するまで解決しないPromiseにして、処理中の一瞬の状態を検証する
+    let resolveRequestPermission: (status: string) => void = () => {};
+    mockedDiaryReminderNotifications.requestReminderPermissionAsync.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRequestPermission = resolve;
+      }),
+    );
+    renderSettingsScreen();
+
+    act(() => {
+      fireEvent(screen.getByLabelText(REMINDER_TOGGLE_LABEL), 'valueChange', true);
+    });
+
+    expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.disabled).toBe(true);
+    // Switch(RCTSwitch)は`disabled`propをそのまま持つが、`Pressable`ベースのステッパーボタンは
+    // `accessibilityState.disabled`として反映される
+    expect(screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
+      true,
+    );
+
+    await act(async () => {
+      resolveRequestPermission('granted');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.disabled).toBe(false);
+    expect(screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
+      false,
+    );
+  });
+
+  it('shows a failure alert and reverts the toggle to OFF when scheduling the reminder fails even though permission is granted (異常系: 通知登録失敗時のフィードバック)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    mockedDiaryReminderNotifications.requestReminderPermissionAsync.mockResolvedValue('granted');
+    mockedDiaryReminderNotifications.scheduleDailyReminderAsync.mockRejectedValue(
+      new Error('schedule error'),
+    );
+    renderSettingsScreen();
+
+    await act(async () => {
+      fireEvent(screen.getByLabelText(REMINDER_TOGGLE_LABEL), 'valueChange', true);
+    });
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'リマインダーの設定に失敗しました',
+        '通知を設定できませんでした。もう一度お試しください。',
+      ),
+    );
+    // 通知の登録に失敗しているため、見た目上もONに確定させずOFFへ戻す
+    expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(false);
+    // 連続タップ防止用の無効化状態も、失敗を経て正しく解除されている
+    expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.disabled).toBe(false);
+  });
+
+  it('restores a previously saved ON/time setting from AsyncStorage on mount (正常系: 起動時の復元)', async () => {
+    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+    await AsyncStorage.setItem(
+      DIARY_REMINDER_STORAGE_KEY,
+      JSON.stringify({ enabled: true, hour: 6, minute: 30 }),
+    );
+
+    renderSettingsScreen();
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true),
+    );
+    expect(screen.getByText('06')).toBeTruthy();
+    expect(screen.getByText('30')).toBeTruthy();
   });
 });
