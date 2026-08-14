@@ -827,8 +827,16 @@ export default function HomeScreen() {
           statusBarTranslucent
           navigationBarTranslucent
         >
-          <View style={styles.modalOverlay}>
-            <ThemedView style={[styles.modalContent, { borderColor: iconColor }]}>
+          {/* 背景の半透明オーバーレイをタップした場合はモーダルを閉じる(Issue #84)。
+              modalContent側は下でonStartShouldSetResponderによりタッチの伝播を止めているため、
+              一覧内の項目をタップしても意図せず閉じてしまうことはない */}
+          <Pressable style={styles.modalOverlay} onPress={handleCloseDateModal}>
+            <ThemedView
+              style={[styles.modalContent, { borderColor: iconColor }]}
+              // オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
+              // modalContent内でのタッチ開始をこのViewがレスポンダーとして引き受け、伝播を止める
+              onStartShouldSetResponder={() => true}
+            >
               <View style={styles.modalHeader}>
                 <ThemedText type="subtitle">
                   {selectedDate ? formatDateHeading(selectedDate) : ''}
@@ -872,7 +880,7 @@ export default function HomeScreen() {
                 )}
               />
             </ThemedView>
-          </View>
+          </Pressable>
         </Modal>
 
         <Modal
