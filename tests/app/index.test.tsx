@@ -281,6 +281,30 @@ function flattenTexts(node: unknown, acc: string[] = []): string[] {
   return acc;
 }
 
+// `react-test-renderer`(`ReactTestInstance`の型の出どころ)には`@types/react-test-renderer`が
+// 導入されておらず型定義が存在しないため、`screen.UNSAFE_getAllByType`等の戻り値は事実上`any`になる。
+// そのコールバック引数(node)にも型注釈を付けないと`tsc --noEmit`の`noImplicitAny`に抵触するため、
+// 既存の実際の型と同じ`any`を明示的に注釈する(実行時の挙動には影響しない、型解決のためだけの措置)。
+type TestNode = any;
+
+// 日付一覧モーダル(Modalコンポーネント)のツリーの中から、背景の半透明オーバーレイに
+// 対応するPressableを特定するヘルパー(Issue #84)。実装側は`modalOverlay`スタイル
+// (styles.modalOverlay)をエクスポートしていないため、実装と同じ背景色('rgba(0, 0, 0, 0.4)')を
+// 手がかりに、モーダル配下でonPressを持つ要素の中から一致するものを探す。
+const MODAL_OVERLAY_BACKGROUND_COLOR = 'rgba(0, 0, 0, 0.4)';
+function getModalOverlayPressable(modal: TestNode): TestNode {
+  const overlay = modal
+    .findAll((node: TestNode) => typeof node.props.onPress === 'function')
+    .find(
+      (node: TestNode) =>
+        StyleSheet.flatten(node.props.style).backgroundColor === MODAL_OVERLAY_BACKGROUND_COLOR,
+    );
+  if (!overlay) {
+    throw new Error('modal overlay (Pressable) not found');
+  }
+  return overlay;
+}
+
 describe('HomeScreen', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
@@ -1846,6 +1870,123 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
 
       await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
+    });
+
+    describe('背景タップでモーダルを閉じる(Issue #84)', () => {
+      it('closes the modal when the semi-transparent background overlay is tapped (正常系)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '背景タップ対象の日記', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+
+        render(<HomeScreen />);
+        await screen.findByText('背景タップ対象の日記');
+
+        fireEvent.press(screen.getByText('背景タップ対象の日記'));
+        await screen.findByText(CLOSE_BUTTON_TEXT);
+
+        const [entryListModal] = screen.UNSAFE_getAllByType(Modal);
+        const overlay = getModalOverlayPressable(entryListModal);
+
+        fireEvent.press(overlay);
+
+        // selectedDateがnullに戻り、モーダルの見出し・閉じるボタンが表示されなくなる
+        await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
+        expect(
+          screen.queryByText(`${now.getFullYear()}年${now.getMonth() + 1}月${dayWithEntry}日`),
+        ).toBeNull();
+        // 閉じた後もデータ自体は消えておらず、カレンダーセルには引き続きタイトルが表示される
+        expect(screen.getByText('背景タップ対象の日記')).toBeTruthy();
+      });
+
+      it('keeps the entry-list modal open (does not let the tap bubble to the overlay) when pressing an interactive element inside it, such as the edit button (境界値/異常系: propagation guard regression)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '編集ボタン確認用の日記', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+
+        render(<HomeScreen />);
+        await screen.findByText('編集ボタン確認用の日記');
+
+        fireEvent.press(screen.getByText('編集ボタン確認用の日記'));
+        await screen.findByText(CLOSE_BUTTON_TEXT);
+
+        fireEvent.press(screen.getByText('編集'));
+
+        // 編集モーダルが開く一方、日付一覧モーダル自体は閉じられていない
+        // (modalContent側のonStartShouldSetResponderにより、内部のボタン操作が
+        // 背景オーバーレイのonPressまで伝播して意図せず閉じてしまうことはない)
+        expect(await screen.findByText('日記を編集')).toBeTruthy();
+        const [entryListModalStillOpen] = screen.UNSAFE_getAllByType(Modal);
+        expect(entryListModalStillOpen.props.visible).toBe(true);
+      });
+
+      it('sets onStartShouldSetResponder on the modal content so a touch starting inside it is claimed there and does not propagate to the overlay Pressable behind it (境界値: propagation guard implementation contract)', async () => {
+        // @testing-library/react-nativeのfireEvent.pressは、ネイティブのタッチレスポンダー交渉
+        // (深い階層から浅い階層へ`onStartShouldSetResponder`を問い合わせ、最初に受理した階層が
+        // タッチを専有する仕組み)を完全には再現できない(常に最も近い有効なonPressハンドラを
+        // 呼び出すだけの簡易シミュレーションのため)。そのため、「一覧やヘッダーの余白など、
+        // それ自体に押下ハンドラを持たない領域をタップしても閉じない」という挙動そのものは
+        // fireEventで直接再現できず、代わりに実装が伝播を止めるためのガード
+        // (`onStartShouldSetResponder={() => true}`)が実際に設定され、trueを返す
+        // (=タッチを専有し、背景オーバーレイへ伝播させない)ことを直接検証する。
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: 'ガード確認用の日記', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+
+        render(<HomeScreen />);
+        await screen.findByText('ガード確認用の日記');
+
+        fireEvent.press(screen.getByText('ガード確認用の日記'));
+        await screen.findByText(CLOSE_BUTTON_TEXT);
+
+        const [entryListModal] = screen.UNSAFE_getAllByType(Modal);
+        const [modalContentResponder] = entryListModal.findAll(
+          (node: TestNode) => typeof node.props.onStartShouldSetResponder === 'function',
+        );
+
+        expect(modalContentResponder).toBeTruthy();
+        expect(modalContentResponder.props.onStartShouldSetResponder()).toBe(true);
+      });
+
+      it('still closes the modal via onRequestClose (Android hardware back / gesture), unaffected by the overlay becoming a Pressable (regression)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '戻る操作確認用の日記', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+
+        render(<HomeScreen />);
+        await screen.findByText('戻る操作確認用の日記');
+
+        fireEvent.press(screen.getByText('戻る操作確認用の日記'));
+        await screen.findByText(CLOSE_BUTTON_TEXT);
+
+        const [entryListModal] = screen.UNSAFE_getAllByType(Modal);
+        expect(typeof entryListModal.props.onRequestClose).toBe('function');
+
+        act(() => {
+          entryListModal.props.onRequestClose();
+        });
+
+        await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
+      });
     });
 
     it('sets statusBarTranslucent and navigationBarTranslucent on both the entry-list modal and the edit modal, so they match the edge-to-edge display of the screen behind them (Issue #94)', async () => {
