@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -689,143 +690,156 @@ export default function HomeScreen() {
       {/* ステータスバー/ノッチ領域とタイトルが重ならないよう、TabScreenContainerで
           セーフエリア上端インセットぶんの余白を自動的に加算する */}
       <TabScreenContainer style={styles.container}>
-        <ThemedText type="title" style={styles.title}>
-          日記
-        </ThemedText>
+        {/* 背景(余白・検索結果一覧・カレンダー領域など)をタップした際にキーボードを閉じられるようにする。
+            TextInputや各種Pressable(保存ボタン、編集/削除ボタン等)は自身がタッチの
+            レスポンダーになるため、このラッパーのonPressには伝播せず、既存の操作性は損なわれない。
+            accessible={false}を指定し、内側のテキストやボタンの個別のアクセシビリティ情報が
+            1つの要素にまとめられて読み上げられてしまわないようにする */}
+        <Pressable
+          style={styles.contentWrapper}
+          onPress={() => Keyboard.dismiss()}
+          accessible={false}
+        >
+          <ThemedText type="title" style={styles.title}>
+            日記
+          </ThemedText>
 
-        <ThemedView style={styles.composer}>
-          <TextInput
-            style={[styles.input, { color: textColor, borderColor: tintColor }]}
-            placeholder="今日の出来事や気持ちを書いてみましょう"
-            placeholderTextColor={iconColor}
-            value={draft}
-            onChangeText={handleChangeDraft}
-            multiline
-            maxLength={BODY_MAX_LENGTH}
-          />
-          <View style={styles.composerFooter}>
-            {/* 文字数カウンター(上限に近づいた/達したことがひと目で分かるよう常に表示する) */}
-            <ThemedText
-              style={[
-                styles.charCount,
-                draft.length >= BODY_MAX_LENGTH ? { color: errorColor } : { color: iconColor },
-              ]}
-            >
-              {draft.length}/{BODY_MAX_LENGTH}
-            </ThemedText>
-            <Pressable
-              style={[
-                styles.saveButton,
-                { backgroundColor: tintColor },
-                // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
-                { opacity: !draft.trim() || isSaving ? 0.5 : 1 },
-              ]}
-              onPress={handleSave}
-              disabled={!draft.trim() || isSaving}
-            >
-              <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
-                保存
-              </ThemedText>
-            </Pressable>
-          </View>
-          {saveError ? (
-            <ThemedText style={[styles.errorText, { color: errorColor }]}>{saveError}</ThemedText>
-          ) : null}
-          {saveToastMessage ? (
-            <SaveToast message={saveToastMessage} onHide={handleHideSaveToast} />
-          ) : null}
-        </ThemedView>
-
-        {/* 日記本文のキーワード検索用の入力欄。「今日の出来事を書く」入力欄(composer)とは
-            独立した検索専用の入力欄で、キーワードが入力されている間だけ下に検索結果一覧を表示する */}
-        <View style={styles.searchContainer}>
-          <TextInput
-            style={[styles.searchInput, { color: textColor, borderColor: iconColor }]}
-            placeholder="日記を検索"
-            placeholderTextColor={iconColor}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            returnKeyType="search"
-            accessibilityLabel="日記を検索"
-          />
-        </View>
-
-        {trimmedSearchQuery ? (
-          // 検索キーワードが入力されている間は、通常のカレンダー表示の代わりに検索結果一覧を表示する
-          <FlatList
-            style={styles.searchResultsList}
-            data={searchResults}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <Pressable
-                style={[styles.searchResultItem, { borderBottomColor: iconColor }]}
-                onPress={() => handleSearchResultPress(item)}
+          <ThemedView style={styles.composer}>
+            <TextInput
+              style={[styles.input, { color: textColor, borderColor: tintColor }]}
+              placeholder="今日の出来事や気持ちを書いてみましょう"
+              placeholderTextColor={iconColor}
+              value={draft}
+              onChangeText={handleChangeDraft}
+              multiline
+              maxLength={BODY_MAX_LENGTH}
+            />
+            <View style={styles.composerFooter}>
+              {/* 文字数カウンター(上限に近づいた/達したことがひと目で分かるよう常に表示する) */}
+              <ThemedText
+                style={[
+                  styles.charCount,
+                  draft.length >= BODY_MAX_LENGTH ? { color: errorColor } : { color: iconColor },
+                ]}
               >
-                <ThemedText style={[styles.searchResultDate, { color: iconColor }]}>
-                  {formatDateHeading(toDateKey(new Date(item.createdAt)))}
-                </ThemedText>
-                <ThemedText numberOfLines={2}>
-                  {getSearchExcerpt(item.text, trimmedSearchQuery)}
+                {draft.length}/{BODY_MAX_LENGTH}
+              </ThemedText>
+              <Pressable
+                style={[
+                  styles.saveButton,
+                  { backgroundColor: tintColor },
+                  // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
+                  { opacity: !draft.trim() || isSaving ? 0.5 : 1 },
+                ]}
+                onPress={handleSave}
+                disabled={!draft.trim() || isSaving}
+              >
+                <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
+                  保存
                 </ThemedText>
               </Pressable>
-            )}
-            ListEmptyComponent={
-              // 検索結果が0件のときは、カレンダーが何も表示されず戸惑わないよう明示的に案内する
-              <ThemedView style={styles.emptyState}>
-                <ThemedText style={styles.emptyStateText}>見つかりませんでした</ThemedText>
-              </ThemedView>
-            }
-          />
-        ) : (
-          <>
-            {isLoading ? (
-              // 初回読み込み中は、まだentriesが空配列なだけなのに空状態メッセージが
-              // 一瞬誤って表示されてしまわないよう、代わりにローディング表示を出す
-              <ThemedView style={styles.emptyState}>
-                <ActivityIndicator color={tintColor} />
-              </ThemedView>
-            ) : entries.length === 0 ? (
-              // 日記が1件も保存されていない場合、ラベルの無いカレンダーだけが表示されて
-              // 何をすればよいか分かりにくくならないよう、案内メッセージを表示する
-              // (カレンダー自体は今後日記を書く導線として引き続き表示しておく)
-              <ThemedView style={styles.emptyState}>
-                <ThemedText style={styles.emptyStateText}>
-                  まだ日記がありません。最初の日記を書いてみましょう。
-                </ThemedText>
-              </ThemedView>
-            ) : null}
-
-            <View
-              style={[styles.calendarWrapper, { borderColor: iconColor, backgroundColor }]}
-              onLayout={(event) => setWrapperHeight(event.nativeEvent.layout.height)}
-            >
-              <Calendar
-                theme={{
-                  backgroundColor,
-                  calendarBackground: backgroundColor,
-                  // 曜日行はtextColorを使い、アイコン色より高いコントラストで視認性を確保する
-                  textSectionTitleColor: textColor,
-                  textDayHeaderFontWeight: '600',
-                  dayTextColor: textColor,
-                  // 月・年の見出しも大きく太字にして、矢印の間で確実に視認できるようにする
-                  monthTextColor: textColor,
-                  textMonthFontWeight: '700',
-                  textMonthFontSize: 18,
-                  arrowColor: tintColor,
-                  todayTextColor: tintColor,
-                }}
-                // 「2026年8月」のように年→月の順で表示する(デフォルトの'MMMM yyyy'は英語の語順のまま
-                // 月名だけ日本語化されてしまい不自然なため)
-                monthFormat="yyyy年M月"
-                dayComponent={renderDay}
-                onDayPress={handleDayPress}
-                enableSwipeMonths
-                // 月によって行数(4〜6週)が変わって高さがガタつかないよう、常に6週分の高さで揃える
-                showSixWeeks
-              />
             </View>
-          </>
-        )}
+            {saveError ? (
+              <ThemedText style={[styles.errorText, { color: errorColor }]}>{saveError}</ThemedText>
+            ) : null}
+            {saveToastMessage ? (
+              <SaveToast message={saveToastMessage} onHide={handleHideSaveToast} />
+            ) : null}
+          </ThemedView>
+
+          {/* 日記本文のキーワード検索用の入力欄。「今日の出来事を書く」入力欄(composer)とは
+            独立した検索専用の入力欄で、キーワードが入力されている間だけ下に検索結果一覧を表示する */}
+          <View style={styles.searchContainer}>
+            <TextInput
+              style={[styles.searchInput, { color: textColor, borderColor: iconColor }]}
+              placeholder="日記を検索"
+              placeholderTextColor={iconColor}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              returnKeyType="search"
+              accessibilityLabel="日記を検索"
+            />
+          </View>
+
+          {trimmedSearchQuery ? (
+            // 検索キーワードが入力されている間は、通常のカレンダー表示の代わりに検索結果一覧を表示する
+            <FlatList
+              style={styles.searchResultsList}
+              data={searchResults}
+              keyExtractor={(item) => item.id}
+              // 一覧をスクロールした際にもキーボードを閉じられるようにする
+              keyboardDismissMode="on-drag"
+              renderItem={({ item }) => (
+                <Pressable
+                  style={[styles.searchResultItem, { borderBottomColor: iconColor }]}
+                  onPress={() => handleSearchResultPress(item)}
+                >
+                  <ThemedText style={[styles.searchResultDate, { color: iconColor }]}>
+                    {formatDateHeading(toDateKey(new Date(item.createdAt)))}
+                  </ThemedText>
+                  <ThemedText numberOfLines={2}>
+                    {getSearchExcerpt(item.text, trimmedSearchQuery)}
+                  </ThemedText>
+                </Pressable>
+              )}
+              ListEmptyComponent={
+                // 検索結果が0件のときは、カレンダーが何も表示されず戸惑わないよう明示的に案内する
+                <ThemedView style={styles.emptyState}>
+                  <ThemedText style={styles.emptyStateText}>見つかりませんでした</ThemedText>
+                </ThemedView>
+              }
+            />
+          ) : (
+            <>
+              {isLoading ? (
+                // 初回読み込み中は、まだentriesが空配列なだけなのに空状態メッセージが
+                // 一瞬誤って表示されてしまわないよう、代わりにローディング表示を出す
+                <ThemedView style={styles.emptyState}>
+                  <ActivityIndicator color={tintColor} />
+                </ThemedView>
+              ) : entries.length === 0 ? (
+                // 日記が1件も保存されていない場合、ラベルの無いカレンダーだけが表示されて
+                // 何をすればよいか分かりにくくならないよう、案内メッセージを表示する
+                // (カレンダー自体は今後日記を書く導線として引き続き表示しておく)
+                <ThemedView style={styles.emptyState}>
+                  <ThemedText style={styles.emptyStateText}>
+                    まだ日記がありません。最初の日記を書いてみましょう。
+                  </ThemedText>
+                </ThemedView>
+              ) : null}
+
+              <View
+                style={[styles.calendarWrapper, { borderColor: iconColor, backgroundColor }]}
+                onLayout={(event) => setWrapperHeight(event.nativeEvent.layout.height)}
+              >
+                <Calendar
+                  theme={{
+                    backgroundColor,
+                    calendarBackground: backgroundColor,
+                    // 曜日行はtextColorを使い、アイコン色より高いコントラストで視認性を確保する
+                    textSectionTitleColor: textColor,
+                    textDayHeaderFontWeight: '600',
+                    dayTextColor: textColor,
+                    // 月・年の見出しも大きく太字にして、矢印の間で確実に視認できるようにする
+                    monthTextColor: textColor,
+                    textMonthFontWeight: '700',
+                    textMonthFontSize: 18,
+                    arrowColor: tintColor,
+                    todayTextColor: tintColor,
+                  }}
+                  // 「2026年8月」のように年→月の順で表示する(デフォルトの'MMMM yyyy'は英語の語順のまま
+                  // 月名だけ日本語化されてしまい不自然なため)
+                  monthFormat="yyyy年M月"
+                  dayComponent={renderDay}
+                  onDayPress={handleDayPress}
+                  enableSwipeMonths
+                  // 月によって行数(4〜6週)が変わって高さがガタつかないよう、常に6週分の高さで揃える
+                  showSixWeeks
+                />
+              </View>
+            </>
+          )}
+        </Pressable>
 
         <Modal
           visible={selectedDate !== null}
@@ -858,6 +872,8 @@ export default function HomeScreen() {
               <FlatList
                 data={selectedDateEntries}
                 keyExtractor={(item) => item.id}
+                // 一覧をスクロールした際にもキーボードを閉じられるようにする
+                keyboardDismissMode="on-drag"
                 renderItem={({ item }) => (
                   <ThemedView style={[styles.entry, { borderBottomColor: iconColor }]}>
                     <View style={styles.entryHeader}>
@@ -962,6 +978,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
+  },
+  // 背景タップでキーボードを閉じるためのPressableラッパー。従来containerに指定していた
+  // gapは、ラッパーの追加によりtitle/composer/検索欄/カレンダー等の直接の親がこちらに
+  // 変わったため、レイアウトを崩さないようこちらへ移動している
+  contentWrapper: {
+    flex: 1,
     gap: 16,
   },
   title: {
