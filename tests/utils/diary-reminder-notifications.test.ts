@@ -211,9 +211,7 @@ describe('utils/diary-reminder-notifications', () => {
 
     it('propagates the error without scheduling when registering the Android channel fails (異常系: チャンネル登録失敗)', async () => {
       Platform.OS = 'android';
-      mockedNotifications.setNotificationChannelAsync.mockRejectedValue(
-        new Error('channel error'),
-      );
+      mockedNotifications.setNotificationChannelAsync.mockRejectedValue(new Error('channel error'));
 
       await expect(scheduleDailyReminderAsync(21, 0)).rejects.toThrow('channel error');
       expect(mockedNotifications.scheduleNotificationAsync).not.toHaveBeenCalled();
@@ -221,9 +219,7 @@ describe('utils/diary-reminder-notifications', () => {
 
     it('propagates the error when scheduleNotificationAsync itself fails (異常系: スケジュール登録失敗)', async () => {
       Platform.OS = 'ios';
-      mockedNotifications.scheduleNotificationAsync.mockRejectedValue(
-        new Error('schedule error'),
-      );
+      mockedNotifications.scheduleNotificationAsync.mockRejectedValue(new Error('schedule error'));
 
       await expect(scheduleDailyReminderAsync(21, 0)).rejects.toThrow('schedule error');
     });
