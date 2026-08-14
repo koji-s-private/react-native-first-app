@@ -47,7 +47,10 @@ function RootLayoutContent() {
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         <Stack.Screen name="oss-licenses" options={{ title: 'OSSライセンス' }} />
       </Stack>
-      <StatusBar style="auto" />
+      {/* `style="auto"`はOSのカラースキーム(Appearance)を見て自動判定するため、
+          OSと逆のテーマをアプリ内で選択した場合に背景色と文字色が食い違ってしまう。
+          解決済みの`colorScheme`から明示的に決定する */}
+      <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
       <Onboarding visible={showOnboarding} onFinish={handleFinishOnboarding} />
     </ThemeProvider>
   );
