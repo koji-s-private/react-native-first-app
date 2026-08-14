@@ -8,6 +8,8 @@ import React from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
+  Keyboard,
   Modal,
   Platform,
   StyleSheet,
@@ -402,6 +404,179 @@ describe('HomeScreen', () => {
 
       const keyboardAvoidingView = screen.getByTestId(KEYBOARD_AVOIDING_VIEW_TEST_ID);
       expect(keyboardAvoidingView.props.accessibilityValue.text).toBe('padding');
+    });
+  });
+
+  describe('背景タップでキーボードを閉じる(Issue #50)', () => {
+    // 実装(`app/(tabs)/index.tsx`)は、TabScreenContainerの中身(タイトル・composer・検索欄・
+    // 検索結果一覧/カレンダー領域)全体を`accessible={false}`な背景タップ用のPressableでラップし、
+    // `onPress={() => Keyboard.dismiss()}`を設定している。
+    //
+    // 注意: `Pressable`はReact.memoでラップされたコンポーネントのため、react-test-rendererの
+    // 内部実装上、メモ化されたフィボの`type`は(元のエクスポート済み参照ではなく)内側の
+    // アンラップされた関数になり、`screen.UNSAFE_getAllByType(Pressable)`では一致しない
+    // (このファイルの他の箇所、例えば`getModalOverlayPressable`が型ではなくprops
+    // (`onPress`/`onStartShouldSetResponder`等)を手がかりに要素を探しているのも同じ理由)。
+    // そのため、背景タップ用Pressableも型ではなく`accessible={false}` + `onPress`を持つという
+    // props の組み合わせを手がかりに`screen.root.findAll`で探す。
+    function getBackgroundDismissPressable() {
+      const candidates = screen.root.findAll(
+        (node: TestNode) =>
+          node.props.accessible === false && typeof node.props.onPress === 'function',
+      );
+      if (candidates.length !== 1) {
+        throw new Error(
+          `expected exactly one background dismiss Pressable, found ${candidates.length}`,
+        );
+      }
+      return candidates[0];
+    }
+
+    it('calls Keyboard.dismiss when the background wrapper is tapped (正常系)', async () => {
+      const dismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      fireEvent.press(getBackgroundDismissPressable());
+
+      expect(dismissSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('sets accessible={false} on the background wrapper so the individual accessibility info of the title/composer/buttons inside is not merged into a single element (境界値: アクセシビリティ設定の確認)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      expect(getBackgroundDismissPressable().props.accessible).toBe(false);
+    });
+
+    it('does not call Keyboard.dismiss when pressing the save button; the save button handles its own tap independently of the background wrapper (回帰: 既存のタップ操作がラッパーに邪魔されない)', async () => {
+      const dismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '入力内容');
+      fireEvent.press(screen.getByText('保存'));
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalled());
+      // 保存自体は正常に行われつつ、背景タップ用ハンドラ(Keyboard.dismiss)は呼ばれていない
+      expect(dismissSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not call Keyboard.dismiss when typing into the composer TextInput; the input handles its own event independently of the background wrapper (回帰)', async () => {
+      const dismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+      fireEvent.changeText(input, '入力内容');
+
+      expect(input.props.value).toBe('入力内容');
+      expect(dismissSpy).not.toHaveBeenCalled();
+    });
+
+    // FlatList自体はメモ化されていない素のクラスコンポーネント(`class FlatList extends
+    // React.PureComponent`)のため、`Pressable`と異なり`screen.UNSAFE_queryAllByType(FlatList)`で
+    // 直接特定できる(内部で使うVirtualizedList/ScrollView等、propsを転送するだけの下位コンポーネントは
+    // 別の型としてカウントされるため、重複ヒットはしない)。
+    //
+    // また、日付一覧モーダル(`<Modal visible={selectedDate !== null}>`)は、実際のReact Native実装
+    // (`Modal.js`)がiOSでは初回`visible=false`のままだと内部state `isRendered` もfalseのままとなり
+    // `render()`が`null`を返すため、一度も開いていない状態ではモーダル内のFlatListはツリーに
+    // 一切マウントされない(一度trueになった後はisRenderedがtrueのまま保持され、閉じてもマウントされ
+    // 続ける)。そのため、モーダル用FlatListを検証するテストでは先に日付セルをタップして開く必要がある。
+    function queryAllFlatLists() {
+      return screen.UNSAFE_queryAllByType(FlatList);
+    }
+
+    it('does not mount the entry-list modal FlatList until the modal has been opened at least once (前提条件の確認)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      expect(queryAllFlatLists()).toHaveLength(0);
+    });
+
+    it('sets keyboardDismissMode="on-drag" on the entry-list modal FlatList once it is opened, so dragging it also dismisses the keyboard (正常系)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: 'キーボード確認用の日記', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('キーボード確認用の日記');
+
+      fireEvent.press(screen.getByText('キーボード確認用の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      // 検索キーワード未入力のため、日付一覧モーダル用のFlatListのみが該当する
+      const flatLists = queryAllFlatLists();
+      expect(flatLists).toHaveLength(1);
+      expect(flatLists[0].props.keyboardDismissMode).toBe('on-drag');
+    });
+
+    it('sets keyboardDismissMode="on-drag" on the search results FlatList once a keyword is entered (正常系)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '今日は公園を散歩した', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('今日は公園を散歩した');
+
+      fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
+      await screen.findByText(/公園/);
+
+      // 日付一覧モーダルは未オープンのため、検索結果一覧用のFlatListのみが該当する
+      const flatLists = queryAllFlatLists();
+      expect(flatLists).toHaveLength(1);
+      expect(flatLists[0].props.keyboardDismissMode).toBe('on-drag');
+    });
+
+    it('sets keyboardDismissMode="on-drag" on both FlatLists simultaneously when the entry-list modal is left open while a search keyword is also entered (境界値: 両方が同時にマウントされているケース)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '今日は公園を散歩した', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('今日は公園を散歩した');
+
+      // 日付一覧モーダルを開いたまま(閉じない)にしておく。実際のReact Native実装
+      // (`Modal.js`)は、visible=falseに戻った時点でモーダル自体のレンダー結果がnullになり
+      // 内部のFlatListごとアンマウントされてしまう(isRenderedを使ったiOS向けの再表示最適化は
+      // 一度falseに戻る=render()がnullを返す一回のサイクルを経ると効かなくなるため、モーダルを
+      // 閉じずに開いたまま検索欄を操作することで、2つのFlatListが同時にマウントされている
+      // 状態を再現する
+      fireEvent.press(screen.getByText('今日は公園を散歩した'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
+      // モーダルを開いたままのため、モーダル内の一覧と検索結果一覧の両方に同じ日記が
+      // 表示され「/公園/」に複数マッチしてしまう。ここでは検索結果一覧用のFlatListが
+      // マウントされたこと自体を、対象のFlatListが2つに増えたことで確認する
+      await waitFor(() => expect(queryAllFlatLists()).toHaveLength(2));
+
+      const flatLists = queryAllFlatLists();
+      for (const flatList of flatLists) {
+        expect(flatList.props.keyboardDismissMode).toBe('on-drag');
+      }
     });
   });
 
