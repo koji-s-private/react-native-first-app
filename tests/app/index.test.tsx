@@ -1200,6 +1200,67 @@ describe('HomeScreen', () => {
 
       expect(AsyncStorage.removeItem).not.toHaveBeenCalledWith(DRAFT_STORAGE_KEY);
     });
+
+    it('does not leave an unhandled promise rejection when the initial draft restore getItem() call rejects, and still enables auto-save afterward (regression for the f63bc33 fix)', async () => {
+      // `@react-native-async-storage/async-storage/jest/async-storage-mock`の各メソッドは
+      // 元々jest.fn()として定義されているため、`jest.spyOn`はそれを新規にラップし直さず
+      // 既存のmock関数をそのまま返す。その状態で`mockRestore()`を呼んでも「スパイ前の
+      // 実装」には戻らず、常に`undefined`を返す空のmockにリセットされてしまう
+      // (`jest.spyOn`は非mock関数に対して使う場合のみ本来の意味で機能する既知の挙動)。
+      // そのため、他のテストへ実装を安全に戻すには、上書き前の実装を明示的に保存しておき、
+      // finallyで`mockImplementation(元の実装)`により復元する
+      const originalGetItemImpl = (AsyncStorage.getItem as jest.Mock).getMockImplementation();
+      // 下書きキー(diary-draft)へのgetItemのみrejectさせ、他のキーへの呼び出しは通常通り解決させる
+      const getItemSpy = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key: string) => {
+        if (key === DRAFT_STORAGE_KEY) {
+          return Promise.reject(new Error('read failed'));
+        }
+        return Promise.resolve(null);
+      });
+
+      // 未処理のPromise rejectionが発生していないことを検知するため、一時的にリスナーを登録する
+      const unhandledRejections: unknown[] = [];
+      const onUnhandledRejection = (reason: unknown) => {
+        unhandledRejections.push(reason);
+      };
+      process.on('unhandledRejection', onUnhandledRejection);
+
+      jest.useFakeTimers();
+      try {
+        render(<HomeScreen />);
+
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY));
+
+        // rejectしたPromiseのcatch/finally節が実行されるまでマイクロタスクキューをフラッシュする
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        expect(unhandledRejections).toHaveLength(0);
+
+        // 復元処理が失敗してもisDraftRestoredはtrueになり、自動保存が無効化されたままにならない
+        const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+        fireEvent.changeText(input, '復元失敗後も自動保存される下書き');
+
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        await waitFor(() =>
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+            DRAFT_STORAGE_KEY,
+            '復元失敗後も自動保存される下書き',
+          ),
+        );
+      } finally {
+        jest.useRealTimers();
+        process.off('unhandledRejection', onUnhandledRejection);
+        if (originalGetItemImpl) {
+          getItemSpy.mockImplementation(originalGetItemImpl);
+        }
+      }
+    });
   });
 
   describe('保存成功時のフィードバック(Issue #55)', () => {
