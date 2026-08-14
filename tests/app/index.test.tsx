@@ -1790,6 +1790,42 @@ describe('HomeScreen', () => {
       expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull();
     });
 
+    // Issue #114: スクリーンリーダー(VoiceOver/TalkBack)利用者にも、日付セルの数字だけでなく
+    // 「何年何月何日か」と「その日に日記があるかどうか」が伝わるよう、accessibilityLabel/
+    // accessibilityStateを検証する
+    it('sets an accessibilityLabel with the full date and "日記あり" on a day cell that has a diary entry, and does not mark it as accessibility-disabled', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '日記あり', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('日記あり');
+
+      const expectedLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${dayWithEntry}日、日記あり`;
+      const dayCell = screen.getByLabelText(expectedLabel);
+      expect(dayCell.props.accessibilityRole).toBe('button');
+      expect(dayCell.props.accessibilityState?.disabled).toBe(false);
+    });
+
+    it('sets an accessibilityLabel with the full date and "日記なし" on a day cell without a diary entry, and marks it as accessibility-disabled so screen readers announce it as non-interactive', async () => {
+      const now = new Date();
+      const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '日記あり', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('日記あり');
+
+      const expectedLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${dayWithoutEntry}日、日記なし`;
+      const dayCell = screen.getByLabelText(expectedLabel);
+      expect(dayCell.props.accessibilityState?.disabled).toBe(true);
+    });
+
     it('does nothing (does not open the modal) when tapping a day without any diary entries', async () => {
       const now = new Date();
       const { dayWithoutEntry } = pickTestDays(now);
