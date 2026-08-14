@@ -1826,6 +1826,30 @@ describe('HomeScreen', () => {
       expect(dayCell.props.accessibilityState?.disabled).toBe(true);
     });
 
+    // Issue #114(境界値): showSixWeeksにより前後月の「はみ出し」日付セルも描画される。
+    // それらのセルは常に日記が無い(entriesByDateには当月のキーしか存在しない)ため、
+    // 実装が`title`のみを見てdisabled判定していることを踏まえ、はみ出しセルでも
+    // 正しい年月日のaccessibilityLabelとaccessibilityState.disabled=trueが付くことを確認する
+    it('sets a correct accessibilityLabel (with that day\'s own year/month, not the currently displayed month) and marks it as accessibility-disabled on overflow day cells belonging to an adjacent month', async () => {
+      const now = new Date();
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const noEntryCells = screen.getAllByLabelText(/^\d{4}年\d{1,2}月\d{1,2}日、日記なし$/);
+      const currentMonthPrefix = `${now.getFullYear()}年${now.getMonth() + 1}月`;
+      const overflowCells = noEntryCells.filter(
+        (cell) => !(cell.props.accessibilityLabel as string).startsWith(currentMonthPrefix),
+      );
+
+      // showSixWeeksで常に6週(42セル)分描画され、当月の日数は最大でも31日のため、
+      // 前月または翌月のはみ出しセルが必ず1つ以上存在する
+      expect(overflowCells.length).toBeGreaterThan(0);
+      overflowCells.forEach((cell) => {
+        expect(cell.props.accessibilityState?.disabled).toBe(true);
+      });
+    });
+
     it('does nothing (does not open the modal) when tapping a day without any diary entries', async () => {
       const now = new Date();
       const { dayWithoutEntry } = pickTestDays(now);
