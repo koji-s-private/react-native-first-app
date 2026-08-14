@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import 'react-native-reanimated';
 
 import { Onboarding } from '@/components/onboarding';
+import { DiaryReminderProvider } from '@/contexts/diary-reminder-context';
 import { ThemePreferenceProvider, useThemePreference } from '@/contexts/theme-preference-context';
 import { hasCompletedOnboarding, markOnboardingCompleted } from '@/utils/onboarding-storage';
 
@@ -57,10 +58,13 @@ function RootLayoutContent() {
 }
 
 export default function RootLayout() {
-  // アプリ内で選択されたテーマ設定(#91)を全体に配線するため、最上位でラップする
+  // アプリ内で選択されたテーマ設定(#91)と、日記リマインダー通知の設定(#92)を
+  // 全体に配線するため、最上位でラップする
   return (
     <ThemePreferenceProvider>
-      <RootLayoutContent />
+      <DiaryReminderProvider>
+        <RootLayoutContent />
+      </DiaryReminderProvider>
     </ThemePreferenceProvider>
   );
 }
