@@ -62,6 +62,8 @@ type DiaryReminderContextValue = {
    * リマインダーのON/OFFを切り替える。ONにする際、未確認(undetermined)であれば
    * 通知許可のリクエストを行い、許可された場合のみ実際に通知をスケジュールする。
    * 拒否された場合はenabled自体はfalseのままになる。
+   * 許可済みでも通知のスケジュール登録自体に失敗した場合は、enabledをfalseへ戻したうえで
+   * 返り値のPromiseがreject する(呼び出し元でユーザーへのエラー案内に利用する想定)。
    */
   setEnabled: (enabled: boolean) => Promise<void>;
   /** リマインダーの時刻を変更する。ON状態であれば新しい時刻で再スケジュールする */
@@ -139,7 +141,17 @@ export function DiaryReminderProvider({ children }: PropsWithChildren) {
       }
 
       persist({ ...settings, enabled: true });
-      await scheduleDailyReminderAsync(settings.hour, settings.minute);
+      try {
+        await scheduleDailyReminderAsync(settings.hour, settings.minute);
+      } catch (error) {
+        // スケジュール登録に失敗した場合、enabled=trueのまま確定させると「ONに見えるが
+        // 実際には通知が届かない」状態を検知できなくなる。setTimeとは異なり、ONへの
+        // 切り替え自体が失敗したことを示すためenabledをfalseへ戻したうえで、
+        // 呼び出し元(app/(tabs)/settings.tsx)がユーザーへエラーを案内できるよう
+        // 例外を伝播させる
+        persist({ ...settings, enabled: false });
+        throw error;
+      }
     },
     [permissionStatus, persist, settings],
   );

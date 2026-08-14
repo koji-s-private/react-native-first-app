@@ -239,6 +239,41 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
         JSON.stringify({ enabled: false, hour: 21, minute: 0 }),
       );
     });
+
+    it('reverts enabled back to false and propagates the error from scheduleDailyReminderAsync when turning ON (異常系: ON時のスケジュール登録失敗)', async () => {
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+      // `mockRejectedValueOnce`を使い、この呼び出しのみを失敗させる。`mockRejectedValue`
+      // (永続的な上書き)を使うと`jest.clearAllMocks()`(mock.callsのクリアのみで実装は
+      // クリアされない)では戻らず、以降の(このファイル内で後に実行される)テストにまで
+      // 失敗が漏れてしまうため注意する
+      mockedNotificationsUtil.scheduleDailyReminderAsync.mockRejectedValueOnce(
+        new Error('schedule error'),
+      );
+      const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // 状態更新(persist)はact()配下で反映させつつ、rejectする例外自体も捕捉して検証する
+      let caughtError: unknown;
+      await act(async () => {
+        try {
+          await result.current.setEnabled(true);
+        } catch (error) {
+          caughtError = error;
+        }
+      });
+
+      expect(caughtError).toBeInstanceOf(Error);
+      expect((caughtError as Error).message).toBe('schedule error');
+      // スケジュール登録に失敗した場合、「ONに見えるが実際には通知が届かない」状態を避けるため
+      // enabledはfalseへ戻される(呼び出し元は例外を捕捉してユーザーへ案内する想定)
+      expect(result.current.enabled).toBe(false);
+      expect(AsyncStorage.setItem).toHaveBeenLastCalledWith(
+        DIARY_REMINDER_STORAGE_KEY,
+        JSON.stringify({ enabled: false, hour: 21, minute: 0 }),
+      );
+    });
   });
 
   describe('setTime', () => {
@@ -372,41 +407,6 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
       // 通知の再スケジュールには失敗しているが、画面上の選択状態(見た目)は更新されたまま
       expect(result.current.hour).toBe(6);
       expect(result.current.minute).toBe(0);
-    });
-
-    // 実装バグの疑い(QAで発見): `setEnabled`は`setTime`と異なり、ONにする際の
-    // `await scheduleDailyReminderAsync(...)`の失敗を`.catch()`していないため、そのまま例外が
-    // 呼び出し元に伝播する。呼び出し元のapp/(tabs)/settings.tsxは
-    // `setEnabled(value).finally(() => setIsTogglePending(false))`という書き方(戻り値のPromiseを
-    // 返却/awaitもcatchもしない)のため、実機では素通しの例外が「未処理のPromise rejection」に
-    // なる。`persist({ ...settings, enabled: true })`は既にscheduleDailyReminderAsyncの呼び出しより
-    // 前に実行されているため、状態(enabled)はtrueのまま確定してしまい、UI上はONに見えるが実際には
-    // 端末への通知登録に失敗している、という状態を検知できないまま埋もれてしまう。
-    it('propagates (does not swallow) the error from scheduleDailyReminderAsync when turning ON (実装バグの疑い: setEnabledはsetTimeと異なりcatchしていない)', async () => {
-      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
-      mockedNotificationsUtil.scheduleDailyReminderAsync.mockRejectedValue(
-        new Error('schedule error'),
-      );
-      const { result } = renderHook(() => useDiaryReminder(), { wrapper });
-      await act(async () => {
-        await Promise.resolve();
-      });
-
-      // 状態更新(persist)はact()配下で反映させつつ、rejectする例外自体も捕捉して検証する
-      let caughtError: unknown;
-      await act(async () => {
-        try {
-          await result.current.setEnabled(true);
-        } catch (error) {
-          caughtError = error;
-        }
-      });
-
-      expect(caughtError).toBeInstanceOf(Error);
-      expect((caughtError as Error).message).toBe('schedule error');
-      // 例外が投げられた後も、persist自体はscheduleDailyReminderAsyncの呼び出しより前に
-      // 完了しているため、enabled=trueのまま(実際には通知登録に失敗している)
-      expect(result.current.enabled).toBe(true);
     });
   });
 

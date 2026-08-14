@@ -10,7 +10,10 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import SettingsScreen from '@/app/(tabs)/settings';
 import { TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID } from '@/components/tab-screen-container';
 import { SETTINGS_SECTIONS } from '@/constants/settings-menu';
-import { DIARY_REMINDER_STORAGE_KEY, DiaryReminderProvider } from '@/contexts/diary-reminder-context';
+import {
+  DIARY_REMINDER_STORAGE_KEY,
+  DiaryReminderProvider,
+} from '@/contexts/diary-reminder-context';
 import {
   THEME_PREFERENCE_STORAGE_KEY,
   ThemePreferenceProvider,
@@ -835,9 +838,7 @@ describe('リマインダーセクション(Issue #92: 日記を書く習慣化�
   });
 
   it('does not show the fallback message when permission is undetermined or granted (境界値: フォールバック非表示のケース)', async () => {
-    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
-      'granted',
-    );
+    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('granted');
     renderSettingsScreen();
 
     await waitFor(() =>
@@ -847,15 +848,15 @@ describe('リマインダーセクション(Issue #92: 日記を書く習慣化�
   });
 
   it('cancels the schedule and turns OFF when the toggle is pressed while ON (正常系: ON→OFF)', async () => {
-    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
-      'granted',
-    );
+    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('granted');
     await AsyncStorage.setItem(
       DIARY_REMINDER_STORAGE_KEY,
       JSON.stringify({ enabled: true, hour: 21, minute: 0 }),
     );
     renderSettingsScreen();
-    await waitFor(() => expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true));
+    await waitFor(() =>
+      expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true),
+    );
 
     await act(async () => {
       fireEvent(screen.getByLabelText(REMINDER_TOGGLE_LABEL), 'valueChange', false);
@@ -933,15 +934,15 @@ describe('リマインダーセクション(Issue #92: 日記を書く習慣化�
   });
 
   it('re-schedules the reminder with the new time via AsyncStorage persistence when ON and permission is granted (正常系: 通知許可済みでの時刻変更)', async () => {
-    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
-      'granted',
-    );
+    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('granted');
     await AsyncStorage.setItem(
       DIARY_REMINDER_STORAGE_KEY,
       JSON.stringify({ enabled: true, hour: 21, minute: 0 }),
     );
     renderSettingsScreen();
-    await waitFor(() => expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true));
+    await waitFor(() =>
+      expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true),
+    );
     jest.clearAllMocks();
 
     await act(async () => {
@@ -979,12 +980,10 @@ describe('リマインダーセクション(Issue #92: 日記を書く習慣化�
     expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.disabled).toBe(true);
     // Switch(RCTSwitch)は`disabled`propをそのまま持つが、`Pressable`ベースのステッパーボタンは
     // `accessibilityState.disabled`として反映される
-    expect(
-      screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled,
-    ).toBe(true);
-    expect(
-      screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled,
-    ).toBe(true);
+    expect(screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
+      true,
+    );
 
     await act(async () => {
       resolveRequestPermission('granted');
@@ -993,15 +992,37 @@ describe('リマインダーセクション(Issue #92: 日記を書く習慣化�
     });
 
     expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.disabled).toBe(false);
-    expect(
-      screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled,
-    ).toBe(false);
+    expect(screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
+      false,
+    );
+  });
+
+  it('shows a failure alert and reverts the toggle to OFF when scheduling the reminder fails even though permission is granted (異常系: 通知登録失敗時のフィードバック)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    mockedDiaryReminderNotifications.requestReminderPermissionAsync.mockResolvedValue('granted');
+    mockedDiaryReminderNotifications.scheduleDailyReminderAsync.mockRejectedValue(
+      new Error('schedule error'),
+    );
+    renderSettingsScreen();
+
+    await act(async () => {
+      fireEvent(screen.getByLabelText(REMINDER_TOGGLE_LABEL), 'valueChange', true);
+    });
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'リマインダーの設定に失敗しました',
+        '通知を設定できませんでした。もう一度お試しください。',
+      ),
+    );
+    // 通知の登録に失敗しているため、見た目上もONに確定させずOFFへ戻す
+    expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(false);
+    // 連続タップ防止用の無効化状態も、失敗を経て正しく解除されている
+    expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.disabled).toBe(false);
   });
 
   it('restores a previously saved ON/time setting from AsyncStorage on mount (正常系: 起動時の復元)', async () => {
-    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
-      'granted',
-    );
+    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('granted');
     await AsyncStorage.setItem(
       DIARY_REMINDER_STORAGE_KEY,
       JSON.stringify({ enabled: true, hour: 6, minute: 30 }),
@@ -1009,7 +1030,9 @@ describe('リマインダーセクション(Issue #92: 日記を書く習慣化�
 
     renderSettingsScreen();
 
-    await waitFor(() => expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true));
+    await waitFor(() =>
+      expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true),
+    );
     expect(screen.getByText('06')).toBeTruthy();
     expect(screen.getByText('30')).toBeTruthy();
   });

@@ -131,7 +131,17 @@ function DiaryReminderSection() {
   const handleToggle = useCallback(
     (value: boolean) => {
       setIsTogglePending(true);
-      setEnabled(value).finally(() => setIsTogglePending(false));
+      setEnabled(value)
+        .catch(() => {
+          // setEnabledがONへの通知スケジュール登録失敗時に例外を投げ直す(enabled自体は
+          // OFFへ戻される)ため、ここで必ず捕捉してユーザーへ失敗を案内する。
+          // 捕捉しないと未処理のPromise rejectionになってしまう
+          Alert.alert(
+            'リマインダーの設定に失敗しました',
+            '通知を設定できませんでした。もう一度お試しください。',
+          );
+        })
+        .finally(() => setIsTogglePending(false));
     },
     [setEnabled],
   );
