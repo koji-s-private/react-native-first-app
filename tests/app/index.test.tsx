@@ -3022,7 +3022,12 @@ describe('HomeScreen', () => {
       expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
 
       resolveSetItem();
-      await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
+      // resolveSetItem後もgetAllDiaryEntries/setEntries等の非同期処理が続けて走るため、
+      // CI環境での遅延に備えてデフォルト(1000ms)より長いタイムアウトを明示する
+      // (Issue #33の削除/編集競合テストにおける同様のwaitForと同じ方針)
+      await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull(), {
+        timeout: 5000,
+      });
 
       // 永続化された内容にも1件のみ含まれ、重複していない
       const [, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
