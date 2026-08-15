@@ -15,10 +15,6 @@ import { useThemeColor } from '@/hooks/use-theme-color';
 import { buildDiaryExportFileName, serializeDiaryEntriesForExport } from '@/utils/diary-export';
 import { clearAllDiaryEntries, getAllDiaryEntries } from '@/utils/diary-storage';
 
-// 破壊的な操作(データ削除)であることを示す強調色。app/(tabs)/index.tsxのerrorTextと同じ色を使い、
-// アプリ内での「注意喚起色」の表現を統一する
-const DANGER_COLOR = '#d32f2f';
-
 // 「外観」セクションで選べる配色設定の選択肢。表示順もこの配列の並び順に従う
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: 'light', label: 'ライト' },
@@ -127,6 +123,9 @@ function DiaryReminderSection() {
   // ON/OFF切り替え(通知許可のリクエストを伴う非同期処理)が完了するまで、
   // 誤って連続でタップされないようにするための状態
   const [isTogglePending, setIsTogglePending] = useState(false);
+  // 破壊的な操作・警告であることを示す強調色。app/(tabs)/index.tsxと同様、ライト/ダーク
+  // それぞれのテーマに適した色をconstants/theme.tsから取得する(固定色は使わない)
+  const errorColor = useThemeColor({}, 'error');
 
   const handleToggle = useCallback(
     (value: boolean) => {
@@ -195,7 +194,7 @@ function DiaryReminderSection() {
         />
       </ThemedView>
       {permissionStatus === 'denied' && (
-        <ThemedText style={[styles.reminderFallbackText, { color: DANGER_COLOR }]}>
+        <ThemedText style={[styles.reminderFallbackText, { color: errorColor }]}>
           通知が許可されていないため、リマインダーを利用できません。端末の設定からこのアプリの通知を許可してください。
         </ThemedText>
       )}
@@ -235,6 +234,9 @@ function SettingsMenuLink({ item }: { item: SettingsMenuItem }) {
 // 設定画面から誤操作しにくい形(確認ダイアログ経由)で削除できるようにする。
 function DeleteAllDiaryDataButton() {
   const [isDeleting, setIsDeleting] = useState(false);
+  // 破壊的な操作(データ削除)であることを示す強調色。app/(tabs)/index.tsxのerrorTextと同様、
+  // ライト/ダークそれぞれのテーマに適した色をconstants/theme.tsから取得する
+  const errorColor = useThemeColor({}, 'error');
 
   const handleDelete = useCallback(async () => {
     setIsDeleting(true);
@@ -269,7 +271,7 @@ function DeleteAllDiaryDataButton() {
       accessibilityRole="button"
       style={styles.dangerButton}
     >
-      <ThemedText style={[styles.dangerButtonText, { color: DANGER_COLOR }]}>
+      <ThemedText style={[styles.dangerButtonText, { color: errorColor }]}>
         日記データを全件削除
       </ThemedText>
     </Pressable>

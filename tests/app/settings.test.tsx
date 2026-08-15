@@ -10,6 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import SettingsScreen from '@/app/(tabs)/settings';
 import { TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID } from '@/components/tab-screen-container';
 import { SETTINGS_SECTIONS } from '@/constants/settings-menu';
+import { Colors } from '@/constants/theme';
 import {
   DIARY_REMINDER_STORAGE_KEY,
   DiaryReminderProvider,
@@ -380,6 +381,50 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
         'もう一度お試しください。',
       ),
     );
+  });
+
+  // Issue #146: 削除ボタンの文字色が固定のライトモード用エラー色のままダークモードでも
+  // 使われてしまっていた不具合の回帰テスト。app/(tabs)/index.tsxと同様に
+  // useThemeColor({}, 'error')経由でライト/ダークそれぞれのテーマに応じた色が
+  // 適用されることを確認する。
+  describe('ダークモード対応(Issue #146: 削除ボタンの文字色)', () => {
+    // 実機では`app/_layout.tsx`の`RootLayout`が全画面を`ThemePreferenceProvider`でラップするが、
+    // このテストでは`SettingsScreen`を単体でレンダリングするため、そのラップが存在しない。
+    // 配色の切り替えを検証するため、外観セクションのテストと同様に明示的にラップする。
+    function renderSettingsScreen() {
+      return render(
+        <ThemePreferenceProvider>
+          <SettingsScreen />
+        </ThemePreferenceProvider>,
+      );
+    }
+
+    it('uses the light theme error color (not a hardcoded value) when the theme preference is light (正常系: ライトモード)', async () => {
+      await AsyncStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, 'light');
+      renderSettingsScreen();
+
+      await waitFor(() => {
+        const flattenedStyle = StyleSheet.flatten(
+          screen.getByText(DELETE_BUTTON_LABEL).props.style,
+        );
+        expect(flattenedStyle.color).toBe(Colors.light.error);
+      });
+    });
+
+    it('uses the dark theme error color (not the light-mode hardcoded value) when the theme preference is dark (正常系: ダークモード)', async () => {
+      await AsyncStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, 'dark');
+      renderSettingsScreen();
+
+      await waitFor(() => {
+        const flattenedStyle = StyleSheet.flatten(
+          screen.getByText(DELETE_BUTTON_LABEL).props.style,
+        );
+        expect(flattenedStyle.color).toBe(Colors.dark.error);
+      });
+      // ライトモード用の固定色が使われていないことも明示的に確認する
+      const flattenedStyle = StyleSheet.flatten(screen.getByText(DELETE_BUTTON_LABEL).props.style);
+      expect(flattenedStyle.color).not.toBe(Colors.light.error);
+    });
   });
 });
 
