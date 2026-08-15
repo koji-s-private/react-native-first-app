@@ -2687,6 +2687,85 @@ describe('HomeScreen', () => {
       return saveButtons[1];
     }
 
+    describe('編集モーダルのKeyboardAvoidingView (Issue #145)', () => {
+      // `Platform.OS` はテスト間で状態を共有するモジュールレベルの値のため、
+      // 変更したテストの後は必ず元の値(デフォルトの 'ios')へ戻す。
+      const originalPlatformOS = Platform.OS;
+
+      afterEach(() => {
+        Platform.OS = originalPlatformOS;
+      });
+
+      async function openEditModalFor(text: string) {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([{ id: '1', text, createdAt: isoAt(now, dayWithEntry) }]),
+        );
+
+        render(<HomeScreen />);
+        await screen.findByText(text);
+        fireEvent.press(screen.getByText(text));
+        await screen.findByText(CLOSE_BUTTON_TEXT);
+        fireEvent.press(screen.getByText('編集'));
+        await screen.findByText('日記を編集');
+      }
+
+      it('wraps the edit modal content in its own KeyboardAvoidingView so the input/save button are not hidden by the keyboard (正常系)', async () => {
+        await openEditModalFor('編集モーダルKAV確認用の日記');
+
+        // 画面全体を覆う既存のKeyboardAvoidingViewと、編集モーダル専用のKeyboardAvoidingViewの
+        // 合計2つが存在することを確認する
+        const keyboardAvoidingViews = screen.getAllByTestId(KEYBOARD_AVOIDING_VIEW_TEST_ID);
+        expect(keyboardAvoidingViews).toHaveLength(2);
+      });
+
+      it('uses behavior="height" for the edit modal on Android so the input and save button are not hidden by the keyboard', async () => {
+        Platform.OS = 'android';
+
+        await openEditModalFor('編集モーダルAndroid確認用の日記');
+
+        const keyboardAvoidingViews = screen.getAllByTestId(KEYBOARD_AVOIDING_VIEW_TEST_ID);
+        expect(keyboardAvoidingViews).toHaveLength(2);
+        // 画面全体用・編集モーダル用のどちらも、プラットフォームに応じたbehaviorが渡っている
+        for (const view of keyboardAvoidingViews) {
+          expect(view.props.accessibilityValue.text).toBe('height');
+        }
+      });
+
+      it('keeps behavior="padding" for the edit modal on iOS (regression check)', async () => {
+        Platform.OS = 'ios';
+
+        await openEditModalFor('編集モーダルiOS確認用の日記');
+
+        const keyboardAvoidingViews = screen.getAllByTestId(KEYBOARD_AVOIDING_VIEW_TEST_ID);
+        expect(keyboardAvoidingViews).toHaveLength(2);
+        for (const view of keyboardAvoidingViews) {
+          expect(view.props.accessibilityValue.text).toBe('padding');
+        }
+      });
+
+      it('does not wrap the edit modal content in a KeyboardAvoidingView while the modal is closed (異常系/境界値)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '編集モーダル未オープン確認用の日記', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        // 編集モーダルを開いていない状態では、画面全体用の1つしか存在しない
+        // (Modalはvisible={false}の間、中身をレンダリングしないため)
+        const keyboardAvoidingViews = screen.getAllByTestId(KEYBOARD_AVOIDING_VIEW_TEST_ID);
+        expect(keyboardAvoidingViews).toHaveLength(1);
+      });
+    });
+
     it('opens the edit modal with the existing text prefilled when the edit button is pressed (正常系)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
