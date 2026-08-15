@@ -2638,6 +2638,47 @@ describe('HomeScreen', () => {
       expect(screen.getByText('日記を編集')).toBeTruthy();
     });
 
+    it('resets isSavingEdit after a save failure, re-enabling the save button so a retry can succeed (異常系→正常系, Issue #137 guard boundary)', async () => {
+      // handleSaveEditはtry/finallyでisSavingEditを必ずfalseへ戻すため、保存失敗直後でも
+      // ガードで弾かれずに再度保存できるはず。これを確認することで、finallyブロックの実装が
+      // 正しく効いていること(失敗時にガードが解除されずロックされたままにならないこと)を検証する
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+      jest.clearAllMocks();
+      // 1回目の書き込みだけ失敗させ、2回目以降はデフォルトの(成功する)モック実装に戻す
+      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
+
+      render(<HomeScreen />);
+      await screen.findByText('編集前の日記');
+      fireEvent.press(screen.getByText('編集前の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+      fireEvent.press(screen.getByText('編集'));
+      await screen.findByText('日記を編集');
+
+      const editInput = screen.getByDisplayValue('編集前の日記');
+      fireEvent.changeText(editInput, '一度失敗した後に成功する編集');
+      fireEvent.press(getEditSaveButton());
+
+      await screen.findByText('更新に失敗しました。もう一度お試しください。');
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      // 失敗直後に保存ボタンが無効化されたまま(isSavingEditがtrueのまま)になっていないことを、
+      // disabledプロパティで直接確認する
+      const editSaveButton = getEditSaveButton().parent?.parent?.parent;
+      expect(editSaveButton?.props.accessibilityState?.disabled).not.toBe(true);
+
+      // 同じ保存ボタンをもう一度押すと、ガードに阻まれず2回目の書き込みが実行される
+      fireEvent.press(getEditSaveButton());
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
+      expect(screen.getAllByText('一度失敗した後に成功する編集').length).toBeGreaterThanOrEqual(1);
+    });
+
     it('ignores a second press of the edit save button while an update is still in flight, preventing a duplicate write (Issue #137)', async () => {
       // 編集モーダルの保存ボタンの連打(タップと同時に発生する複数のonPressイベントを含む)によって
       // 同一の更新処理(AsyncStorage.setItem)が重複して実行されないことを確認する。
