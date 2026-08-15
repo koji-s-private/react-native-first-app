@@ -1081,4 +1081,51 @@ describe('リマインダーセクション(Issue #92: 日記を書く習慣化�
     expect(screen.getByText('06')).toBeTruthy();
     expect(screen.getByText('30')).toBeTruthy();
   });
+
+  // Issue #146: 通知未許可時のフォールバック文言の文字色も、削除ボタンと同様に
+  // 固定のライトモード用エラー色ではなく、useThemeColor経由でライト/ダークそれぞれの
+  // テーマに応じた色が適用されることを確認する回帰テスト。
+  describe('ダークモード対応(Issue #146: フォールバック文言の文字色)', () => {
+    // このブロックだけは配色切り替えの検証も必要なため、`DiaryReminderProvider`に加えて
+    // `ThemePreferenceProvider`でもラップする(実機では`app/_layout.tsx`の`RootLayout`が
+    // 両方でラップしている)。
+    function renderSettingsScreenWithThemePreference() {
+      return render(
+        <ThemePreferenceProvider>
+          <DiaryReminderProvider>
+            <SettingsScreen />
+          </DiaryReminderProvider>
+        </ThemePreferenceProvider>,
+      );
+    }
+
+    it('uses the light theme error color (not a hardcoded value) when the theme preference is light (正常系: ライトモード)', async () => {
+      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
+        'denied',
+      );
+      await AsyncStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, 'light');
+      renderSettingsScreenWithThemePreference();
+
+      await waitFor(() => {
+        const flattenedStyle = StyleSheet.flatten(screen.getByText(FALLBACK_TEXT).props.style);
+        expect(flattenedStyle.color).toBe(Colors.light.error);
+      });
+    });
+
+    it('uses the dark theme error color (not the light-mode hardcoded value) when the theme preference is dark (正常系: ダークモード)', async () => {
+      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
+        'denied',
+      );
+      await AsyncStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, 'dark');
+      renderSettingsScreenWithThemePreference();
+
+      await waitFor(() => {
+        const flattenedStyle = StyleSheet.flatten(screen.getByText(FALLBACK_TEXT).props.style);
+        expect(flattenedStyle.color).toBe(Colors.dark.error);
+      });
+      // ライトモード用の固定色が使われていないことも明示的に確認する
+      const flattenedStyle = StyleSheet.flatten(screen.getByText(FALLBACK_TEXT).props.style);
+      expect(flattenedStyle.color).not.toBe(Colors.light.error);
+    });
+  });
 });
