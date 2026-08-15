@@ -616,29 +616,29 @@ describe('HomeScreen', () => {
       expect(input.props.value).toBe('');
     });
 
-    it('shows a character counter that updates as the user types and limits input via maxLength', async () => {
+    it('shows a character counter that updates as the user types', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
-      expect(input.props.maxLength).toBe(1000);
       expect(screen.getByText('0/1000')).toBeTruthy();
 
       fireEvent.changeText(input, '何か書く');
       expect(screen.getByText('4/1000')).toBeTruthy();
     });
 
-    it('does not save when the text exceeds the max length (defense in depth against TextInput maxLength)', async () => {
+    it('truncates input exceeding the max length via onChangeText (TextInput no longer has a maxLength prop, since it only limits UTF-16 code units, not grapheme clusters)', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
-      // TextInputのmaxLengthを迂回して直接onChangeTextを呼び出すケースを想定し、
-      // handleSave側の防御チェックが機能することを確認する
+      // ネイティブのmaxLength propは指定していないため、onChangeTextハンドラ
+      // (handleChangeDraft内のtruncateToBodyMaxLength)がgrapheme単位で上限を超えた分を
+      // 切り詰めることを直接確認する
       fireEvent.changeText(input, 'あ'.repeat(1001));
-      fireEvent.press(screen.getByText('保存'));
 
-      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+      expect(input.props.value).toBe('あ'.repeat(1000));
+      expect(screen.getByText('1000/1000')).toBeTruthy();
     });
 
     it('allows saving when the text length is exactly at the max length (boundary), and persists it encrypted (not as plain JSON)', async () => {
@@ -680,6 +680,79 @@ describe('HomeScreen', () => {
       fireEvent.changeText(input, 'あ'.repeat(1000));
       const counterAtLimit = screen.getByText('1000/1000');
       expect(StyleSheet.flatten(counterAtLimit.props.style).color).toBe(Colors.light.error);
+    });
+
+    describe('絵文字(サロゲートペア・ZWJ結合絵文字)を含む本文の文字数カウント・切り詰め(Issue #139)', () => {
+      // ZWJ(Zero Width Joiner)で複数の絵文字コードポイントを結合した家族の絵文字。
+      // 見た目上は1文字(1書記素クラスタ)だが、'👨'+ZWJ+'👩'+ZWJ+'👧'+ZWJ+'👦'を構成する
+      // サロゲートペア4つ(各2ユニット)とZWJ3つ(各1ユニット)で、UTF-16コードユニットは11個ある
+      const familyEmoji = '👨‍👩‍👧‍👦';
+      // シンプルなサロゲートペア絵文字(UTF-16コードユニット2個で1書記素クラスタ)
+      const simpleEmoji = '😀';
+      // 地域指示記号(Regional Indicator)のサロゲートペア2つを組み合わせた旗の絵文字
+      // (UTF-16コードユニット4個で1書記素クラスタ)
+      const flagEmoji = '🇯🇵';
+
+      it('counts each surrogate-pair/ZWJ emoji as a single grapheme in the character counter, not by UTF-16 code units', async () => {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+        const text = `${familyEmoji}${simpleEmoji}${flagEmoji}`;
+        // UTF-16コードユニット単位では11+2+4=17だが、書記素クラスタ単位では3文字
+        expect(text.length).toBe(17);
+
+        fireEvent.changeText(input, text);
+
+        // grapheme単位でカウントされ、カウンター表示は実際の見た目通り3文字になる
+        expect(screen.getByText('3/1000')).toBeTruthy();
+        expect(screen.queryByText('17/1000')).toBeNull();
+      });
+
+      it('does not split a ZWJ-joined family emoji in the middle when truncating overlong input via onChangeText (boundary: exactly at the limit)', async () => {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+        // 999文字の'あ' + 家族の絵文字(1000文字目) + さらに超過する10文字、という構成。
+        // grapheme単位で正しく切り詰めれば、家族の絵文字は途中で壊れず1000文字目として残り、
+        // それ以降の10文字だけが切り捨てられるはず
+        const overLimitText = `${'あ'.repeat(999)}${familyEmoji}${'あ'.repeat(10)}`;
+        fireEvent.changeText(input, overLimitText);
+
+        const expectedTruncated = `${'あ'.repeat(999)}${familyEmoji}`;
+        expect(input.props.value).toBe(expectedTruncated);
+        expect(screen.getByText('1000/1000')).toBeTruthy();
+      });
+
+      it('does not split a surrogate-pair emoji in the middle when truncating overlong input via onChangeText (boundary: exactly at the limit)', async () => {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+        // 999文字の'い' + サロゲートペア絵文字(1000文字目) + さらに超過する5文字。
+        // UTF-16コードユニット単位でslice(0, 1000)してしまうと、絵文字の
+        // サロゲートの片割れだけが残って文字化けするはずの境界を狙う
+        const overLimitText = `${'い'.repeat(999)}${simpleEmoji}${'い'.repeat(5)}`;
+        fireEvent.changeText(input, overLimitText);
+
+        const expectedTruncated = `${'い'.repeat(999)}${simpleEmoji}`;
+        expect(input.props.value).toBe(expectedTruncated);
+        expect(screen.getByText('1000/1000')).toBeTruthy();
+      });
+
+      it('keeps an emoji-ending body of exactly BODY_MAX_LENGTH graphemes intact (boundary: exactly at the limit, no truncation)', async () => {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+        // ちょうど1000文字(999文字の'う' + 絵文字1文字)で、超過していない境界値
+        const exactlyMaxLength = `${'う'.repeat(999)}${familyEmoji}`;
+        fireEvent.changeText(input, exactlyMaxLength);
+
+        expect(input.props.value).toBe(exactlyMaxLength);
+        expect(screen.getByText('1000/1000')).toBeTruthy();
+      });
     });
 
     it('disables the save button while the input is empty and enables it once text is entered', async () => {
@@ -2758,7 +2831,7 @@ describe('HomeScreen', () => {
       expect(StyleSheet.flatten(editSaveButton?.props.style).opacity).toBe(1);
     });
 
-    it('limits the edit input via maxLength to BODY_MAX_LENGTH (1000 characters, boundary)', async () => {
+    it('truncates the edit input exceeding the max length via onChangeText (edit TextInput no longer has a maxLength prop either)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -2776,7 +2849,60 @@ describe('HomeScreen', () => {
       await screen.findByText('日記を編集');
 
       const editInput = screen.getByDisplayValue('文字数上限確認用');
-      expect(editInput.props.maxLength).toBe(1000);
+      // ネイティブのmaxLength propは指定していないため、onChangeTextハンドラ
+      // (handleChangeEditDraft内のtruncateToBodyMaxLength)がgrapheme単位で
+      // 上限を超えた分を切り詰めることを直接確認する
+      fireEvent.changeText(editInput, 'あ'.repeat(1001));
+
+      expect(editInput.props.value).toBe('あ'.repeat(1000));
+      expect(screen.getByText('1000/1000')).toBeTruthy();
+    });
+
+    describe('絵文字(サロゲートペア・ZWJ結合絵文字)を含む本文の文字数カウント・切り詰め(編集用TextInput, Issue #139)', () => {
+      // ZWJ(Zero Width Joiner)で複数の絵文字コードポイントを結合した家族の絵文字。
+      // 見た目上は1文字(1書記素クラスタ)だが、UTF-16コードユニットは11個ある
+      // ('👨'+ZWJ+'👩'+ZWJ+'👧'+ZWJ+'👦'で、サロゲートペア4つ(各2ユニット)+ZWJ3つ(各1ユニット))
+      const familyEmoji = '👨‍👩‍👧‍👦';
+
+      async function openEditModal(initialText: string) {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([{ id: '1', text: initialText, createdAt: isoAt(now, dayWithEntry) }]),
+        );
+
+        render(<HomeScreen />);
+        await screen.findByText(initialText);
+        fireEvent.press(screen.getByText(initialText));
+        await screen.findByText(CLOSE_BUTTON_TEXT);
+        fireEvent.press(screen.getByText('編集'));
+        await screen.findByText('日記を編集');
+
+        return screen.getByDisplayValue(initialText);
+      }
+
+      it('counts a ZWJ-joined family emoji as a single grapheme in the edit character counter, not by UTF-16 code units', async () => {
+        const editInput = await openEditModal('編集前の日記');
+
+        fireEvent.changeText(editInput, familyEmoji);
+
+        // familyEmojiはUTF-16コードユニット単位では11だが、grapheme単位では1文字
+        expect(screen.getByText('1/1000')).toBeTruthy();
+        expect(screen.queryByText('11/1000')).toBeNull();
+      });
+
+      it('does not split a ZWJ-joined family emoji in the middle when truncating overlong edit input via onChangeText (boundary: exactly at the limit)', async () => {
+        const editInput = await openEditModal('編集前の日記');
+
+        // 999文字の'あ' + 家族の絵文字(1000文字目) + さらに超過する10文字、という構成
+        const overLimitText = `${'あ'.repeat(999)}${familyEmoji}${'あ'.repeat(10)}`;
+        fireEvent.changeText(editInput, overLimitText);
+
+        const expectedTruncated = `${'あ'.repeat(999)}${familyEmoji}`;
+        expect(editInput.props.value).toBe(expectedTruncated);
+        expect(screen.getByText('1000/1000')).toBeTruthy();
+      });
     });
 
     it('rolls back to the previous text and shows an error message when saving the edit fails (異常系)', async () => {
