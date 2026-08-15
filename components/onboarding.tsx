@@ -21,7 +21,6 @@ type OnboardingProps = {
  * このコンポーネント自体はvisible/onFinishのpropsだけを見る単純な表示コンポーネントにしている。
  */
 export function Onboarding({ visible, onFinish }: OnboardingProps) {
-  // 現在表示中のスライドのインデックス
   const [stepIndex, setStepIndex] = useState(0);
   const tintColor = useThemeColor({}, 'tint');
   const iconColor = useThemeColor({}, 'icon');

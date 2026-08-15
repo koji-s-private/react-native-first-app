@@ -123,8 +123,7 @@ function DiaryReminderSection() {
   // ON/OFF切り替え(通知許可のリクエストを伴う非同期処理)が完了するまで、
   // 誤って連続でタップされないようにするための状態
   const [isTogglePending, setIsTogglePending] = useState(false);
-  // 破壊的な操作・警告であることを示す強調色。app/(tabs)/index.tsxと同様、ライト/ダーク
-  // それぞれのテーマに適した色をconstants/theme.tsから取得する(固定色は使わない)
+  // 破壊的な操作・警告であることを示す強調色(テーマに応じてconstants/theme.tsから取得)
   const errorColor = useThemeColor({}, 'error');
 
   const handleToggle = useCallback(
@@ -234,15 +233,13 @@ function SettingsMenuLink({ item }: { item: SettingsMenuItem }) {
 // 設定画面から誤操作しにくい形(確認ダイアログ経由)で削除できるようにする。
 function DeleteAllDiaryDataButton() {
   const [isDeleting, setIsDeleting] = useState(false);
-  // 破壊的な操作(データ削除)であることを示す強調色。app/(tabs)/index.tsxのerrorTextと同様、
-  // ライト/ダークそれぞれのテーマに適した色をconstants/theme.tsから取得する
+  // 破壊的な操作(データ削除)であることを示す強調色(テーマに応じてconstants/theme.tsから取得)
   const errorColor = useThemeColor({}, 'error');
 
   const handleDelete = useCallback(async () => {
     setIsDeleting(true);
     try {
       await clearAllDiaryEntries();
-      // 削除が完了したことをユーザーに伝える(既存のAlertベースの確認フローに合わせたフィードバック)
       Alert.alert('削除が完了しました', '保存されていた日記データをすべて削除しました。');
     } catch {
       Alert.alert('削除に失敗しました', 'もう一度お試しください。');
@@ -253,7 +250,6 @@ function DeleteAllDiaryDataButton() {
 
   const handlePress = useCallback(() => {
     // 誤操作による日記データの消失を防ぐため、削除前に必ず確認ダイアログを挟む
-    // (キャンセルすると何も削除されない)
     Alert.alert(
       '日記データを削除しますか?',
       'この端末に保存されているすべての日記データが削除されます。この操作は取り消せません。',
