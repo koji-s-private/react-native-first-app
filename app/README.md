@@ -9,7 +9,6 @@
 ```
 app/
   _layout.tsx          アプリ全体のレイアウト・初期化処理（テーマ、フォント読み込みなど）
-  modal.tsx             モーダル画面
   oss-licenses.tsx       OSSライセンス一覧画面
   (tabs)/
     _layout.tsx          タブナビゲーションの定義
@@ -20,7 +19,7 @@ app/
 
 `_layout.tsx` は、そのディレクトリ配下の画面に共通する「入れ物」を定義するファイルです。
 
-- `app/_layout.tsx`: アプリ全体のレイアウト。`ThemeProvider` によるライト/ダークテーマの切り替え、`Stack` によるスタックナビゲーションの定義（`(tabs)`・`modal`・`oss-licenses` の各画面をスタックに登録）、スプラッシュ画面制御などを行っています。
+- `app/_layout.tsx`: アプリ全体のレイアウト。`ThemeProvider` によるライト/ダークテーマの切り替え、`Stack` によるスタックナビゲーションの定義（`(tabs)`・`oss-licenses` の各画面をスタックに登録）、スプラッシュ画面制御などを行っています。
 - `app/(tabs)/_layout.tsx`: タブ画面群のレイアウト。`Tabs` コンポーネントでタブバーの見た目・アイコン・タイトルを定義しています。
 
 ## `oss-licenses.tsx` の役割

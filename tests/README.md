@@ -9,7 +9,6 @@ tests/
   app/
     _layout.test.tsx      app/_layout.tsx（アプリ全体のレイアウト・オンボーディング表示制御）のテスト
     index.test.tsx      app/(tabs)/index.tsx（日記画面）のテスト
-    modal.test.tsx        app/modal.tsx（モーダル画面）のテスト
     settings.test.tsx      app/(tabs)/settings.tsx（設定画面）のテスト
     oss-licenses.test.tsx など   app/oss-licenses.tsx（OSSライセンス画面）のテスト
   components/
