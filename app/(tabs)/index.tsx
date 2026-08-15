@@ -149,6 +149,20 @@ function splitIntoGraphemes(text: string): string[] {
   return Array.from(text);
 }
 
+// 日記本文をBODY_MAX_LENGTHを超えないよう、書記素クラスタ(grapheme)単位で切り詰める。
+// React NativeのTextInputが標準で提供するmaxLength propはUTF-16コードユニット単位でしか
+// 制限できず、サロゲートペアやZWJ結合絵文字(家族の絵文字など複数コードポイントが
+// 結合されたもの)の途中で入力を打ち切ってしまう可能性がある。そのためTextInput側の
+// maxLength propは使わず、onChangeTextハンドラでこの関数を使いgrapheme単位で
+// 切り詰める方針にしている
+function truncateToBodyMaxLength(text: string): string {
+  const graphemes = splitIntoGraphemes(text);
+  if (graphemes.length <= BODY_MAX_LENGTH) {
+    return text;
+  }
+  return graphemes.slice(0, BODY_MAX_LENGTH).join('');
+}
+
 // 日記本文からカレンダーセルに表示する短いタイトルを作る
 // (改行があれば最初の行のみを使い、さらに長ければ指定文字数で切り詰める)。
 // 文字数のカウント・切り詰めは書記素クラスタ単位で行い、絵文字などの
@@ -362,8 +376,10 @@ export default function HomeScreen() {
     }
 
     const trimmed = draft.trim();
-    // 万が一上限を超えたテキストが渡ってきても保存しない(TextInput側のmaxLengthが主な防御線)
-    if (!trimmed || trimmed.length > BODY_MAX_LENGTH) {
+    // 万が一上限を超えたテキストが渡ってきても保存しない(onChangeText側のgrapheme単位の
+    // 切り詰めが主な防御線)。上限チェック自体もsplitIntoGraphemesでgrapheme単位で行い、
+    // UTF-16コードユニット単位のlengthとのズレを防ぐ
+    if (!trimmed || splitIntoGraphemes(trimmed).length > BODY_MAX_LENGTH) {
       return;
     }
 
@@ -433,10 +449,12 @@ export default function HomeScreen() {
   }, [draft, entries, isSaving, enqueueDiaryWrite]);
 
   // draft用TextInputのonChangeText。setDraftに加えて、pending中にユーザーが入力操作を
-  // 行ったことをdraftEditedRefへ記録する(handleSaveの保存失敗時ロールバック判定に使う)
+  // 行ったことをdraftEditedRefへ記録する(handleSaveの保存失敗時ロールバック判定に使う)。
+  // TextInput側にmaxLength propを指定していないため、ここでtruncateToBodyMaxLengthを使い
+  // grapheme単位でBODY_MAX_LENGTHを超えないよう切り詰める
   const handleChangeDraft = useCallback((text: string) => {
     draftEditedRef.current = true;
-    setDraft(text);
+    setDraft(truncateToBodyMaxLength(text));
   }, []);
 
   // 編集モーダルを開き、対象エントリの本文を編集用の下書きにセットする
@@ -444,6 +462,13 @@ export default function HomeScreen() {
     setEditingEntryId(entry.id);
     setEditDraft(entry.text);
     setEditError(null);
+  }, []);
+
+  // 編集用TextInputのonChangeText。draft用のhandleChangeDraftと同様、TextInput側に
+  // maxLength propを指定していないため、truncateToBodyMaxLengthでgrapheme単位で
+  // BODY_MAX_LENGTHを超えないよう切り詰める
+  const handleChangeEditDraft = useCallback((text: string) => {
+    setEditDraft(truncateToBodyMaxLength(text));
   }, []);
 
   // 編集モーダルを閉じ、編集用の状態をリセットする
@@ -460,8 +485,10 @@ export default function HomeScreen() {
     }
 
     const trimmed = editDraft.trim();
-    // 万が一上限を超えたテキストが渡ってきても保存しない(TextInput側のmaxLengthが主な防御線)
-    if (!editingEntryId || !trimmed || trimmed.length > BODY_MAX_LENGTH) {
+    // 万が一上限を超えたテキストが渡ってきても保存しない(onChangeText側のgrapheme単位の
+    // 切り詰めが主な防御線)。上限チェック自体もsplitIntoGraphemesでgrapheme単位で行い、
+    // UTF-16コードユニット単位のlengthとのズレを防ぐ
+    if (!editingEntryId || !trimmed || splitIntoGraphemes(trimmed).length > BODY_MAX_LENGTH) {
       return;
     }
 
@@ -689,6 +716,14 @@ export default function HomeScreen() {
 
   const selectedDateEntries = selectedDate ? (entriesByDate[selectedDate] ?? []) : [];
 
+  // 文字数カウンター表示用に、入力のたびにgrapheme単位で数え直す。単純なdraft.length/
+  // editDraft.length(UTF-16コードユニット単位)だと、絵文字などのサロゲートペア・ZWJ結合文字を
+  // 実際の見た目の文字数より多くカウントしてしまいカウンター表示がずれるため、
+  // 既存のsplitIntoGraphemesを再利用する。入力のたびに再計算が走るため、draft/editDraft自体が
+  // 変化した場合のみ計算し直すようuseMemoで不要な再計算を避ける
+  const draftGraphemeCount = useMemo(() => splitIntoGraphemes(draft).length, [draft]);
+  const editDraftGraphemeCount = useMemo(() => splitIntoGraphemes(editDraft).length, [editDraft]);
+
   return (
     <KeyboardAvoidingView
       style={styles.flex}
@@ -726,17 +761,22 @@ export default function HomeScreen() {
               value={draft}
               onChangeText={handleChangeDraft}
               multiline
-              maxLength={BODY_MAX_LENGTH}
+              // TextInput標準のmaxLength propはUTF-16コードユニット単位の制限しか行えず、
+              // サロゲートペアやZWJ結合絵文字の途中で入力を打ち切ってしまう可能性があるため
+              // あえて指定しない。上限判定・切り詰めはhandleChangeDraft内でgrapheme単位
+              // (splitIntoGraphemesベースのtruncateToBodyMaxLength)で行っている
             />
             <View style={styles.composerFooter}>
               {/* 文字数カウンター(上限に近づいた/達したことがひと目で分かるよう常に表示する) */}
               <ThemedText
                 style={[
                   styles.charCount,
-                  draft.length >= BODY_MAX_LENGTH ? { color: errorColor } : { color: iconColor },
+                  draftGraphemeCount >= BODY_MAX_LENGTH
+                    ? { color: errorColor }
+                    : { color: iconColor },
                 ]}
               >
-                {draft.length}/{BODY_MAX_LENGTH}
+                {draftGraphemeCount}/{BODY_MAX_LENGTH}
               </ThemedText>
               <Pressable
                 style={[
@@ -942,20 +982,21 @@ export default function HomeScreen() {
               <TextInput
                 style={[styles.input, { color: textColor, borderColor: tintColor }]}
                 value={editDraft}
-                onChangeText={setEditDraft}
+                onChangeText={handleChangeEditDraft}
                 multiline
-                maxLength={BODY_MAX_LENGTH}
+                // draft用TextInputと同様の理由でmaxLength propはあえて指定しない。
+                // 上限判定・切り詰めはhandleChangeEditDraft内でgrapheme単位で行っている
               />
               <View style={styles.composerFooter}>
                 <ThemedText
                   style={[
                     styles.charCount,
-                    editDraft.length >= BODY_MAX_LENGTH
+                    editDraftGraphemeCount >= BODY_MAX_LENGTH
                       ? { color: errorColor }
                       : { color: iconColor },
                   ]}
                 >
-                  {editDraft.length}/{BODY_MAX_LENGTH}
+                  {editDraftGraphemeCount}/{BODY_MAX_LENGTH}
                 </ThemedText>
                 <Pressable
                   style={[
