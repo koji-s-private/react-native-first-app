@@ -2752,7 +2752,11 @@ describe('HomeScreen', () => {
         await AsyncStorage.setItem(
           STORAGE_KEY,
           JSON.stringify([
-            { id: '1', text: '編集モーダル未オープン確認用の日記', createdAt: isoAt(now, dayWithEntry) },
+            {
+              id: '1',
+              text: '編集モーダル未オープン確認用の日記',
+              createdAt: isoAt(now, dayWithEntry),
+            },
           ]),
         );
 
