@@ -80,7 +80,14 @@ export async function getAllDiaryEntries(): Promise<DiaryEntry[]> {
       return [];
     }
     // 配列の要素のうち型ガードを通らない不正な要素はスキップし、有効なエントリのみを返す
-    return parsed.filter(isDiaryEntry);
+    const validEntries = parsed.filter(isDiaryEntry);
+    if (validEntries.length !== parsed.length) {
+      // サイレントにスキップするとデータ欠落に誰も気づけないため、開発者向けにログを残す
+      console.warn(
+        `getAllDiaryEntries: ${parsed.length - validEntries.length}件の不正なエントリをスキップしました(元の件数: ${parsed.length}件, 有効な件数: ${validEntries.length}件)`,
+      );
+    }
+    return validEntries;
   } catch {
     // ストレージが壊れている・復号失敗の場合は空配列を返す
     return [];
