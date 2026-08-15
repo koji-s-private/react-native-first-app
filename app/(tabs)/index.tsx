@@ -969,57 +969,67 @@ export default function HomeScreen() {
           statusBarTranslucent
           navigationBarTranslucent
         >
-          <View style={styles.modalOverlay}>
-            <ThemedView style={[styles.modalContent, { borderColor: iconColor }]}>
-              <View style={styles.modalHeader}>
-                <ThemedText type="subtitle">日記を編集</ThemedText>
-                <Pressable onPress={handleCancelEdit}>
-                  <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
-                    閉じる
+          {/* ModalはKeyboardAvoidingViewを含む親コンポーネント階層とは別のネイティブサーフェスとして
+              描画されるため、727行目付近の画面全体のKeyboardAvoidingViewの効果を受けない。
+              このモーダルはTextInput(本文編集欄)を含むため、Android SDK 54のedge-to-edge対応で
+              windowSoftInputModeによる自動リサイズが効かないケースを考慮し、モーダル内にも
+              KeyboardAvoidingViewを配置してTextInput・保存ボタンがキーボードに隠れないようにする */}
+          <KeyboardAvoidingView
+            style={styles.flex}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          >
+            <View style={styles.modalOverlay}>
+              <ThemedView style={[styles.modalContent, { borderColor: iconColor }]}>
+                <View style={styles.modalHeader}>
+                  <ThemedText type="subtitle">日記を編集</ThemedText>
+                  <Pressable onPress={handleCancelEdit}>
+                    <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
+                      閉じる
+                    </ThemedText>
+                  </Pressable>
+                </View>
+                <TextInput
+                  style={[styles.input, { color: textColor, borderColor: tintColor }]}
+                  value={editDraft}
+                  onChangeText={handleChangeEditDraft}
+                  multiline
+                  // draft用TextInputと同様の理由でmaxLength propはあえて指定しない。
+                  // 上限判定・切り詰めはhandleChangeEditDraft内でgrapheme単位で行っている
+                />
+                <View style={styles.composerFooter}>
+                  <ThemedText
+                    style={[
+                      styles.charCount,
+                      editDraftGraphemeCount >= BODY_MAX_LENGTH
+                        ? { color: errorColor }
+                        : { color: iconColor },
+                    ]}
+                  >
+                    {editDraftGraphemeCount}/{BODY_MAX_LENGTH}
                   </ThemedText>
-                </Pressable>
-              </View>
-              <TextInput
-                style={[styles.input, { color: textColor, borderColor: tintColor }]}
-                value={editDraft}
-                onChangeText={handleChangeEditDraft}
-                multiline
-                // draft用TextInputと同様の理由でmaxLength propはあえて指定しない。
-                // 上限判定・切り詰めはhandleChangeEditDraft内でgrapheme単位で行っている
-              />
-              <View style={styles.composerFooter}>
-                <ThemedText
-                  style={[
-                    styles.charCount,
-                    editDraftGraphemeCount >= BODY_MAX_LENGTH
-                      ? { color: errorColor }
-                      : { color: iconColor },
-                  ]}
-                >
-                  {editDraftGraphemeCount}/{BODY_MAX_LENGTH}
-                </ThemedText>
-                <Pressable
-                  style={[
-                    styles.saveButton,
-                    { backgroundColor: tintColor },
-                    // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
-                    { opacity: !editDraft.trim() || isSavingEdit ? 0.5 : 1 },
-                  ]}
-                  onPress={handleSaveEdit}
-                  disabled={!editDraft.trim() || isSavingEdit}
-                >
-                  <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
-                    保存
+                  <Pressable
+                    style={[
+                      styles.saveButton,
+                      { backgroundColor: tintColor },
+                      // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
+                      { opacity: !editDraft.trim() || isSavingEdit ? 0.5 : 1 },
+                    ]}
+                    onPress={handleSaveEdit}
+                    disabled={!editDraft.trim() || isSavingEdit}
+                  >
+                    <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
+                      保存
+                    </ThemedText>
+                  </Pressable>
+                </View>
+                {editError ? (
+                  <ThemedText style={[styles.errorText, { color: errorColor }]}>
+                    {editError}
                   </ThemedText>
-                </Pressable>
-              </View>
-              {editError ? (
-                <ThemedText style={[styles.errorText, { color: errorColor }]}>
-                  {editError}
-                </ThemedText>
-              ) : null}
-            </ThemedView>
-          </View>
+                ) : null}
+              </ThemedView>
+            </View>
+          </KeyboardAvoidingView>
         </Modal>
       </TabScreenContainer>
     </KeyboardAvoidingView>
