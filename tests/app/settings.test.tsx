@@ -1100,9 +1100,7 @@ describe('リマインダーセクション(Issue #92: 日記を書く習慣化�
     }
 
     it('uses the light theme error color (not a hardcoded value) when the theme preference is light (正常系: ライトモード)', async () => {
-      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
-        'denied',
-      );
+      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('denied');
       await AsyncStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, 'light');
       renderSettingsScreenWithThemePreference();
 
@@ -1113,9 +1111,7 @@ describe('リマインダーセクション(Issue #92: 日記を書く習慣化�
     });
 
     it('uses the dark theme error color (not the light-mode hardcoded value) when the theme preference is dark (正常系: ダークモード)', async () => {
-      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
-        'denied',
-      );
+      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('denied');
       await AsyncStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, 'dark');
       renderSettingsScreenWithThemePreference();
 
