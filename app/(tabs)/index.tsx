@@ -273,7 +273,31 @@ export default function HomeScreen() {
   const iconColor = useThemeColor({}, 'icon');
   const errorColor = useThemeColor({}, 'error');
 
+  // 新規保存・編集・削除の永続化処理を直列化するためのキュー。
+  // 各処理はReact stateのentries(古いレンダー時点のスナップショットの可能性がある)ではなく、
+  // 実行の順番が回ってきた時点でAsyncStorageから読み直した最新データをもとに次の内容を計算するため、
+  // 「Aの削除確定→保存処理中に、Bの編集保存が先に完了→Aの書き込みが後から古いスナップショットで
+  // 上書きしてBの編集が消える」といったレースコンディションを防ぐ。
+  // loadEntriesが下でこのrefを参照するため、宣言順をloadEntriesより前にしている
+  const writeQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // 現在キューに積まれている(まだAsyncStorageへの書き込みが完了していない)タスクの件数。
+  // loadEntriesが「pending中の書き込みがある場合だけ」writeQueueRef.currentを待つかどうかの
+  // 判定に使う(詳細はloadEntries内のコメント参照)
+  const pendingWriteCountRef = useRef(0);
+
   const loadEntries = useCallback(async () => {
+    // useFocusEffectでタブに再フォーカスした際、保存/編集/削除の書き込みがwriteQueueRef上で
+    // まだpending中(AsyncStorageへの実際の書き込みが完了していない)ことがある。ここで待たずに
+    // 読み込むと、キューの書き込みが完了する前の古い内容を一時的に読み込んでしまい、楽観的更新で
+    // 表示していた内容から一瞬戻ってしまう(その後キューの書き込みが完了すればUIは正しい状態に
+    // 収束するが、ちらつきとして見えてしまう)。そのため、pending中の書き込みがある場合に限り、
+    // 直近でキューに積まれた書き込みが完了するまで待ってから読み込む。
+    // pending中の書き込みが無い場合にまで無条件で`await`すると、既に解決済みのPromiseであっても
+    // 1マイクロタスク分の遅延が余分に発生し、他の非同期処理(下書き復元など)との実行順序が
+    // ずれてしまうため、必要な場合のみ待つようにしている
+    if (pendingWriteCountRef.current > 0) {
+      await writeQueueRef.current;
+    }
     // 復号を含む読み込みロジックはutils/diary-storage.tsの共通関数に集約しており、
     // 設定画面のエクスポート機能とも共有している。ストレージが空・壊れている場合は
     // 例外を投げず空配列を返す仕様のため、ここで個別にtry/catchする必要はない
@@ -283,17 +307,14 @@ export default function HomeScreen() {
     setIsLoading(false);
   }, []);
 
-  // 新規保存・編集・削除の永続化処理を直列化するためのキュー。
-  // 各処理はReact stateのentries(古いレンダー時点のスナップショットの可能性がある)ではなく、
-  // 実行の順番が回ってきた時点でAsyncStorageから読み直した最新データをもとに次の内容を計算するため、
-  // 「Aの削除確定→保存処理中に、Bの編集保存が先に完了→Aの書き込みが後から古いスナップショットで
-  // 上書きしてBの編集が消える」といったレースコンディションを防ぐ
-  const writeQueueRef = useRef<Promise<void>>(Promise.resolve());
-
   // mutateは「読み直した最新entries」を受け取り、実際に書き込むべき次のentriesを返す。
   // 戻り値のPromiseは実際に永続化された(=書き込みに使われた)entriesで解決する
   const enqueueDiaryWrite = useCallback(
     (mutate: (latestEntries: DiaryEntry[]) => DiaryEntry[]): Promise<DiaryEntry[]> => {
+      // タスクをキューに積んだ時点(実行完了を待たず)で同期的にインクリメントする。
+      // これにより、この関数の呼び出し直後にloadEntriesが走った場合でも、
+      // まだ実行順が回ってきていないタスクの存在を正しく検知できる
+      pendingWriteCountRef.current += 1;
       const task = writeQueueRef.current.then(async () => {
         const latestEntries = await getAllDiaryEntries();
         const nextEntries = mutate(latestEntries);
@@ -301,10 +322,16 @@ export default function HomeScreen() {
         await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(nextEntries), key));
         return nextEntries;
       });
-      // キュー自体は個々のタスクの成否に関わらず先に進める(失敗はtask側のcatchで呼び出し元に伝える)
+      // キュー自体は個々のタスクの成否に関わらず先に進める(失敗はtask側のcatchで呼び出し元に伝える)。
+      // 併せてpendingWriteCountRefも、成否に関わらずタスクが完了(=もはやpendingではなくなる)
+      // 時点でデクリメントする
       writeQueueRef.current = task.then(
-        () => undefined,
-        () => undefined,
+        () => {
+          pendingWriteCountRef.current -= 1;
+        },
+        () => {
+          pendingWriteCountRef.current -= 1;
+        },
       );
       return task;
     },

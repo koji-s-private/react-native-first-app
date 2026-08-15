@@ -3491,6 +3491,124 @@ describe('HomeScreen', () => {
     });
   });
 
+  describe('タブ再フォーカス時にpending中の書き込みキューを待ってから読み直す(Issue #152)', () => {
+    it('does not flicker back to stale data when useFocusEffect refires while a save is still pending in the write queue (regression for Issue #152)', async () => {
+      const now = new Date();
+      // 新規保存したエントリはcreatedAtが実行時点の「今日」になるため、既存エントリは
+      // 「今日」とは別の日にしておき、カレンダー上で2つのタイトルを独立して検証できるようにする
+      const existingDay = pickNonTodayDayInRange(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: 'existing', text: '既存の日記', createdAt: isoAt(now, existingDay) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      // 保存の永続化書き込み(enqueueDiaryWrite内のsetItem)の完了タイミングを制御できるようにする。
+      // 既存の直列化テスト(Issue #130)と同様、実際のAsyncStorageへの書き込み自体は元の実装
+      // 経由で行い、完了タイミングだけを遅延させる
+      const originalSetItem = AsyncStorage.setItem;
+      let resolveSaveWrite: () => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        (key: string, value: string) =>
+          new Promise<void>((resolve) => {
+            resolveSaveWrite = () => {
+              originalSetItem(key, value).then(resolve);
+            };
+          }),
+      );
+
+      render(<HomeScreen />);
+      expect(await screen.findByText('既存の日記')).toBeTruthy();
+
+      // 新規保存を開始する。楽観的UI更新は同期的に反映されるが、AsyncStorageへの実際の
+      // 書き込み(enqueueDiaryWrite内のsetItem)はpendingのまま止まる
+      fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '新しい日記');
+      fireEvent.press(screen.getByText('保存'));
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+      // 楽観的UI更新により、書き込みが完了する前から新しい日記が一覧に表示されている
+      expect(screen.getByText('新しい日記')).toBeTruthy();
+
+      const getItemMock = AsyncStorage.getItem as jest.Mock;
+      const getItemCallsWhilePending = getItemMock.mock.calls.length;
+
+      // 書き込みがまだpending中に、useFocusEffectの再発火(タブへの再フォーカス)を模す
+      act(() => {
+        (triggerRefocus as () => void)();
+      });
+
+      // 修正前の実装では、ここでloadEntries内のgetAllDiaryEntries()がpending中の書き込みを
+      // 待たずに即座にAsyncStorageを読み直してしまい、まだ反映されていない古い内容
+      // (新しい日記を含まない状態)で一覧を上書きしてしまっていた。修正後は、pending中の
+      // 書き込みがある間はキューの完了を待ってから読み直すため、この時点では追加の
+      // AsyncStorage.getItem呼び出しは発生しない
+      expect(getItemMock.mock.calls.length).toBe(getItemCallsWhilePending);
+      // 読み直しがブロックされている間も、楽観的更新済みの新しい日記の表示が古い状態へ
+      // 巻き戻ってちらつくことはない
+      expect(screen.getByText('新しい日記')).toBeTruthy();
+      expect(screen.getByText('既存の日記')).toBeTruthy();
+
+      // pending中の書き込みを完了させる
+      await act(async () => {
+        resolveSaveWrite();
+      });
+
+      // 書き込み完了後、待たされていた読み直しが実行され、AsyncStorage.getItemが追加で呼ばれる
+      await waitFor(() =>
+        expect(getItemMock.mock.calls.length).toBeGreaterThan(getItemCallsWhilePending),
+      );
+
+      // 最終的に画面には、pending中だった書き込みが反映された最新の状態(既存+新規)が
+      // 表示され続けている(一時的にせよ新しい日記が消えることはなかった)
+      expect(screen.getByText('新しい日記')).toBeTruthy();
+      expect(screen.getByText('既存の日記')).toBeTruthy();
+
+      // 実際に永続化された内容にも新しい日記が反映されている
+      const setItemMock = AsyncStorage.setItem as jest.Mock;
+      const [, lastValue] = setItemMock.mock.calls[setItemMock.mock.calls.length - 1];
+      const persisted = (await decryptPersistedEntries(lastValue)) as {
+        id: string;
+        text: string;
+      }[];
+      expect(persisted.some((entry) => entry.text === '新しい日記')).toBe(true);
+      expect(persisted.some((entry) => entry.id === 'existing')).toBe(true);
+    });
+
+    // pending中の書き込みが無い通常時は、余分な待ち合わせをせず即座に読み直す従来通りの
+    // 挙動を維持していることを確認する回帰テスト(loadEntries冒頭のawaitは
+    // pendingWriteCountRef.current > 0のときのみ行われる)
+    it('reloads immediately on refocus when there is no pending write in the queue (regression check for normal refetch behavior)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: 'existing', text: '既存の日記', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      expect(await screen.findByText('既存の日記')).toBeTruthy();
+
+      const getItemMock = AsyncStorage.getItem as jest.Mock;
+      const callsBeforeRefocus = getItemMock.mock.calls.length;
+
+      // pending中の書き込みが存在しない状態で再フォーカスした場合、待ち合わせ無く
+      // 即座に読み直しが実行される
+      act(() => {
+        (triggerRefocus as () => void)();
+      });
+
+      await waitFor(() =>
+        expect(getItemMock.mock.calls.length).toBeGreaterThan(callsBeforeRefocus),
+      );
+      expect(screen.getByText('既存の日記')).toBeTruthy();
+    });
+  });
+
   describe('テーマに応じたエラー色(Issue #58)', () => {
     // `hooks/use-color-scheme.ts`はreact-nativeの`useColorScheme`をそのままre-exportしているため、
     // jest-expo(react-native)のオートモック(常に'light'を返すjest.fn)を直接上書きすることで
