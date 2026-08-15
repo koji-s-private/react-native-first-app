@@ -197,6 +197,7 @@ describe('getAllDiaryEntries', () => {
   });
 
   it('filters out elements that do not match the DiaryEntry shape while keeping valid ones (異常系: 一部エントリのスキーマ不整合)', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const key = await getOrCreateEncryptionKey();
     const mixed = [
       sampleEntries[0],
@@ -210,6 +211,33 @@ describe('getAllDiaryEntries', () => {
 
     // 不正な要素のみがスキップされ、有効なエントリだけが返る
     await expect(getAllDiaryEntries()).resolves.toEqual(sampleEntries);
+    warnSpy.mockRestore();
+  });
+
+  it('logs a warning with the skipped count when some entries are filtered out (不正エントリのスキップをログで検知できること)', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const key = await getOrCreateEncryptionKey();
+    const mixed = [sampleEntries[0], { id: '2', text: '欠損データ' }, null, sampleEntries[1]];
+    const encrypted = encryptText(JSON.stringify(mixed), key);
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, encrypted);
+
+    await getAllDiaryEntries();
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toContain('2件');
+    warnSpy.mockRestore();
+  });
+
+  it('does not log a warning when all entries are valid (正常系: ログが出ないこと)', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const key = await getOrCreateEncryptionKey();
+    const encrypted = encryptText(JSON.stringify(sampleEntries), key);
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, encrypted);
+
+    await getAllDiaryEntries();
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 
   it('returns an empty array when the stored plain JSON is not an array (異常系: 後方互換データのスキーマ不整合)', async () => {
