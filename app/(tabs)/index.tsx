@@ -58,30 +58,15 @@ const SAVE_SUCCESS_MESSAGE = '保存しました';
 
 // 日付セルの高さのデフォルト最小値(外枠の実測高さがまだ取れていない初回レンダー用のフォールバック)
 const DEFAULT_DAY_CELL_HEIGHT = 48;
-// 日付セル内のテキスト(日付番号・日記タイトル)に許容するOS文字サイズ設定の最大倍率。
-// react-native-calendars自体の月見出し・曜日行は内部実装で常にallowFontScaling={false}が
-// 指定されており(theme等では変更不可。node_modules/react-native-calendars/src/calendar/header/index.js
-// 参照)OSの文字サイズ設定の影響を受けないが、dayComponentとして差し替えている日付セルの中身は
-// このアプリ側のThemedTextであり、そのままでは無制限に拡大されてしまう。拡大を放置すると
-// セル内のテキストが1週あたりの行の高さ(dayCellHeight)を超えてはみ出し、calendarWrapperの
-// overflow: 'hidden'によって最下段の週が見切れる懸念があるため、拡大率の上限を設けてリスクを抑える
+// 日付セル内テキストの拡大率上限。react-native-calendarsのヘッダー・曜日行はallowFontScaling={false}
+// 固定でOS文字サイズ設定の影響を受けないが、差し替えているセル本体(ThemedText)は無制限に
+// 拡大されるとdayCellHeightを超えてoverflow: 'hidden'で見切れるため、上限を設けてリスクを抑える
 const DAY_CELL_MAX_FONT_SCALE = 1.5;
 // showSixWeeksを有効にし、月をまたいでも常に6行で表示を揃えるため6固定で計算する
 const CALENDAR_WEEK_ROWS = 6;
-// react-native-calendarsのヘッダー(月表示+矢印)と曜日行を合わせたおおよその高さ、および
-// 1週間の行に付与される上下マージン(週の行が持つmarginVertical、react-native-calendarsの
-// デフォルトのweekVerticalMargin=7を上下2回分)。テーマのフォントサイズ等から算出した概算値であり、
-// 実測ではないが、日付セルの高さを外枠の実測高さから一度の計算で求めるための基準として使う
-//
-// なお、これらの値はOSの文字サイズ設定(Dynamic Type等)によって変化しないため、
-// PixelRatio.getFontScale()による補正はあえて行っていない。react-native-calendarsの
-// ヘッダー・曜日行を描画するTextコンポーネントは、テーマ等で変更不可能な形で内部実装として
-// 常にallowFontScaling={false}が指定されており(node_modules/react-native-calendars/src/calendar/
-// header/index.js、src/commons/WeekDaysNames.js参照)、OSの文字サイズ設定の影響を受けない。
-// この実装依存のガードは万一将来ライブラリ側の挙動が変わった場合に外れる可能性があるため、
-// フォントスケール由来の高さ増加リスクは、実際に可変であるこのアプリ側のセル内テキスト
-// (dayNumber/dayEntryTitle、上記のDAY_CELL_MAX_FONT_SCALEで拡大率を制限)側で根本的に
-// 抑える方針とし、既に文字サイズ設定の影響を受けないここでの概算値をあえて動かさない
+// react-native-calendarsのヘッダー+曜日行のおおよその高さと、週の行のマージン(デフォルトの
+// weekVerticalMargin=7を上下2回分)。ヘッダー等はallowFontScaling={false}固定でOS文字サイズ設定の
+// 影響を受けないため、この概算値もフォントスケール補正なしの固定値としてそのまま使う
 const CALENDAR_CHROME_HEIGHT = 90;
 const CALENDAR_WEEK_ROW_MARGIN = 14;
 
@@ -484,21 +469,18 @@ export default function HomeScreen() {
     setDraft(truncateToBodyMaxLength(text));
   }, []);
 
-  // 編集モーダルを開き、対象エントリの本文を編集用の下書きにセットする
   const handleStartEdit = useCallback((entry: DiaryEntry) => {
     setEditingEntryId(entry.id);
     setEditDraft(entry.text);
     setEditError(null);
   }, []);
 
-  // 編集用TextInputのonChangeText。draft用のhandleChangeDraftと同様、TextInput側に
-  // maxLength propを指定していないため、truncateToBodyMaxLengthでgrapheme単位で
-  // BODY_MAX_LENGTHを超えないよう切り詰める
+  // 編集用TextInputのonChangeText。draft用のhandleChangeDraftと同様の理由で
+  // truncateToBodyMaxLength(grapheme単位の切り詰め)を使う
   const handleChangeEditDraft = useCallback((text: string) => {
     setEditDraft(truncateToBodyMaxLength(text));
   }, []);
 
-  // 編集モーダルを閉じ、編集用の状態をリセットする
   const handleCancelEdit = useCallback(() => {
     setEditingEntryId(null);
     setEditDraft('');
@@ -638,7 +620,6 @@ export default function HomeScreen() {
   }, [entries, trimmedSearchQuery]);
 
   // 検索結果の項目がタップされたら、そのエントリが書かれた日付の一覧モーダルを開く
-  // (既存のselectedDate stateをそのまま使い、日付タップ時と同じモーダルに誘導する)
   const handleSearchResultPress = useCallback((entry: DiaryEntry) => {
     setSelectedDate(toDateKey(new Date(entry.createdAt)));
   }, []);
@@ -743,34 +724,22 @@ export default function HomeScreen() {
 
   const selectedDateEntries = selectedDate ? (entriesByDate[selectedDate] ?? []) : [];
 
-  // 文字数カウンター表示用に、入力のたびにgrapheme単位で数え直す。単純なdraft.length/
-  // editDraft.length(UTF-16コードユニット単位)だと、絵文字などのサロゲートペア・ZWJ結合文字を
-  // 実際の見た目の文字数より多くカウントしてしまいカウンター表示がずれるため、
-  // 既存のsplitIntoGraphemesを再利用する。入力のたびに再計算が走るため、draft/editDraft自体が
-  // 変化した場合のみ計算し直すようuseMemoで不要な再計算を避ける
+  // 文字数カウンター表示用に、grapheme単位で数え直す(絵文字などでUTF-16の.lengthとずれるため)
   const draftGraphemeCount = useMemo(() => splitIntoGraphemes(draft).length, [draft]);
   const editDraftGraphemeCount = useMemo(() => splitIntoGraphemes(editDraft).length, [editDraft]);
 
   return (
     <KeyboardAvoidingView
       style={styles.flex}
-      // Android は SDK 54 で edge-to-edge 表示が常時有効になり、OS標準の
-      // windowSoftInputMode(adjustResize相当)によるレイアウト自動リサイズが
-      // 効かないケースがあるため、iOS同様にbehaviorを明示的に指定する
-      // (undefinedのままだとAndroid実機でキーボード表示時に入力欄・保存ボタンが
-      // 隠れる可能性がある。React Native公式ドキュメントでも
-      // 「Android and iOS both interact with this prop differently. On both iOS and
-      // Android, setting behavior is recommended.」と案内されている)
+      // Android SDK 54のedge-to-edge対応でwindowSoftInputModeの自動リサイズが効かない
+      // ケースがあるため、iOS同様behaviorを明示的に指定する(未指定だと入力欄が隠れうる)
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       {/* ステータスバー/ノッチ領域とタイトルが重ならないよう、TabScreenContainerで
           セーフエリア上端インセットぶんの余白を自動的に加算する */}
       <TabScreenContainer style={styles.container}>
-        {/* 背景(余白・検索結果一覧・カレンダー領域など)をタップした際にキーボードを閉じられるようにする。
-            TextInputや各種Pressable(保存ボタン、編集/削除ボタン等)は自身がタッチの
-            レスポンダーになるため、このラッパーのonPressには伝播せず、既存の操作性は損なわれない。
-            accessible={false}を指定し、内側のテキストやボタンの個別のアクセシビリティ情報が
-            1つの要素にまとめられて読み上げられてしまわないようにする */}
+        {/* 背景タップでキーボードを閉じる。TextInput/Pressable自身がタッチを受け取るため既存の
+            操作性は損なわれない。accessible={false}で内側の要素が1つにまとめて読み上げられるのを防ぐ */}
         <Pressable
           style={styles.contentWrapper}
           onPress={() => Keyboard.dismiss()}
@@ -788,10 +757,8 @@ export default function HomeScreen() {
               value={draft}
               onChangeText={handleChangeDraft}
               multiline
-              // TextInput標準のmaxLength propはUTF-16コードユニット単位の制限しか行えず、
-              // サロゲートペアやZWJ結合絵文字の途中で入力を打ち切ってしまう可能性があるため
-              // あえて指定しない。上限判定・切り詰めはhandleChangeDraft内でgrapheme単位
-              // (splitIntoGraphemesベースのtruncateToBodyMaxLength)で行っている
+              // maxLength propはUTF-16コードユニット単位でしか制限できないためあえて指定せず、
+              // handleChangeDraft側でgrapheme単位の切り詰めを行っている
             />
             <View style={styles.composerFooter}>
               {/* 文字数カウンター(上限に近づいた/達したことがひと目で分かるよう常に表示する) */}
@@ -996,11 +963,8 @@ export default function HomeScreen() {
           statusBarTranslucent
           navigationBarTranslucent
         >
-          {/* ModalはKeyboardAvoidingViewを含む親コンポーネント階層とは別のネイティブサーフェスとして
-              描画されるため、727行目付近の画面全体のKeyboardAvoidingViewの効果を受けない。
-              このモーダルはTextInput(本文編集欄)を含むため、Android SDK 54のedge-to-edge対応で
-              windowSoftInputModeによる自動リサイズが効かないケースを考慮し、モーダル内にも
-              KeyboardAvoidingViewを配置してTextInput・保存ボタンがキーボードに隠れないようにする */}
+          {/* Modalは親のKeyboardAvoidingViewとは別のネイティブサーフェスに描画され効果を受けないため、
+              TextInput(本文編集欄)を含むこのモーダル内にも別途KeyboardAvoidingViewを配置する */}
           <KeyboardAvoidingView
             style={styles.flex}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -1020,8 +984,7 @@ export default function HomeScreen() {
                   value={editDraft}
                   onChangeText={handleChangeEditDraft}
                   multiline
-                  // draft用TextInputと同様の理由でmaxLength propはあえて指定しない。
-                  // 上限判定・切り詰めはhandleChangeEditDraft内でgrapheme単位で行っている
+                  // draft用TextInputと同様の理由でmaxLength propはあえて指定しない
                 />
                 <View style={styles.composerFooter}>
                   <ThemedText
@@ -1133,7 +1096,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   errorText: {
-    // 色はテーマ(ライト/ダーク)に応じてJSX側でuseThemeColorから取得した値を上書き適用する
     fontSize: 14,
   },
   emptyState: {
@@ -1236,6 +1198,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   entryDeleteText: {
-    // 色はテーマ(ライト/ダーク)に応じてJSX側でuseThemeColorから取得した値を上書き適用する
+    // 色はJSX側でuseThemeColorの値を上書き適用する
   },
 });
