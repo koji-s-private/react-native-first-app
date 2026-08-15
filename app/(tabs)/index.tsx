@@ -239,6 +239,10 @@ export default function HomeScreen() {
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [editError, setEditError] = useState<string | null>(null);
+  // handleSaveEdit(編集内容の保存)の実行中かどうか。isSavingと同様に、保存ボタンの連打(または
+  // タップと同時に発生する複数のonPressイベント)によって、同じ内容の更新処理が重複して
+  // 実行されてしまうことを防ぐため、実行中は早期returnし、保存ボタンもdisabledにする
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
   // handleSave内の保存処理(pending中)開始後に、ユーザーがdraft用TextInputへ入力操作を
   // 行ったかどうかを表すref。「pending開始時にセットした空文字列のまま」なのか
   // 「pending中に入力した末、自分で全部消して空文字列に戻した」のかを、値の内容(空文字列か
@@ -449,11 +453,18 @@ export default function HomeScreen() {
   }, []);
 
   const handleSaveEdit = useCallback(async () => {
+    // 既に更新処理が進行中であれば、連打による重複更新を防ぐため何もしない
+    if (isSavingEdit) {
+      return;
+    }
+
     const trimmed = editDraft.trim();
     // 万が一上限を超えたテキストが渡ってきても保存しない(TextInput側のmaxLengthが主な防御線)
     if (!editingEntryId || !trimmed || trimmed.length > BODY_MAX_LENGTH) {
       return;
     }
+
+    setIsSavingEdit(true);
 
     const previousEntries = entries;
     // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
@@ -480,8 +491,11 @@ export default function HomeScreen() {
       // 永続化に失敗した場合は保存前の状態に戻し、編集モーダルは開いたままエラーを伝える
       setEntries(previousEntries);
       setEditError('更新に失敗しました。もう一度お試しください。');
+    } finally {
+      // 成功・失敗いずれの場合も、次の更新を行えるよう必ず実行中フラグを戻す
+      setIsSavingEdit(false);
     }
-  }, [editDraft, editingEntryId, entries, enqueueDiaryWrite]);
+  }, [editDraft, editingEntryId, entries, enqueueDiaryWrite, isSavingEdit]);
 
   // 日付一覧モーダルを閉じる(開いていた編集モーダルがあれば合わせて閉じる)
   const handleCloseDateModal = useCallback(() => {
@@ -932,10 +946,10 @@ export default function HomeScreen() {
                     styles.saveButton,
                     { backgroundColor: tintColor },
                     // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
-                    { opacity: !editDraft.trim() ? 0.5 : 1 },
+                    { opacity: !editDraft.trim() || isSavingEdit ? 0.5 : 1 },
                   ]}
                   onPress={handleSaveEdit}
-                  disabled={!editDraft.trim()}
+                  disabled={!editDraft.trim() || isSavingEdit}
                 >
                   <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
                     保存

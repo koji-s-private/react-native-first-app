@@ -2637,6 +2637,57 @@ describe('HomeScreen', () => {
       expect(screen.getAllByText('編集前の日記').length).toBeGreaterThanOrEqual(1);
       expect(screen.getByText('日記を編集')).toBeTruthy();
     });
+
+    it('ignores a second press of the edit save button while an update is still in flight, preventing a duplicate write (Issue #137)', async () => {
+      // 編集モーダルの保存ボタンの連打(タップと同時に発生する複数のonPressイベントを含む)によって
+      // 同一の更新処理(AsyncStorage.setItem)が重複して実行されないことを確認する。
+      // handleSaveの連打防止テスト(Issue #70)と同様、AsyncStorage.setItemの解決を意図的に
+      // 遅延させ、その完了前に2回目のpressを発火させる
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+      jest.clearAllMocks();
+
+      let resolveSetItem: () => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSetItem = resolve;
+          }),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('編集前の日記');
+      fireEvent.press(screen.getByText('編集前の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+      fireEvent.press(screen.getByText('編集'));
+      await screen.findByText('日記を編集');
+
+      const editInput = screen.getByDisplayValue('編集前の日記');
+      fireEvent.changeText(editInput, '連打される編集');
+      const editSaveButton = getEditSaveButton();
+      fireEvent.press(editSaveButton);
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      // 1回目の更新(AsyncStorage.setItem)がまだpendingの間に、続けて保存ボタンを連打する
+      fireEvent.press(editSaveButton);
+      fireEvent.press(editSaveButton);
+
+      // pending中の連打はガードされ、AsyncStorage.setItemは追加で呼ばれない
+      expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+
+      resolveSetItem();
+      await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
+
+      // 永続化された内容にも1件のみ含まれ、重複していない
+      const [, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
+      const persisted = (await decryptPersistedEntries(value)) as { text: string }[];
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0].text).toBe('連打される編集');
+    });
   });
 
   describe('日記エントリの削除(Issue #33)', () => {
