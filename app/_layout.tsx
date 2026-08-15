@@ -45,7 +45,6 @@ function RootLayoutContent() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         <Stack.Screen name="oss-licenses" options={{ title: 'OSSライセンス' }} />
       </Stack>
       {/* `style="auto"`はOSのカラースキーム(Appearance)を見て自動判定するため、

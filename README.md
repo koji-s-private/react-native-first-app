@@ -216,7 +216,6 @@ erDiagram
 app/                 画面（expo-router によるファイルベースルーティング）
   (tabs)/            タブ画面（index.tsx: 日記画面）
   _layout.tsx         アプリ全体のレイアウト・初期化処理
-  modal.tsx           モーダル画面
 assets/              画像などの静的アセット（アイコン・スプラッシュ画像など）
 components/          再利用可能なUIコンポーネント
 constants/           テーマなどの定数
