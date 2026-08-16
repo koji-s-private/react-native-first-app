@@ -3966,5 +3966,15 @@ describe('HomeScreen', () => {
       // マッチ全体(前後の文脈込み)は元の本文よりも短く切り詰められている
       expect(excerpt.length).toBeLessThan(longEntryText.length);
     });
+
+    it('sets maxLength={1000} (BODY_MAX_LENGTH) on the search input, so it cannot exceed the diary body max length itself (boundary, Issue #171)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
+      // composer/edit用のTextInputとは異なりgrapheme単位の切り詰めロジックは持たないため、
+      // ネイティブのmaxLength propがBODY_MAX_LENGTH(1000)に設定されていることを直接確認する
+      expect(searchInput.props.maxLength).toBe(1000);
+    });
   });
 });
