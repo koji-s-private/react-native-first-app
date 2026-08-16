@@ -7,6 +7,5 @@
 // (各テストファイル内で同じモックを個別に`jest.mock`している箇所もあるが、同一のファクトリを
 // 指しているため上書きしても問題は起きない)
 jest.mock('@react-native-async-storage/async-storage', () =>
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
