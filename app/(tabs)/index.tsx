@@ -973,8 +973,14 @@ export default function HomeScreen() {
             style={styles.flex}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           >
-            <View style={styles.modalOverlay}>
-              <ThemedView style={[styles.modalContent, { borderColor: iconColor }]}>
+            {/* 背景の半透明オーバーレイをタップした場合はモーダルを閉じる(一覧モーダルと同じパターン) */}
+            <Pressable style={styles.modalOverlay} onPress={handleCancelEdit}>
+              <ThemedView
+                style={[styles.modalContent, { borderColor: iconColor }]}
+                // オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
+                // modalContent内でのタッチ開始をこのViewがレスポンダーとして引き受け、伝播を止める
+                onStartShouldSetResponder={() => true}
+              >
                 <View style={styles.modalHeader}>
                   <ThemedText type="subtitle">日記を編集</ThemedText>
                   <Pressable onPress={handleCancelEdit}>
@@ -1022,7 +1028,7 @@ export default function HomeScreen() {
                   </ThemedText>
                 ) : null}
               </ThemedView>
-            </View>
+            </Pressable>
           </KeyboardAvoidingView>
         </Modal>
       </TabScreenContainer>
