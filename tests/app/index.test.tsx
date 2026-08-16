@@ -2826,7 +2826,11 @@ describe('HomeScreen', () => {
         await AsyncStorage.setItem(
           STORAGE_KEY,
           JSON.stringify([
-            { id: '1', text: '編集モーダル背景タップ対象の日記', createdAt: isoAt(now, dayWithEntry) },
+            {
+              id: '1',
+              text: '編集モーダル背景タップ対象の日記',
+              createdAt: isoAt(now, dayWithEntry),
+            },
           ]),
         );
         jest.clearAllMocks();
@@ -2855,7 +2859,9 @@ describe('HomeScreen', () => {
         // editDraftの変更内容は保存されず破棄される(handleCancelEditと同じ効果)
         expect(AsyncStorage.setItem).not.toHaveBeenCalled();
         // 元の本文はそのまま残っている
-        expect(screen.getAllByText('編集モーダル背景タップ対象の日記').length).toBeGreaterThanOrEqual(1);
+        expect(
+          screen.getAllByText('編集モーダル背景タップ対象の日記').length,
+        ).toBeGreaterThanOrEqual(1);
         expect(screen.queryByText('保存されないはずの編集内容')).toBeNull();
       });
 
@@ -2869,7 +2875,11 @@ describe('HomeScreen', () => {
         await AsyncStorage.setItem(
           STORAGE_KEY,
           JSON.stringify([
-            { id: '1', text: '編集モーダルガード確認用の日記', createdAt: isoAt(now, dayWithEntry) },
+            {
+              id: '1',
+              text: '編集モーダルガード確認用の日記',
+              createdAt: isoAt(now, dayWithEntry),
+            },
           ]),
         );
 
