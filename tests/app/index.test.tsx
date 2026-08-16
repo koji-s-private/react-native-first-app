@@ -23,10 +23,8 @@ import { TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID } from '@/components/tab-screen-
 import { Colors } from '@/constants/theme';
 import { decryptText, encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
 
-// `expo-router`'s `Link` (with its `Trigger`/`Preview`/`Menu` compound API) requires a
-// navigation/router context that isn't set up when rendering the screen in isolation.
-// We stub it out with simple pass-through components so the screen's own content can be
-// asserted without pulling in the whole router.
+// `expo-router`の`Link`(Trigger/Preview/Menuを伴う複合API)はナビゲーション/routerコンテキストを
+// 要求するため、単体レンダリングでも動くよう単純なパススルーコンポーネントに差し替える。
 jest.mock('expo-router', () => {
   const PassThrough = ({ children }: PropsWithChildren) => children;
 
@@ -53,17 +51,10 @@ jest.mock('expo-router', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const ReactForMock = require('react');
 
-  // 本物の`useFocusEffect`(expo-router内部で`useNavigation()`を要求する)は、
-  // このテストのようにNavigationContainer/expo-routerのコンテキスト無しで画面を
-  // 単体レンダリングする環境では利用できないため、マウント時に一度だけ発火する
-  // 簡易モックに差し替える。「タブに再フォーカスして読み込み直す」挙動を検証したい
-  // テストでは、下の`persists diary entries...`と同様にunmount/再mountすることで、
-  // このモックからも再度effectを発火させて模倣する。
-  //
-  // ただし、画面をアンマウントせずに保持したまま(=Reactのstateを保ったまま)
-  // 再フォーカスだけを模したいテスト(Issue #39: isLoadingがfalseになった後は
-  // 再フォーカスしてもtrueへ戻らないことの検証)向けに、現在マウント中の全effectを
-  // 保持しておき、`__triggerRefocus()`で明示的に再発火できるようにしておく
+  // 本物の`useFocusEffect`は単体レンダリング環境では動かないため、マウント時に一度だけ
+  // 発火する簡易モックに差し替える。再フォーカスを模す場合はunmount/再mountするテストが
+  // 多いが、stateを保ったまま再フォーカスだけ模したいテスト向けに、現在マウント中の
+  // 全effectを保持し`__triggerRefocus()`で明示的に再発火できるようにしておく
   // (実際のexpo-routerには存在しないテスト専用のヘルパー)。
   const activeFocusEffects = new Set<() => void>();
 
@@ -86,15 +77,10 @@ jest.mock('expo-router', () => {
   return { Link, useFocusEffect, __triggerRefocus };
 });
 
-// `jest-expo` が自動生成する expo-crypto のモック(node_modules/expo-crypto/mocks/ExpoCrypto.ts)は
-// `randomUUID()` が常に `undefined` を返す実装になっているため、ID一意性を検証するテストのために
-// 呼び出しごとに異なる値を返す独自のモックに差し替える。
-// また、日記の暗号化(utils/diary-encryption.ts)が鍵・nonceの生成に使う `getRandomBytes` も
-// オートモックには存在しない(`TypeError: getRandomBytes is not a function`になる)ため、
-// Node標準の`crypto`モジュールによる実際の乱数生成で代替する。
+// jest-expoのオートモックは`randomUUID()`が常に`undefined`を返すため、ID一意性検証のために
+// 呼び出しごとに異なる値を返すモックに差し替える。`getRandomBytes`もオートモックには存在しない
+// ため、Node標準の`crypto`モジュールによる実際の乱数生成で代替する。
 jest.mock('expo-crypto', () => {
-  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
-  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const nodeCrypto = require('crypto');
   return {
@@ -103,14 +89,11 @@ jest.mock('expo-crypto', () => {
   };
 });
 
-// `expo-secure-store`はjest-expoのオートモックだと`getItemAsync`が常に`undefined`を返し、
-// 状態を永続化しない。そのままだと`getOrCreateEncryptionKey`が呼び出すたびに異なる鍵を
-// 新規生成してしまい、保存→再読み込みの暗号化ラウンドトリップを検証できないため、
-// インメモリでキーと値を保持する独自モックに差し替える。
-// 保存成功時のハプティックフィードバック(Issue #55)を検証しやすくするため、
-// jest-expoのオートモック(実際のネイティブモジュール呼び出しを模した薄いjest.fn())ではなく、
-// 呼び出し引数を明示的にアサートしやすい独自モックに差し替える
-// (他のexpo系モジュールと同様、`jest.mock`の巻き上げの都合によりファクトリ内は自己完結させる)。
+// expo-secure-storeはjest-expoのオートモックだと`getItemAsync`が常に`undefined`を返し状態を
+// 永続化しないため、保存→再読み込みの暗号化ラウンドトリップを検証できるようインメモリで
+// キーと値を保持する独自モックに差し替える。
+// expo-hapticsも、保存成功時のハプティックフィードバック(Issue #55)を呼び出し引数まで
+// 明示的にアサートできるよう、jest-expoのオートモックではなく独自モックに差し替える。
 jest.mock('expo-haptics', () => ({
   notificationAsync: jest.fn(() => Promise.resolve()),
   NotificationFeedbackType: { Success: 'success' },
@@ -135,34 +118,25 @@ jest.mock('expo-secure-store', () => {
   };
 });
 
-// 実機では `expo-router` の `ExpoRoot` が自動的に `SafeAreaProvider` で全体をラップするが、
-// このテストでは `HomeScreen` を単体でレンダリングするため、そのラップが存在しない。
-// `useSafeAreaInsets` は `SafeAreaProvider` 配下でないとエラーを投げるため、
+// 実機では`expo-router`の`ExpoRoot`が自動的に`SafeAreaProvider`で全体をラップするが、
+// 単体レンダリングではそのラップが無く`useSafeAreaInsets`がエラーを投げるため、
 // ライブラリ公式のjestモック(常にゼロインセットを返す)に差し替える。
 jest.mock(
   'react-native-safe-area-context',
-  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
-  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   () => require('react-native-safe-area-context/jest/mock').default,
 );
 
-// The native `AsyncStorage` module isn't available in the Jest environment
-// (`NativeModule: AsyncStorage is null`), so we swap in the official in-memory mock
-// shipped with the package. This lets the screen's persistence logic (`getItem`/`setItem`)
-// run against a real (fake) storage backend instead of crashing.
+// Jest環境ではネイティブの`AsyncStorage`が使えない(`NativeModule: AsyncStorage is null`)ため、
+// パッケージ同梱の公式インメモリモックに差し替える。
 jest.mock('@react-native-async-storage/async-storage', () =>
-  // 上記と同様、`jest.mock`の巻き上げの都合によりファクトリ内で`require()`を使う必要がある
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
-// `KeyboardAvoidingView` は `behavior` prop を内部でしか消費せず、レンダリング結果の
-// ホストView(のstyle)には直接反映されないため、実装が意図した `behavior` を渡しているかを
-// レンダリング結果だけから検証するのは難しい。そこで、実際の見た目・挙動には関与しない
-// 薄いモックに差し替え、渡された `behavior` prop を `testID` 付きのViewでそのまま可視化する。
+// `KeyboardAvoidingView`は`behavior` propをレンダリング結果のstyleに反映しないため、渡された
+// propを検証できるよう`testID`付きのViewでそのまま可視化する薄いモックに差し替える。
 jest.mock('react-native/Libraries/Components/Keyboard/KeyboardAvoidingView', () => {
-  // `jest.mock`の巻き上げの都合によりファクトリ内で`require()`を使う必要がある
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const ReactForMock = require('react');
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -185,9 +159,7 @@ jest.mock('react-native/Libraries/Components/Keyboard/KeyboardAvoidingView', () 
 
 const mockRandomUUID = randomUUID as jest.Mock;
 const mockNotificationAsync = Haptics.notificationAsync as jest.Mock;
-// 上で定義した`__reset`にアクセスするための型付け直し
 const secureStoreMock = SecureStore as unknown as { __reset: () => void };
-// 上で定義した`expo-router`モックの`__triggerRefocus`にアクセスするための型付け直し
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { __triggerRefocus: triggerRefocus } = require('expo-router') as {
   __triggerRefocus: () => void;
@@ -211,16 +183,9 @@ async function decryptPersistedEntries(encryptedValue: string): Promise<unknown>
   return JSON.parse(decryptText(encryptedValue, key));
 }
 
-// `react-native-calendars` の `Calendar` はデフォルトで実行時点の「今日」を含む月を表示する
-// (このコンポーネントは `current`/`initialDate` を指定していないため)。そのため、テストで参照する
-// 日付は常に「テスト実行日と同じ月」に収める必要がある。
-//
-// カレンダーは表示する週を7の倍数に揃えるため、月初/月末には前後の月の日付が「はみ出し」として
-// 描画される(最大でも前後6日程度)。10〜20日の範囲であればどの月・どの実行日でも
-// このはみ出しと重複しない(前月のはみ出しは常に月末に近い大きな数字、翌月のはみ出しは
-// 常に月初に近い小さな数字になるため)。
-// さらに、`dayWithEntry`(10〜15日)と `dayWithoutEntry`(16〜20日)の範囲を分けることで、
-// テスト実行日そのものに関わらず必ず異なる日付になることを保証する。
+// `Calendar`はcurrent/initialDate未指定のため実行時点の「今日」を含む月を表示する。
+// 月初/月末の前後月「はみ出し」セル(最大前後6日程度)と重複しない10〜20日の範囲を使い、
+// さらに`dayWithEntry`(10〜15日)と`dayWithoutEntry`(16〜20日)の範囲を分けて必ず異なる日付にする。
 function pickTestDays(now: Date): { dayWithEntry: number; dayWithoutEntry: number } {
   return {
     dayWithEntry: 10 + (now.getDate() % 6), // 10〜15
@@ -228,10 +193,8 @@ function pickTestDays(now: Date): { dayWithEntry: number; dayWithoutEntry: numbe
   };
 }
 
-// pickTestDays と同じ10〜20日の「はみ出しと重複しない」範囲の中から、実行時点の「今日」とは
-// 異なる日を1つ選ぶ。「今日」バッジのセル(todayBadgeスタイル)と通常のセルを区別して検証したいため、
-// 意図せず両者が同じ日になってしまうことを避ける。
-// 10〜20日の11通りのうち「今日」と一致するのは高々1通りなので、必ず1つは見つかる。
+// pickTestDaysと同じ10〜20日の範囲から、「今日」バッジのセルと区別できるよう
+// 実行時点の「今日」とは異なる日を1つ選ぶ。
 function pickNonTodayDayInRange(now: Date): number {
   const today = now.getDate();
   for (let day = 10; day <= 20; day += 1) {
@@ -239,7 +202,7 @@ function pickNonTodayDayInRange(now: Date): number {
       return day;
     }
   }
-  // 10〜20日は11通りあるため、ここには到達しない
+  // 10〜20日の11通りのうち「今日」と一致するのは高々1通りなので、実際には到達しない
   return 10;
 }
 
@@ -283,16 +246,12 @@ function flattenTexts(node: unknown, acc: string[] = []): string[] {
   return acc;
 }
 
-// `react-test-renderer`(`ReactTestInstance`の型の出どころ)には`@types/react-test-renderer`が
-// 導入されておらず型定義が存在しないため、`screen.UNSAFE_getAllByType`等の戻り値は事実上`any`になる。
-// そのコールバック引数(node)にも型注釈を付けないと`tsc --noEmit`の`noImplicitAny`に抵触するため、
-// 既存の実際の型と同じ`any`を明示的に注釈する(実行時の挙動には影響しない、型解決のためだけの措置)。
+// `@types/react-test-renderer`が無く`screen.UNSAFE_getAllByType`等の戻り値は事実上`any`になるため、
+// コールバック引数にも同じ`any`を明示注釈し`noImplicitAny`を回避する(実行時の挙動には影響しない)。
 type TestNode = any;
 
-// 日付一覧モーダル(Modalコンポーネント)のツリーの中から、背景の半透明オーバーレイに
-// 対応するPressableを特定するヘルパー(Issue #84)。実装側は`modalOverlay`スタイル
-// (styles.modalOverlay)をエクスポートしていないため、実装と同じ背景色('rgba(0, 0, 0, 0.4)')を
-// 手がかりに、モーダル配下でonPressを持つ要素の中から一致するものを探す。
+// 日付一覧モーダルの背景オーバーレイPressableを特定するヘルパー(Issue #84)。実装側は
+// `modalOverlay`スタイルをエクスポートしていないため、同じ背景色を手がかりに探す。
 const MODAL_OVERLAY_BACKGROUND_COLOR = 'rgba(0, 0, 0, 0.4)';
 function getModalOverlayPressable(modal: TestNode): TestNode {
   const overlay = modal
@@ -324,8 +283,7 @@ describe('HomeScreen', () => {
 
     expect(screen.getByText('日記')).toBeTruthy();
 
-    // Let the initial `AsyncStorage.getItem` effect settle so it doesn't leak into
-    // the next test.
+    // 初回読み込みのeffectを完了させ、次のテストに漏れ出さないようにする
     await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
   });
 
@@ -408,17 +366,10 @@ describe('HomeScreen', () => {
   });
 
   describe('背景タップでキーボードを閉じる(Issue #50)', () => {
-    // 実装(`app/(tabs)/index.tsx`)は、TabScreenContainerの中身(タイトル・composer・検索欄・
-    // 検索結果一覧/カレンダー領域)全体を`accessible={false}`な背景タップ用のPressableでラップし、
-    // `onPress={() => Keyboard.dismiss()}`を設定している。
-    //
-    // 注意: `Pressable`はReact.memoでラップされたコンポーネントのため、react-test-rendererの
-    // 内部実装上、メモ化されたフィボの`type`は(元のエクスポート済み参照ではなく)内側の
-    // アンラップされた関数になり、`screen.UNSAFE_getAllByType(Pressable)`では一致しない
-    // (このファイルの他の箇所、例えば`getModalOverlayPressable`が型ではなくprops
-    // (`onPress`/`onStartShouldSetResponder`等)を手がかりに要素を探しているのも同じ理由)。
-    // そのため、背景タップ用Pressableも型ではなく`accessible={false}` + `onPress`を持つという
-    // props の組み合わせを手がかりに`screen.root.findAll`で探す。
+    // `Pressable`はReact.memoでラップされているため、react-test-rendererの内部実装上
+    // メモ化された`type`が内側のアンラップ済み関数になり`screen.UNSAFE_getAllByType(Pressable)`
+    // では一致しない。そのため型ではなく`accessible={false}` + `onPress`のprops組み合わせを
+    // 手がかりに`screen.root.findAll`で探す(`getModalOverlayPressable`も同じ理由)。
     function getBackgroundDismissPressable() {
       const candidates = screen.root.findAll(
         (node: TestNode) =>
@@ -460,7 +411,6 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText('保存'));
 
       await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalled());
-      // 保存自体は正常に行われつつ、背景タップ用ハンドラ(Keyboard.dismiss)は呼ばれていない
       expect(dismissSpy).not.toHaveBeenCalled();
     });
 
@@ -477,16 +427,10 @@ describe('HomeScreen', () => {
       expect(dismissSpy).not.toHaveBeenCalled();
     });
 
-    // FlatList自体はメモ化されていない素のクラスコンポーネント(`class FlatList extends
-    // React.PureComponent`)のため、`Pressable`と異なり`screen.UNSAFE_queryAllByType(FlatList)`で
-    // 直接特定できる(内部で使うVirtualizedList/ScrollView等、propsを転送するだけの下位コンポーネントは
-    // 別の型としてカウントされるため、重複ヒットはしない)。
-    //
-    // また、日付一覧モーダル(`<Modal visible={selectedDate !== null}>`)は、実際のReact Native実装
-    // (`Modal.js`)がiOSでは初回`visible=false`のままだと内部state `isRendered` もfalseのままとなり
-    // `render()`が`null`を返すため、一度も開いていない状態ではモーダル内のFlatListはツリーに
-    // 一切マウントされない(一度trueになった後はisRenderedがtrueのまま保持され、閉じてもマウントされ
-    // 続ける)。そのため、モーダル用FlatListを検証するテストでは先に日付セルをタップして開く必要がある。
+    // FlatListはメモ化されていない素のクラスコンポーネントのため`screen.UNSAFE_queryAllByType(FlatList)`
+    // で直接特定できる。また、日付一覧モーダルはReact Native実装上、一度も開いていない
+    // (visible=falseのまま)状態では内部state `isRendered` もfalseのままで中身がマウントされない
+    // (一度trueになると閉じてもマウントされ続ける)ため、検証には先に日付セルをタップして開く必要がある。
     function queryAllFlatLists() {
       return screen.UNSAFE_queryAllByType(FlatList);
     }
@@ -558,19 +502,14 @@ describe('HomeScreen', () => {
       render(<HomeScreen />);
       await screen.findByText('今日は公園を散歩した');
 
-      // 日付一覧モーダルを開いたまま(閉じない)にしておく。実際のReact Native実装
-      // (`Modal.js`)は、visible=falseに戻った時点でモーダル自体のレンダー結果がnullになり
-      // 内部のFlatListごとアンマウントされてしまう(isRenderedを使ったiOS向けの再表示最適化は
-      // 一度falseに戻る=render()がnullを返す一回のサイクルを経ると効かなくなるため、モーダルを
-      // 閉じずに開いたまま検索欄を操作することで、2つのFlatListが同時にマウントされている
-      // 状態を再現する
+      // 日付一覧モーダルを開いたまま(閉じない)にしておく。visible=falseに戻ると
+      // モーダル内のFlatListがアンマウントされてしまうため、開いたまま検索欄を操作することで
+      // 2つのFlatListが同時にマウントされている状態を再現する
       fireEvent.press(screen.getByText('今日は公園を散歩した'));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
-      // モーダルを開いたままのため、モーダル内の一覧と検索結果一覧の両方に同じ日記が
-      // 表示され「/公園/」に複数マッチしてしまう。ここでは検索結果一覧用のFlatListが
-      // マウントされたこと自体を、対象のFlatListが2つに増えたことで確認する
+      // 検索結果一覧用のFlatListがマウントされたことを、対象のFlatListが2つに増えたことで確認する
       await waitFor(() => expect(queryAllFlatLists()).toHaveLength(2));
 
       const flatLists = queryAllFlatLists();
@@ -588,8 +527,6 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText('保存'));
 
       expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-      // カレンダー上に日記のタイトル(=タップ可能なセル)が一つも表示されないことで
-      // 「何も保存されていない」ことを確認する
       expect(screen.queryAllByRole('button')).toHaveLength(0);
     });
 
@@ -632,9 +569,7 @@ describe('HomeScreen', () => {
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
-      // ネイティブのmaxLength propは指定していないため、onChangeTextハンドラ
-      // (handleChangeDraft内のtruncateToBodyMaxLength)がgrapheme単位で上限を超えた分を
-      // 切り詰めることを直接確認する
+      // maxLength propは指定していないため、handleChangeDraft内のgrapheme単位の切り詰めを直接確認する
       fireEvent.changeText(input, 'あ'.repeat(1001));
 
       expect(input.props.value).toBe('あ'.repeat(1000));
@@ -780,7 +715,6 @@ describe('HomeScreen', () => {
       fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '何か書く');
       expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(1);
 
-      // 入力欄を再び空に戻すと、半透明表示にも戻る
       fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '');
       expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(0.5);
     });
@@ -843,9 +777,7 @@ describe('HomeScreen', () => {
       expect(await screen.findByText('1件目の日記')).toBeTruthy();
       expect(screen.queryByText('2件目の日記')).toBeNull();
 
-      // セルをタップするとその日の全件がモーダルに表示される
-      // (モーダル表示中も背後のカレンダーセルは残るため、先頭の日記のタイトルは
-      // カレンダーセルとモーダル内の一覧の2箇所に表示されることになる)
+      // モーダル表示中も背後のカレンダーセルは残るため、先頭の日記のタイトルは2箇所に表示される
       fireEvent.press(screen.getAllByText('1件目の日記')[0]);
       expect(await screen.findByText('2件目の日記')).toBeTruthy();
       expect(screen.getAllByText('1件目の日記').length).toBeGreaterThanOrEqual(1);
@@ -956,7 +888,6 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      // 保存前は既存の1件目のタイトルがその日のセルに表示されている
       await screen.findByText('過去の日記');
 
       fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '今日の日記');
@@ -975,7 +906,6 @@ describe('HomeScreen', () => {
       expect(screen.getByText('過去の日記')).toBeTruthy();
       expect(screen.queryByText('今日の日記')).toBeNull();
 
-      // タップするとその日の一覧に新しい日記も含めて表示される
       fireEvent.press(screen.getAllByText('過去の日記')[0]);
       expect(await screen.findByText('今日の日記')).toBeTruthy();
       expect(screen.getAllByText('過去の日記').length).toBeGreaterThanOrEqual(1);
@@ -1030,7 +960,6 @@ describe('HomeScreen', () => {
       expect(input.props.value).toBe('今日の日記');
       expect(screen.getByText('過去の日記')).toBeTruthy();
 
-      // モーダルを開いても新しい日記は含まれず、既存の1件のみが表示される
       fireEvent.press(screen.getByText('過去の日記'));
       await screen.findByText(CLOSE_BUTTON_TEXT);
       expect(screen.queryByText('今日の日記')).toBeNull();
@@ -1068,7 +997,6 @@ describe('HomeScreen', () => {
       // pendingの間にユーザーが新しい下書きを書き始める
       fireEvent.changeText(input, '書きかけの新しい下書き');
 
-      // ここで保存が失敗する
       rejectSetItem(new Error('write failed'));
 
       expect(await screen.findByText('保存に失敗しました。もう一度お試しください。')).toBeTruthy();
@@ -1111,7 +1039,6 @@ describe('HomeScreen', () => {
       fireEvent.changeText(input, '書きかけの新しい下書き');
       fireEvent.changeText(input, '');
 
-      // ここで保存が失敗する
       rejectSetItem(new Error('write failed'));
 
       expect(await screen.findByText('保存に失敗しました。もう一度お試しください。')).toBeTruthy();
@@ -1153,7 +1080,6 @@ describe('HomeScreen', () => {
       // pendingの間にユーザーが新しい下書きを書き始める
       fireEvent.changeText(input, '書きかけの新しい下書き');
 
-      // ここで保存が成功する
       resolveSetItem();
       await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
 
@@ -1420,8 +1346,6 @@ describe('HomeScreen', () => {
     });
 
     it('does not warn about updating state after unmount when the initial draft restore resolves after the screen has already been unmounted', async () => {
-      // マウント時の下書き復元(AsyncStorage.getItem)がまだ解決していないうちに
-      // 画面がアンマウントされ、その後に解決した場合の挙動を検証する
       let resolveDraftRead: (value: string | null) => void = () => {};
       // `@react-native-async-storage/async-storage/jest/async-storage-mock`の各メソッドは
       // 元々jest.fn()として定義されているため、`jest.spyOn`はそれを新規にラップし直さず
@@ -1469,10 +1393,8 @@ describe('HomeScreen', () => {
     });
 
     it('does not clear the auto-saved draft key when saving the diary entry fails, so it remains recoverable on next launch', async () => {
-      // Issue #54の実装では、下書きキーのクリア(removeItem)はhandleSave成功時のみ
-      // 実行される(enqueueDiaryWriteが失敗した場合はcatch節に分岐しremoveItemへ到達しない)。
-      // 保存に失敗したのに下書きが消えてしまうと、ユーザーが再入力した内容も次回起動時の
-      // 復元対象も両方失われてしまうため、この境界を明示的に検証する
+      // 下書きキーのクリア(removeItem)はhandleSave成功時のみ実行される(Issue #54)。
+      // 保存失敗時に下書きまで消えると、次回起動時の復元対象も失われてしまうため、この境界を検証する
       await AsyncStorage.setItem(DRAFT_STORAGE_KEY, '保存に失敗する日記');
       jest.clearAllMocks();
 
@@ -1489,13 +1411,8 @@ describe('HomeScreen', () => {
     });
 
     it('does not leave an unhandled promise rejection when the initial draft restore getItem() call rejects, and still enables auto-save afterward (regression for the f63bc33 fix)', async () => {
-      // `@react-native-async-storage/async-storage/jest/async-storage-mock`の各メソッドは
-      // 元々jest.fn()として定義されているため、`jest.spyOn`はそれを新規にラップし直さず
-      // 既存のmock関数をそのまま返す。その状態で`mockRestore()`を呼んでも「スパイ前の
-      // 実装」には戻らず、常に`undefined`を返す空のmockにリセットされてしまう
-      // (`jest.spyOn`は非mock関数に対して使う場合のみ本来の意味で機能する既知の挙動)。
-      // そのため、他のテストへ実装を安全に戻すには、上書き前の実装を明示的に保存しておき、
-      // finallyで`mockImplementation(元の実装)`により復元する
+      // async-storage-mockは元々jest.fn()のため、jest.spyOnの`mockRestore()`では元の実装に
+      // 戻らない(既知の挙動)。上書き前の実装を保存しておき、finallyで明示的に復元する
       const originalGetItemImpl = (AsyncStorage.getItem as jest.Mock).getMockImplementation();
       // 下書きキー(diary-draft)へのgetItemのみrejectさせ、他のキーへの呼び出しは通常通り解決させる
       const getItemSpy = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key: string) => {
@@ -1551,12 +1468,10 @@ describe('HomeScreen', () => {
   });
 
   describe('保存成功時のフィードバック(Issue #55)', () => {
-    // 実装(`app/(tabs)/index.tsx`)はハプティックを`process.env.EXPO_OS === 'ios'`の条件下でのみ
-    // 発火させるが、`process.env.EXPO_OS`はbabel-preset-expo(jest-expoのデフォルト設定では
-    // `platform: 'ios'`固定)によってビルド時にリテラル値へインライン化されるため、
-    // テスト実行中に`process.env.EXPO_OS`を書き換えても実装側の分岐には反映されない
-    // (jest-expo/jest-preset.jsのbabelOpts参照)。そのため、iOS向けにインライン化された
-    // 状態(=常にiOS相当として振る舞う)でのハプティック発火のみを検証する。
+    // 実装はハプティックを`process.env.EXPO_OS === 'ios'`の条件下でのみ発火させるが、
+    // `process.env.EXPO_OS`はbabel-preset-expo(jest-expoのデフォルトで'ios'固定)によって
+    // ビルド時にインライン化されるため、テスト実行中に書き換えても分岐には反映されない。
+    // そのため、常にiOS相当として振る舞う状態でのハプティック発火のみを検証する。
     it('shows a toast with a success message, exposed via accessibilityLiveRegion="polite", after a successful save', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
@@ -1609,10 +1524,8 @@ describe('HomeScreen', () => {
         await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalled());
         expect(await screen.findByText('保存しました')).toBeTruthy();
 
-        // トースト表示中に、ユーザーが次の日記の入力を続ける(=onChangeTextのたびにHomeScreenが
-        // 再レンダーされる)。onHideが毎レンダーで再生成される実装だと、SaveToast側の
-        // useEffect(依存配列に[message, onHide])が再実行され続け、自動非表示タイマーが
-        // 都度張り直されてしまう(最初の表示から2.5秒経っても消えない)。
+        // トースト表示中に入力を続けHomeScreenを再レンダーさせる。onHideが毎レンダーで
+        // 再生成される実装だと、SaveToast側のuseEffectが再実行され続けタイマーが張り直されてしまう。
         act(() => {
           jest.advanceTimersByTime(1000);
         });
@@ -1702,9 +1615,8 @@ describe('HomeScreen', () => {
   });
 
   describe('空状態(日記が0件)の案内メッセージ', () => {
-    // Issue #39: 初回読み込み中(AsyncStorage.getItemがまだ解決していない間)は、
-    // entriesの初期値が空配列であることに起因して空状態メッセージが一瞬誤って
-    // 表示されてしまわないよう、代わりにローディング表示(ActivityIndicator)を出す。
+    // Issue #39: 初回読み込み中はentriesの初期値が空配列であることに起因して空状態メッセージが
+    // 一瞬誤って表示されてしまわないよう、代わりにローディング表示(ActivityIndicator)を出す。
     it('shows a loading indicator instead of the empty state message before the async AsyncStorage load resolves (regression for Issue #39: prevents the empty state from flashing)', async () => {
       // AsyncStorage.getItemの解決タイミングを呼び出し側から制御できるようにし、
       // 読み込みが完了する前の状態を確実に検証できるようにする
@@ -1770,10 +1682,8 @@ describe('HomeScreen', () => {
     });
 
     // Issue #39: isLoadingは初回読み込み完了時にfalseへ遷移した後は二度とtrueへ戻らない仕様。
-    // useFocusEffectによりタブへ再フォーカスするたびにloadEntriesは再実行されるが、
-    // その都度ローディング表示がちらつかないことを確認する
-    // (expo-routerのuseFocusEffectモックはマウント時に一度だけ発火するため、
-    // 再フォーカスはunmount/再mountすることで模す。既存の同種のテストと同じ手法)。
+    // タブへ再フォーカスするたびにloadEntriesは再実行されるが、その都度ローディング表示が
+    // ちらつかないことを確認する。
     it('does not show the loading indicator again on a subsequent focus refetch (regression for Issue #39: isLoading only ever transitions true -> false, never back to true)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
@@ -1782,9 +1692,8 @@ describe('HomeScreen', () => {
         JSON.stringify([{ id: '1', text: '既存の日記', createdAt: isoAt(now, dayWithEntry) }]),
       );
 
-      // 1回目のフォーカス(初回マウント)。ここで画面はアンマウントせず、そのまま
-      // Reactのstate(isLoading)を保持し続ける(実機のexpo-router Tabsが
-      // タブ画面をアンマウントしないのと同じ状況を再現する)
+      // 1回目のフォーカス(初回マウント)。画面はアンマウントせず、そのままstate(isLoading)を
+      // 保持し続ける(実機のexpo-router Tabsがタブ画面をアンマウントしないのと同じ状況)
       render(<HomeScreen />);
       expect(await screen.findByText('既存の日記')).toBeTruthy();
       expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
@@ -1798,9 +1707,8 @@ describe('HomeScreen', () => {
           }),
       );
 
-      // 画面をアンマウントせずに、タブへの再フォーカス(useFocusEffectの再実行)のみを模す。
-      // なお、マウント時には日記本文(STORAGE_KEY)に加えて下書き復元用(diary-draft)の
-      // AsyncStorage.getItemも1回呼ばれているため(Issue #54)、再フォーカス後の合計は3回になる
+      // マウント時には日記本文(STORAGE_KEY)に加えて下書き復元用(diary-draft)のgetItemも
+      // 1回呼ばれているため(Issue #54)、再フォーカス後の合計は3回になる
       act(() => {
         (triggerRefocus as () => void)();
       });
@@ -1879,10 +1787,9 @@ describe('HomeScreen', () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      // 「2026年8月」のように年→月の順で見出しが表示される(矢印の間に埋もれず視認できること)。
       // react-native-calendarsのヘッダーは`importantForAccessibility="no-hide-descendants"`で
-      // 内部テキストをアクセシビリティツリーから隠しているため、`includeHiddenElements`を指定して検索する
-      // (画面上には通常どおり表示されており、アクセシビリティツリーからのみ隠れている)。
+      // 内部テキストをアクセシビリティツリーから隠している(画面上には表示されている)ため、
+      // `includeHiddenElements`を指定して検索する。
       expect(
         await screen.findByText(`${now.getFullYear()}年${now.getMonth() + 1}月`, {
           includeHiddenElements: true,
@@ -1950,10 +1857,8 @@ describe('HomeScreen', () => {
     it('does not split a surrogate-pair emoji in the middle when truncating (regression: Issue #71)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
-      // '😀'はサロゲートペア(UTF-16で2コードユニット)で表現される絵文字。
-      // 19文字の通常文字 + 絵文字1つ(見た目上20文字)+ 文字化けを誘発しやすい末尾の文字、
-      // という構成で、単純なUTF-16コードユニット単位のslice(0, 20)だと絵文字の
-      // 途中(サロゲートの片割れ)で切れてしまう境界を狙う
+      // '😀'はサロゲートペア(UTF-16で2コードユニット)の絵文字。単純なUTF-16単位のslice(0, 20)
+      // だと絵文字の途中(サロゲートの片割れ)で切れてしまう境界を狙う構成
       const text = `${'あ'.repeat(19)}😀切れたら文字化け`;
       await AsyncStorage.setItem(
         STORAGE_KEY,
@@ -1970,10 +1875,8 @@ describe('HomeScreen', () => {
     it('does not split a ZWJ-joined family emoji in the middle when truncating (regression: Issue #71)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
-      // '👨\u200d👩\u200d👧\u200d👦'(家族)はZWJ(Zero Width Joiner)で複数の絵文字コードポイントを
-      // 結合した単一の書記素クラスタ。サロゲートペアのみを考慮するArray.from()による
-      // コードポイント単位の分割だと、ZWJや個別の絵文字コードポイントの境目で
-      // 途中が分断されてしまう(Intl.Segmenterのgrapheme単位分割でのみ正しく1文字として扱える)
+      // ZWJ(Zero Width Joiner)で複数の絵文字コードポイントを結合した家族の絵文字(単一の書記素
+      // クラスタ)。コードポイント単位の分割(Array.from())だと境目で分断されてしまう構成
       const family = '👨\u200d👩\u200d👧\u200d👦';
       const text = `${'う'.repeat(19)}${family}途中で切れたら文字化け`;
       await AsyncStorage.setItem(
@@ -2029,10 +1932,8 @@ describe('HomeScreen', () => {
       await screen.findByText('日記あり');
 
       // 日記が無い日のセルはタップ可能な要素(accessibilityRole="button")として描画されない
-      // (=タイトルは何も表示されておらず、押せない)
       expect(screen.queryAllByRole('button')).toHaveLength(1);
 
-      // 日記が無い日の日付セル自体は表示されているが、タップしても何も起きない
       const emptyDayCell = screen.getByText(String(dayWithoutEntry));
       fireEvent.press(emptyDayCell);
       expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull();
@@ -2238,14 +2139,9 @@ describe('HomeScreen', () => {
       });
 
       it('sets onStartShouldSetResponder on the modal content so a touch starting inside it is claimed there and does not propagate to the overlay Pressable behind it (境界値: propagation guard implementation contract)', async () => {
-        // @testing-library/react-nativeのfireEvent.pressは、ネイティブのタッチレスポンダー交渉
-        // (深い階層から浅い階層へ`onStartShouldSetResponder`を問い合わせ、最初に受理した階層が
-        // タッチを専有する仕組み)を完全には再現できない(常に最も近い有効なonPressハンドラを
-        // 呼び出すだけの簡易シミュレーションのため)。そのため、「一覧やヘッダーの余白など、
-        // それ自体に押下ハンドラを持たない領域をタップしても閉じない」という挙動そのものは
-        // fireEventで直接再現できず、代わりに実装が伝播を止めるためのガード
-        // (`onStartShouldSetResponder={() => true}`)が実際に設定され、trueを返す
-        // (=タッチを専有し、背景オーバーレイへ伝播させない)ことを直接検証する。
+        // fireEvent.pressはネイティブのタッチレスポンダー交渉を完全には再現できないため、
+        // 「余白タップで閉じない」という挙動そのものではなく、実装のガード
+        // (`onStartShouldSetResponder={() => true}`)が実際に設定されtrueを返すことを直接検証する。
         const now = new Date();
         const { dayWithEntry } = pickTestDays(now);
         await AsyncStorage.setItem(
@@ -2353,12 +2249,9 @@ describe('HomeScreen', () => {
   });
 
   describe('カレンダーセルの複数件数バッジ(Issue #72)', () => {
-    // 同じ日に2件以上の日記がある場合、カレンダーセルの右上に「+N」(2件目以降の件数)の
-    // バッジを表示する。実装(renderDay)の`extraEntryCount = dayEntries.length - 1`を
-    // ホワイトボックスで踏まえつつ、実際のレンダリング結果(バッジのテキスト有無・内容)を
-    // ブラックボックスに検証する。バッジの本体View(styles.entryCountBadge)は
-    // `minWidth: 16, height: 16`という一意な組み合わせのスタイルを持つため、
-    // それを目印にView自体を特定するヘルパーを用意する。
+    // 同じ日に2件以上の日記がある場合、カレンダーセルの右上に「+N」の件数バッジを表示する。
+    // バッジの本体View(styles.entryCountBadge)は`minWidth: 16, height: 16`という
+    // 一意な組み合わせのスタイルを持つため、それを目印にView自体を特定するヘルパーを用意する。
     function findEntryCountBadgeViews() {
       return screen.UNSAFE_getAllByType(View).filter((node) => {
         const flattened = StyleSheet.flatten(node.props.style ?? {});
@@ -2516,11 +2409,9 @@ describe('HomeScreen', () => {
       await screen.findByText('朝の日記');
       expect(screen.getByText('+1')).toBeTruthy();
 
-      // 同じ日の日記を新たに保存すると、保存対象の日付は今日(now)なので、
-      // dayWithEntryが今日自身の場合のみ検証可能。保存欄からの追加は
-      // 「今日」の日付にしか保存できない実装のため、pickTestDaysが選ぶ範囲(10〜20日)と
-      // 実行日が一致しない限りこのテストでは直接は再現できない。
-      // そのため、AsyncStorageへ直接3件目を追記して再フォーカス相当の再読み込みを模す。
+      // 保存欄からの追加は「今日」の日付にしか保存できない実装のため、pickTestDaysが選ぶ範囲
+      // (10〜20日)と実行日が一致しない限り直接は再現できない。そのためAsyncStorageへ直接
+      // 3件目を追記して再フォーカス相当の再読み込みを模す。
       const key = await getOrCreateEncryptionKey();
       const threeEntries = [
         ...storedEntries,
@@ -2535,18 +2426,14 @@ describe('HomeScreen', () => {
   });
 
   describe('日付セルのフォント拡大率の上限(maxFontSizeMultiplier)', () => {
-    // OSの文字サイズ設定(アクセシビリティのフォント拡大・Dynamic Type)を拡大しても、
-    // 日付セル内のテキスト(日付番号・日記タイトル)が際限なく拡大されて最下段の週が
-    // 見切れてしまわないよう、`maxFontSizeMultiplier`で拡大率の上限が指定されていることを検証する。
-    // react-native-calendars自体の月見出し・曜日行はライブラリ内部で常に
-    // `allowFontScaling={false}`が指定されており対象外のため、ここでは検証しない。
+    // OSの文字サイズ設定を拡大しても日付セル内テキストが際限なく拡大され最下段の週が
+    // 見切れないよう、`maxFontSizeMultiplier`で上限が指定されていることを検証する。
+    // react-native-calendars自体の月見出し・曜日行は常に`allowFontScaling={false}`のため対象外。
     const EXPECTED_MAX_FONT_SCALE = 1.5;
 
     it('caps the font scale multiplier at a value greater than 1 but not unbounded (sanity check on the constant itself)', () => {
-      // 実装側の定数はモジュール外にexportされていないため、直接importはできないが、
-      // 「等倍(1)ではなく拡大を許容しつつも、無制限ではない妥当な値」であることは
-      // 以下の各テストで実際にレンダリングされるpropsの値として確認できる。
-      // ここではその期待値自体が1(拡大を許さない)や極端に大きい値(実質無制限)ではないことを明記する。
+      // 実装側の定数はモジュール外にexportされていないため、期待値自体が1(拡大なし)や
+      // 極端に大きい値(実質無制限)ではない妥当な範囲であることをここで明記する
       expect(EXPECTED_MAX_FONT_SCALE).toBeGreaterThan(1);
       expect(EXPECTED_MAX_FONT_SCALE).toBeLessThanOrEqual(2);
     });
@@ -2610,17 +2497,11 @@ describe('HomeScreen', () => {
   });
 
   describe('formatEntryDateTime のゼロパディング(境界値)', () => {
-    // `Calendar` は current/initialDate を指定していないため、実行時点の実際の月を表示する。
-    // `jest.useFakeTimers`でシステム時刻を差し替えても、`react-native-calendars`が内部で使う
-    // `xdate`ライブラリはモジュール読み込み時にネイティブの`Date`をIIFEのクロージャに
-    // 固定的に保持する実装になっており、後からのフェイクタイマーが反映されない
-    // (実際に検証済み)。そのため「表示月そのもの」を差し替える必要があるうるう年・
-    // 年またぎのようなケースは、この方式では決定的にテストできない。
-    // 一方、日・時・分は実行時点の実際の月の範囲内であれば自由に選べるため、
-    // それぞれ1桁の値でゼロパディングされることを検証する。
-    // (期待値はformatEntryDateTime実装のpadStartをそのまま模倣せず、
-    // 別ロジックのpadTwoで計算することで、実装と同じ勘違いをテスト側で
-    // 見逃してしまうリスクを減らす)
+    // `react-native-calendars`が内部で使う`xdate`はモジュール読み込み時にネイティブの`Date`を
+    // 固定的に保持するため`jest.useFakeTimers`が反映されず、うるう年・年またぎ等の「表示月そのもの」
+    // を差し替えるケースは決定的にテストできない。実行時点の月の範囲内で日・時・分を選び、
+    // それぞれ1桁の値でゼロパディングされることを検証する(期待値は実装のpadStartを模倣せず
+    // 別ロジックのpadTwoで計算し、実装と同じ勘違いを見逃さないようにする)。
     function padTwo(n: number): string {
       return n < 10 ? `0${n}` : `${n}`;
     }
@@ -2866,10 +2747,8 @@ describe('HomeScreen', () => {
       });
 
       it('sets onStartShouldSetResponder on the edit modal content so a touch starting inside it is claimed there and does not propagate to the overlay Pressable behind it (境界値: propagation guard implementation contract)', async () => {
-        // @testing-library/react-nativeのfireEvent.pressはネイティブのタッチレスポンダー交渉を
-        // 完全には再現できないため(Issue #84のテストと同様の理由)、実装が伝播を止めるためのガード
-        // (`onStartShouldSetResponder={() => true}`)が編集モーダルのmodalContentにも実際に設定され、
-        // trueを返す(=タッチを専有し、背景オーバーレイへ伝播させない)ことを直接検証する。
+        // fireEvent.pressの制約(Issue #84のテストと同様の理由)により、実装が伝播を止める
+        // ガード(`onStartShouldSetResponder={() => true}`)が編集モーダルにも設定されtrueを返すことを直接検証する。
         const now = new Date();
         const { dayWithEntry } = pickTestDays(now);
         await AsyncStorage.setItem(
@@ -2925,7 +2804,6 @@ describe('HomeScreen', () => {
       fireEvent.changeText(editInput, '編集後の日記');
       fireEvent.press(getEditSaveButton());
 
-      // 保存(AsyncStorageへの暗号化書き込み)が呼ばれる
       await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
       const [savedKey, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
       expect(savedKey).toBe(STORAGE_KEY);
@@ -3017,9 +2895,7 @@ describe('HomeScreen', () => {
       await screen.findByText('日記を編集');
 
       const editInput = screen.getByDisplayValue('文字数上限確認用');
-      // ネイティブのmaxLength propは指定していないため、onChangeTextハンドラ
-      // (handleChangeEditDraft内のtruncateToBodyMaxLength)がgrapheme単位で
-      // 上限を超えた分を切り詰めることを直接確認する
+      // maxLength propは指定していないため、handleChangeEditDraft内のgrapheme単位の切り詰めを直接確認する
       fireEvent.changeText(editInput, 'あ'.repeat(1001));
 
       expect(editInput.props.value).toBe('あ'.repeat(1000));
@@ -3109,8 +2985,7 @@ describe('HomeScreen', () => {
 
     it('resets isSavingEdit after a save failure, re-enabling the save button so a retry can succeed (異常系→正常系, Issue #137 guard boundary)', async () => {
       // handleSaveEditはtry/finallyでisSavingEditを必ずfalseへ戻すため、保存失敗直後でも
-      // ガードで弾かれずに再度保存できるはず。これを確認することで、finallyブロックの実装が
-      // 正しく効いていること(失敗時にガードが解除されずロックされたままにならないこと)を検証する
+      // ガードで弾かれずに再度保存できるはず(finallyブロックが正しく効いていることの検証)
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -3149,10 +3024,8 @@ describe('HomeScreen', () => {
     });
 
     it('ignores a second press of the edit save button while an update is still in flight, preventing a duplicate write (Issue #137)', async () => {
-      // 編集モーダルの保存ボタンの連打(タップと同時に発生する複数のonPressイベントを含む)によって
-      // 同一の更新処理(AsyncStorage.setItem)が重複して実行されないことを確認する。
-      // handleSaveの連打防止テスト(Issue #70)と同様、AsyncStorage.setItemの解決を意図的に
-      // 遅延させ、その完了前に2回目のpressを発火させる
+      // 編集モーダルの保存ボタン連打で同一の更新処理が重複実行されないことを確認する。
+      // handleSaveの連打防止テスト(Issue #70)と同様、setItemの解決を意図的に遅延させる
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -3405,12 +3278,9 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
       jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
-      // 1回目(Aの削除の永続化)と2回目(Bの編集の永続化)のsetItemの解決タイミングを
-      // それぞれ個別に制御できるようにしておく。実際のストレージへの書き込み自体は
-      // 呼び出し直前に捕まえておいた元の実装(spyOnで差し替える前のsetItem)経由で行い、
-      // 「完了タイミングだけを遅延させる」ようにする(単に解決を遅らせるだけだと、
-      // 実際のAsyncStorageへは書き込まれないまま次のタスクが読み直してしまい、
-      // 直列化の検証にならないため)
+      // 1回目(Aの削除)・2回目(Bの編集)のsetItemの解決タイミングを個別に制御する。実際の書き込みは
+      // 元の実装(spyOn前のsetItem)経由で行い「完了タイミングだけ遅延させる」(単に解決を遅らせる
+      // だけだと実際には書き込まれないまま次のタスクが読み直してしまい、直列化の検証にならない)
       const originalSetItem = AsyncStorage.setItem;
       let resolveDeleteWrite: () => void = () => {};
       let resolveEditWrite: () => void = () => {};
@@ -3624,11 +3494,8 @@ describe('HomeScreen', () => {
         (triggerRefocus as () => void)();
       });
 
-      // 修正前の実装では、ここでloadEntries内のgetAllDiaryEntries()がpending中の書き込みを
-      // 待たずに即座にAsyncStorageを読み直してしまい、まだ反映されていない古い内容
-      // (新しい日記を含まない状態)で一覧を上書きしてしまっていた。修正後は、pending中の
-      // 書き込みがある間はキューの完了を待ってから読み直すため、この時点では追加の
-      // AsyncStorage.getItem呼び出しは発生しない
+      // 修正前は、pending中の書き込みを待たずに即座にAsyncStorageを読み直し、まだ反映されていない
+      // 古い内容で一覧を上書きしてしまっていた。修正後はキューの完了を待つため追加のgetItem呼び出しは発生しない
       expect(getItemMock.mock.calls.length).toBe(getItemCallsWhilePending);
       // 読み直しがブロックされている間も、楽観的更新済みの新しい日記の表示が古い状態へ
       // 巻き戻ってちらつくことはない
@@ -3828,7 +3695,6 @@ describe('HomeScreen', () => {
       await screen.findByText('今日は公園を散歩した');
 
       const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
-      // 大文字小文字を区別しない部分一致であることを確認するため、あえて半角大文字を混ぜる
       fireEvent.changeText(searchInput, '公園');
 
       expect(await screen.findByText(/公園/)).toBeTruthy();

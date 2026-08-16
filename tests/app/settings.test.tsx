@@ -20,36 +20,25 @@ import {
 } from '@/contexts/theme-preference-context';
 import { DIARY_ENTRIES_STORAGE_KEY } from '@/utils/diary-storage';
 
-// 実機では`expo-router`の`ExpoRoot`が自動的に`SafeAreaProvider`で全体をラップするが、
-// このテストでは`SettingsScreen`を単体でレンダリングするため、そのラップが存在しない。
-// `useSafeAreaInsets`(内部で`TabScreenContainer`が利用する)は`SafeAreaProvider`配下でないと
-// エラーを投げるため、`tests/app/index.test.tsx`と同様にライブラリ公式のjestモック
-// (常にゼロインセットを返す)に差し替える。
+// 実機では`expo-router`の`ExpoRoot`が自動的に`SafeAreaProvider`で全体をラップするが、単体
+// レンダリングではそのラップが無く`useSafeAreaInsets`がエラーを投げるため(`tests/app/index.test.tsx`
+// と同様)、ライブラリ公式のjestモック(常にゼロインセットを返す)に差し替える。
 jest.mock(
   'react-native-safe-area-context',
-  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
-  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   () => require('react-native-safe-area-context/jest/mock').default,
 );
 
-// `settings.tsx`は削除ボタンから`clearAllDiaryEntries`(内部で`AsyncStorage.removeItem`を呼ぶ)を
-// 利用するようになったため、ネイティブの`AsyncStorage`モジュールが存在しないJest環境では
-// `NativeModule: AsyncStorage is null`エラーになる。`tests/app/index.test.tsx`と同様、
-// パッケージ公式のインメモリモックに差し替える。
+// `settings.tsx`は削除ボタンから`clearAllDiaryEntries`(内部で`AsyncStorage.removeItem`)を利用する
+// ため、ネイティブの`AsyncStorage`が存在しないJest環境では公式のインメモリモックに差し替える。
 jest.mock('@react-native-async-storage/async-storage', () =>
-  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
-  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
-// `app/(tabs)/settings.tsx`は「リマインダー」セクション(Issue #92)から
-// `contexts/diary-reminder-context.tsx`経由で`utils/diary-reminder-notifications.ts`
-// (expo-notificationsの薄いラッパー)を利用する。実際のネイティブ通知APIを呼ばずに
-// 許可リクエスト・スケジュール登録/キャンセルの呼び出しを検証できるよう、ラッパーごとモック化する
-// (tests/utils/diary-reminder-notifications.test.ts、tests/contexts/diary-reminder-context.test.tsx
-// で個別に検証済みのものを、画面からの結線確認のためにここでも薄く検証する)。
+// 「リマインダー」セクション(Issue #92)が使う`utils/diary-reminder-notifications.ts`
+// (expo-notificationsの薄いラッパー)を、実際のネイティブ通知APIを呼ばずに検証できるようモック化する
+// (個別の挙動はtests/utils/diary-reminder-notifications.test.ts等で検証済み。ここでは結線確認のみ)。
 jest.mock('@/utils/diary-reminder-notifications', () => ({
   getReminderPermissionStatusAsync: jest.fn(() => Promise.resolve('undetermined')),
   requestReminderPermissionAsync: jest.fn(() => Promise.resolve('undetermined')),
@@ -57,16 +46,10 @@ jest.mock('@/utils/diary-reminder-notifications', () => ({
   cancelDailyReminderAsync: jest.fn(() => Promise.resolve()),
 }));
 
-// `expo-file-system`(新API)はJest環境ではネイティブモジュールが存在せず、`Paths.cache`を
-// 参照した時点で例外になる(実機ではキャッシュディレクトリを指す`Directory`インスタンスが返る)。
-// エクスポート機能の正常系(ファイル書き出し→共有)を検証するため、固定のURIを返す`Paths.cache`と、
-// 書き込み内容を記録できる`File`のモックに差し替える。
-//
-// `Paths.cache`を一部のテストで「取得できない」状態(実機ではキャッシュディレクトリの参照自体が
-// 例外を投げる状況を想定)に上書きしたいが、状態を外側のクロージャ変数(`state`)に持たせることで、
-// このテストファイルと`app/(tabs)/settings.tsx`のどちらの`import`経由でも同じ実体を読み書きできる。
-// `File#write`は同期メソッド(Promiseを返さない)のため、書き込み内容の検証や書き込み失敗の
-// シミュレーションは単一のjest.fn(`write`)への差し替えで行う。
+// `expo-file-system`(新API)はJest環境ではネイティブモジュールが存在せず、`Paths.cache`の参照時点で
+// 例外になるため、固定のURIを返す`Paths.cache`と書き込み内容を記録できる`File`のモックに差し替える。
+// `Paths.cache`を「取得できない」状態に上書きできるよう外側のクロージャ変数(`state`)に持たせ、
+// テストファイルと`app/(tabs)/settings.tsx`のどちらの`import`経由でも同じ実体を読み書きできるようにする。
 jest.mock('expo-file-system', () => {
   const state: { cacheDirectoryUri: string | null } = { cacheDirectoryUri: 'file:///mock-cache/' };
   const write = jest.fn();
@@ -112,8 +95,6 @@ jest.mock('expo-sharing', () => ({
 // このテストでは各リンクの`href`が正しいことも検証したいため、`href`を`testID`として
 // 可視化する薄いモックにしている。
 jest.mock('expo-router', () => {
-  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
-  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const ReactForMock = require('react');
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -226,12 +207,10 @@ describe('SettingsScreen', () => {
   it('renders the "設定" tab content without crashing when the ThemedText/ThemedView wrap each link (regression check)', () => {
     render(<SettingsScreen />);
 
-    // 直接ThemedTextを描画確認するSmokeテスト
     expect(screen.UNSAFE_getAllByType(Text).length).toBeGreaterThan(0);
   });
 
-  // Issue #125: 設定タブがステータスバー/ノッチ領域と重なる不具合の回帰テスト。
-  // セーフエリア対応は共通コンポーネント`TabScreenContainer`に委ねているため、
+  // Issue #125: セーフエリア対応は共通コンポーネント`TabScreenContainer`に委ねているため、
   // ここではその外側ラッパーに正しくインセットが伝播していることのみを検証する。
   describe('セーフエリア対応(Issue #125: ステータスバー/ノッチ領域との重なり防止)', () => {
     it('does not add extra top padding via TabScreenContainer when the safe area top inset is zero', () => {
@@ -312,11 +291,9 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
     jest.clearAllMocks();
   });
 
-  // Alert.alertは実機ではネイティブダイアログを表示するが、テスト環境では
-  // jest.spyOnでモック化した上で、直近の呼び出しに渡されたボタン定義から
-  // 指定ラベルのonPressを直接呼び出すことで「ユーザーがそのボタンをタップした」ことを模倣する。
-  // onPress自体が状態更新を伴う非同期処理(handleDelete)を呼び出すため、actで包んで
-  // Reactのバッチ更新がテスト側に反映されるのを待つ。
+  // Alert.alertをモック化した上で、直近の呼び出しに渡されたボタン定義から指定ラベルのonPressを
+  // 直接呼び出すことで「ユーザーがそのボタンをタップした」ことを模倣する。onPress自体が状態更新を
+  // 伴う非同期処理(handleDelete)を呼び出すため、actで包んで反映を待つ。
   async function pressAlertButton(label: string) {
     const alertMock = Alert.alert as jest.Mock;
     const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
@@ -349,7 +326,6 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
     expect(buttons[0]).toMatchObject({ text: 'キャンセル', style: 'cancel' });
     expect(buttons[1]).toMatchObject({ text: '削除する', style: 'destructive' });
 
-    // ダイアログを表示しただけの段階では削除処理はまだ呼ばれていない
     expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
   });
 
@@ -362,7 +338,6 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
     await pressAlertButton('キャンセル');
 
     expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
-    // AsyncStorage上のデータもそのまま残っている
     expect(await AsyncStorage.getItem(DIARY_ENTRIES_STORAGE_KEY)).toBe(
       'encrypted:v1:dummy-payload',
     );
@@ -370,7 +345,6 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
 
   it('deletes all diary data from AsyncStorage and shows a completion alert once confirmed (正常系: 削除の実行と完了通知)', async () => {
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-    // 削除前に実際に日記データが保存されている状態を用意する
     await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, 'encrypted:v1:dummy-payload');
     render(<SettingsScreen />);
 
@@ -380,7 +354,6 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
     await waitFor(() =>
       expect(AsyncStorage.removeItem).toHaveBeenCalledWith(DIARY_ENTRIES_STORAGE_KEY),
     );
-    // 受け入れ条件: 削除後、AsyncStorageから該当データが実際に消えていること
     expect(await AsyncStorage.getItem(DIARY_ENTRIES_STORAGE_KEY)).toBeNull();
 
     await waitFor(() =>
@@ -407,9 +380,8 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
     );
   });
 
-  // Issue #167: 削除処理中(isDeleting === true)は誤って連続タップされないよう、
-  // 視覚的にも判別できるようボタンを半透明化(opacity: 0.5)しaccessibilityState.disabledを
-  // trueにする。処理完了後は元の見た目(opacity: 1, disabled: false)に戻ることも合わせて確認する。
+  // Issue #167: 削除処理中(isDeleting === true)は誤って連続タップされないよう、ボタンを
+  // 半透明化(opacity: 0.5)しaccessibilityState.disabledをtrueにする。完了後は元に戻る。
   it('dims the button (opacity 0.5) and sets accessibilityState.disabled to true while deleting, then restores both once finished (Issue #167: 処理中の視覚的フィードバック)', async () => {
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     // AsyncStorage.removeItemが完了するまで解決しないPromiseにして、処理中の一瞬の状態を検証する
@@ -449,13 +421,10 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
   });
 
   // Issue #146: 削除ボタンの文字色が固定のライトモード用エラー色のままダークモードでも
-  // 使われてしまっていた不具合の回帰テスト。app/(tabs)/index.tsxと同様に
-  // useThemeColor({}, 'error')経由でライト/ダークそれぞれのテーマに応じた色が
-  // 適用されることを確認する。
+  // 使われてしまっていた不具合の回帰テスト。
   describe('ダークモード対応(Issue #146: 削除ボタンの文字色)', () => {
-    // 実機では`app/_layout.tsx`の`RootLayout`が全画面を`ThemePreferenceProvider`でラップするが、
-    // このテストでは`SettingsScreen`を単体でレンダリングするため、そのラップが存在しない。
-    // 配色の切り替えを検証するため、外観セクションのテストと同様に明示的にラップする。
+    // 単体レンダリングでは実機の`RootLayout`によるラップが無いため、配色切り替えを検証するには
+    // 外観セクションのテストと同様に明示的に`ThemePreferenceProvider`でラップする必要がある。
     function renderSettingsScreen() {
       return render(
         <ThemePreferenceProvider>
@@ -566,7 +535,6 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
       UTI: 'public.json',
     });
 
-    // 失敗系のAlertは呼ばれていないこと
     expect(Alert.alert).not.toHaveBeenCalled();
   });
 
@@ -628,15 +596,13 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
     );
   });
 
-  // Issue #167: エクスポート処理中(isExporting === true)は誤って連続タップされないよう、
-  // 視覚的にも判別できるようボタンを半透明化(opacity: 0.5)しaccessibilityState.disabledを
-  // trueにする。処理完了後は元の見た目(opacity: 1, disabled: false)に戻ることも合わせて確認する。
+  // Issue #167: エクスポート処理中(isExporting === true)は誤って連続タップされないよう、ボタンを
+  // 半透明化(opacity: 0.5)しaccessibilityState.disabledをtrueにする。完了後は元に戻る。
   it('dims the button (opacity 0.5) and sets accessibilityState.disabled to true while exporting, then restores both once finished (Issue #167: 処理中の視覚的フィードバック)', async () => {
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, sampleEntriesJson);
-    // `file.write()`は同期メソッドのため、書き込み自体は即座に終わってしまい処理中の状態を
-    // 作れない。その代わり、書き込み後に呼ばれる`Sharing.isAvailableAsync`が完了するまで
-    // 解決しないPromiseにして、処理中(isExporting === true)の一瞬の状態を検証する。
+    // `file.write()`は同期メソッドのため書き込み自体は即座に終わる。代わりに書き込み後に呼ばれる
+    // `Sharing.isAvailableAsync`が完了するまで解決しないPromiseにして、処理中の状態を検証する。
     let resolveIsAvailable: (value: boolean) => void = () => {};
     (Sharing.isAvailableAsync as jest.Mock).mockReturnValue(
       new Promise<boolean>((resolve) => {
@@ -686,13 +652,10 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
   });
 
   describe('Web版(Platform.OS === "web")', () => {
-    // Webはexpo-file-system/expo-sharingの双方に対応していないため、実装はBlob + <a download>による
-    // ブラウザ標準ダウンロードにフォールバックする。Jest環境(Node)には`document`が存在しないため、
-    // `click`呼び出しを検証できる最小限のモックを用意する。
-    // また、`URL.createObjectURL`/`revokeObjectURL`はexpoがJestにも登録するポリフィル
-    // (expo/src/winter/url.ts)に差し替わっており、実機のネイティブ`BlobModule`を前提とするため
-    // Jest環境でそのまま呼ぶと`Cannot read properties of undefined (reading 'BlobModule')`で
-    // 例外になる。ブラウザの実際の挙動を模した最小限のモックに差し替える。
+    // Webはexpo-file-system/expo-sharingに対応していないため、実装はBlob + <a download>による
+    // ブラウザ標準ダウンロードにフォールバックする。Jest環境(Node)には`document`が存在しないため
+    // `click`呼び出しを検証できる最小限のモックを用意する。`URL.createObjectURL`/`revokeObjectURL`も
+    // expoのポリフィルのままだと実機のネイティブ`BlobModule`前提で例外になるため差し替える。
     let createdAnchor: { href: string; download: string; click: jest.Mock };
     const originalCreateObjectURL = URL.createObjectURL;
     const originalRevokeObjectURL = URL.revokeObjectURL;
@@ -755,11 +718,9 @@ describe('外観セクション(Issue #91: ライト/ダーク/端末に合わ�
   const DARK_LABEL = 'ダーク';
   const SYSTEM_LABEL = '端末に合わせる';
 
-  // 実機では`app/_layout.tsx`の`RootLayout`が全画面を`ThemePreferenceProvider`でラップするが、
-  // このテストでは`SettingsScreen`を単体でレンダリングするため、そのラップが存在しない。
   // `useThemePreference()`は`Provider`配下でない場合`setPreference`がno-opにフォールバックする
-  // 仕様(tests/contexts/theme-preference-context.test.tsx参照)のため、ここでは実機と同じ構成を
-  // 再現するために明示的に`ThemePreferenceProvider`でラップする。
+  // 仕様(tests/contexts/theme-preference-context.test.tsx参照)のため、実機と同じ構成を再現するために
+  // 明示的に`ThemePreferenceProvider`でラップする。
   function renderSettingsScreen() {
     return render(
       <ThemePreferenceProvider>
@@ -909,11 +870,9 @@ describe('リマインダーセクション(Issue #92: 日記を書く習慣化�
   const FALLBACK_TEXT =
     '通知が許可されていないため、リマインダーを利用できません。端末の設定からこのアプリの通知を許可してください。';
 
-  // 実機では`app/_layout.tsx`の`RootLayout`が全画面を`DiaryReminderProvider`でラップするが、
-  // このテストでは`SettingsScreen`を単体でレンダリングするため、そのラップが存在しない。
   // `useDiaryReminder()`は`Provider`配下でない場合`setEnabled`/`setTime`がno-opにフォールバックする
-  // 仕様(tests/contexts/diary-reminder-context.test.tsx参照)のため、ここでは実機と同じ構成を
-  // 再現するために明示的に`DiaryReminderProvider`でラップする。
+  // 仕様(tests/contexts/diary-reminder-context.test.tsx参照)のため、実機と同じ構成を再現するために
+  // 明示的に`DiaryReminderProvider`でラップする。
   function renderSettingsScreen() {
     return render(
       <DiaryReminderProvider>
@@ -1070,8 +1029,6 @@ describe('リマインダーセクション(Issue #92: 日記を書く習慣化�
     });
     expect(screen.getByText('05')).toBeTruthy();
 
-    // 実機の連続タップは別々の(同期)イベントとして届き、都度再描画が挟まるため、
-    // それぞれを個別の`act`で包んで1回ずつ確実に反映させる
     await act(async () => {
       fireEvent.press(screen.getByLabelText(MINUTE_DECREASE_LABEL));
     });
