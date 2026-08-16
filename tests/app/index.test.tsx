@@ -2819,6 +2819,91 @@ describe('HomeScreen', () => {
       expect(screen.getAllByText('編集キャンセル対象').length).toBeGreaterThanOrEqual(1);
     });
 
+    describe('背景タップでモーダルを閉じる(Issue #173)', () => {
+      it('closes the edit modal (editingEntryId becomes null) and discards the unsaved draft (editDraft is cleared) when the semi-transparent background overlay is tapped (正常系)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            {
+              id: '1',
+              text: '編集モーダル背景タップ対象の日記',
+              createdAt: isoAt(now, dayWithEntry),
+            },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await screen.findByText('編集モーダル背景タップ対象の日記');
+        fireEvent.press(screen.getByText('編集モーダル背景タップ対象の日記'));
+        await screen.findByText(CLOSE_BUTTON_TEXT);
+
+        fireEvent.press(screen.getByText('編集'));
+        await screen.findByText('日記を編集');
+
+        // 保存前に本文を書き換えておき、オーバーレイタップ後に破棄(editDraftのクリア)されることを
+        // AsyncStorageへの書き込みが起きないこと・元の本文が残ることの両面から確認する
+        const editInput = screen.getByDisplayValue('編集モーダル背景タップ対象の日記');
+        fireEvent.changeText(editInput, '保存されないはずの編集内容');
+
+        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
+        const overlay = getModalOverlayPressable(editModal);
+
+        fireEvent.press(overlay);
+
+        // editingEntryIdがnullに戻り、モーダルの見出しが表示されなくなる
+        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
+        expect(editModal.props.visible).toBe(false);
+        // editDraftの変更内容は保存されず破棄される(handleCancelEditと同じ効果)
+        expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+        // 元の本文はそのまま残っている
+        expect(
+          screen.getAllByText('編集モーダル背景タップ対象の日記').length,
+        ).toBeGreaterThanOrEqual(1);
+        expect(screen.queryByText('保存されないはずの編集内容')).toBeNull();
+      });
+
+      it('sets onStartShouldSetResponder on the edit modal content so a touch starting inside it is claimed there and does not propagate to the overlay Pressable behind it (境界値: propagation guard implementation contract)', async () => {
+        // @testing-library/react-nativeのfireEvent.pressはネイティブのタッチレスポンダー交渉を
+        // 完全には再現できないため(Issue #84のテストと同様の理由)、実装が伝播を止めるためのガード
+        // (`onStartShouldSetResponder={() => true}`)が編集モーダルのmodalContentにも実際に設定され、
+        // trueを返す(=タッチを専有し、背景オーバーレイへ伝播させない)ことを直接検証する。
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            {
+              id: '1',
+              text: '編集モーダルガード確認用の日記',
+              createdAt: isoAt(now, dayWithEntry),
+            },
+          ]),
+        );
+
+        render(<HomeScreen />);
+        await screen.findByText('編集モーダルガード確認用の日記');
+        fireEvent.press(screen.getByText('編集モーダルガード確認用の日記'));
+        await screen.findByText(CLOSE_BUTTON_TEXT);
+
+        fireEvent.press(screen.getByText('編集'));
+        await screen.findByText('日記を編集');
+
+        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
+        const [modalContentResponder] = editModal.findAll(
+          (node: TestNode) => typeof node.props.onStartShouldSetResponder === 'function',
+        );
+
+        expect(modalContentResponder).toBeTruthy();
+        expect(modalContentResponder.props.onStartShouldSetResponder()).toBe(true);
+
+        // ガードが効いている間も、編集モーダル自体は開いたままである
+        expect(editModal.props.visible).toBe(true);
+      });
+    });
+
     it('updates the entry text (keeping createdAt unchanged), refreshes the list, and persists it encrypted when the edit is saved (正常系)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
