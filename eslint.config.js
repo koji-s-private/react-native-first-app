@@ -19,4 +19,11 @@ module.exports = defineConfig([
       globals: globals.node,
     },
   },
+  {
+    // jest.setup.jsはJest実行時に読み込まれるため、jest等のJestグローバルを許可する
+    files: ['jest.setup.js'],
+    languageOptions: {
+      globals: globals.jest,
+    },
+  },
 ]);
