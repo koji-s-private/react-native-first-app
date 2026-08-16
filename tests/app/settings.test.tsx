@@ -383,6 +383,47 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
     );
   });
 
+  // Issue #167: 削除処理中(isDeleting === true)は誤って連続タップされないよう、
+  // 視覚的にも判別できるようボタンを半透明化(opacity: 0.5)しaccessibilityState.disabledを
+  // trueにする。処理完了後は元の見た目(opacity: 1, disabled: false)に戻ることも合わせて確認する。
+  it('dims the button (opacity 0.5) and sets accessibilityState.disabled to true while deleting, then restores both once finished (Issue #167: 処理中の視覚的フィードバック)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    // AsyncStorage.removeItemが完了するまで解決しないPromiseにして、処理中の一瞬の状態を検証する
+    let resolveRemoveItem: () => void = () => {};
+    jest.spyOn(AsyncStorage, 'removeItem').mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveRemoveItem = resolve;
+      }),
+    );
+    render(<SettingsScreen />);
+
+    fireEvent.press(screen.getByText(DELETE_BUTTON_LABEL));
+    const alertMock = Alert.alert as jest.Mock;
+    const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
+    const buttons = lastCall[2] as { text: string; onPress?: () => void }[];
+    const confirmDeleteButton = buttons.find((b) => b.text === '削除する');
+
+    act(() => {
+      confirmDeleteButton?.onPress?.();
+    });
+
+    const buttonWhileDeleting = screen.getByRole('button', { name: DELETE_BUTTON_LABEL });
+    expect(StyleSheet.flatten(buttonWhileDeleting.props.style).opacity).toBe(0.5);
+    expect(buttonWhileDeleting.props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: true }),
+    );
+
+    resolveRemoveItem();
+
+    await waitFor(() => {
+      const buttonAfterDeleting = screen.getByRole('button', { name: DELETE_BUTTON_LABEL });
+      expect(StyleSheet.flatten(buttonAfterDeleting.props.style).opacity).toBe(1);
+    });
+    expect(
+      screen.getByRole('button', { name: DELETE_BUTTON_LABEL }).props.accessibilityState,
+    ).toEqual(expect.objectContaining({ disabled: false }));
+  });
+
   // Issue #146: 削除ボタンの文字色が固定のライトモード用エラー色のままダークモードでも
   // 使われてしまっていた不具合の回帰テスト。app/(tabs)/index.tsxと同様に
   // useThemeColor({}, 'error')経由でライト/ダークそれぞれのテーマに応じた色が
@@ -560,6 +601,41 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
         'もう一度お試しください。',
       ),
     );
+  });
+
+  // Issue #167: エクスポート処理中(isExporting === true)は誤って連続タップされないよう、
+  // 視覚的にも判別できるようボタンを半透明化(opacity: 0.5)しaccessibilityState.disabledを
+  // trueにする。処理完了後は元の見た目(opacity: 1, disabled: false)に戻ることも合わせて確認する。
+  it('dims the button (opacity 0.5) and sets accessibilityState.disabled to true while exporting, then restores both once finished (Issue #167: 処理中の視覚的フィードバック)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, sampleEntriesJson);
+    // FileSystem.writeAsStringAsyncが完了するまで解決しないPromiseにして、処理中の一瞬の状態を検証する
+    let resolveWrite: () => void = () => {};
+    (FileSystem.writeAsStringAsync as jest.Mock).mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveWrite = resolve;
+      }),
+    );
+    render(<SettingsScreen />);
+
+    fireEvent.press(screen.getByText(EXPORT_BUTTON_LABEL));
+
+    const buttonWhileExporting = screen.getByRole('button', { name: EXPORT_BUTTON_LABEL });
+    expect(StyleSheet.flatten(buttonWhileExporting.props.style).opacity).toBe(0.5);
+    expect(buttonWhileExporting.props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: true }),
+    );
+
+    await waitFor(() => expect(FileSystem.writeAsStringAsync).toHaveBeenCalledTimes(1));
+    resolveWrite();
+
+    await waitFor(() => {
+      const buttonAfterExporting = screen.getByRole('button', { name: EXPORT_BUTTON_LABEL });
+      expect(StyleSheet.flatten(buttonAfterExporting.props.style).opacity).toBe(1);
+    });
+    expect(
+      screen.getByRole('button', { name: EXPORT_BUTTON_LABEL }).props.accessibilityState,
+    ).toEqual(expect.objectContaining({ disabled: false }));
   });
 
   it('shows a failure alert when the cache directory is unavailable (境界値: FileSystem.cacheDirectoryがnull)', async () => {
