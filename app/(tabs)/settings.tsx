@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { File, Paths } from 'expo-file-system';
 import { Link } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useCallback, useState } from 'react';
@@ -320,13 +320,12 @@ function ExportDiaryDataButton() {
       }
 
       // ネイティブ(iOS/Android)は一旦キャッシュディレクトリにJSONファイルを書き出してから、
-      // OS標準の共有シートでそのファイルを共有する
-      if (!FileSystem.cacheDirectory) {
-        // 型上はnullを許容するが、iOS/Androidの実機・シミュレーターでnullになることは想定しない
-        throw new Error('キャッシュディレクトリを取得できませんでした');
-      }
-      const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
-      await FileSystem.writeAsStringAsync(fileUri, content);
+      // OS標準の共有シートでそのファイルを共有する。
+      // キャッシュディレクトリが取得できない場合はPaths.cache/Fileのコンストラクタが例外を
+      // 送出するため、この関数を囲むtry-catchでまとめて捕捉される
+      const file = new File(Paths.cache, fileName);
+      file.write(content);
+      const fileUri = file.uri;
 
       const isSharingAvailable = await Sharing.isAvailableAsync();
       if (!isSharingAvailable) {
