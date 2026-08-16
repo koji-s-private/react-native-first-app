@@ -806,6 +806,10 @@ export default function HomeScreen() {
               onChangeText={setSearchQuery}
               returnKeyType="search"
               accessibilityLabel="日記を検索"
+              // 検索欄は日記本文をそのまま入力する用途ではなく、composer/edit用の
+              // grapheme単位切り詰めのような厳密な制御は不要なため、TextInput標準の
+              // maxLength(UTF-16コードユニット単位)でBODY_MAX_LENGTHを上限として指定する
+              maxLength={BODY_MAX_LENGTH}
             />
           </View>
 
