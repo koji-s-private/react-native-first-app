@@ -13,8 +13,6 @@ assets/
     android-icon-background.png        Androidアダプティブアイコン（背景）
     android-icon-foreground.png        Androidアダプティブアイコン（前景）
     android-icon-monochrome.png        Androidアダプティブアイコン（モノクロ）
-    react-logo.png / @2x / @3x         サンプル画像（標準・高解像度版）
-    partial-react-logo.png             サンプル画像
 ```
 
 ## `images/` サブディレクトリの用途
@@ -23,9 +21,9 @@ assets/
 
 ## アセット追加時の命名・解像度のルール
 
-- ファイル名は**小文字のケバブケース**にしてください（例: `react-logo.png`）。
+- ファイル名は**小文字のケバブケース**にしてください（例: `xxx-icon.png`）。
 - React Native/Expoでは、同じ画像の高解像度版を `@2x`・`@3x` サフィックスを付けたファイル名で並べて置くと、端末の画面密度に応じて自動的に使い分けられます。
-  - 例: `react-logo.png`（標準解像度）、`react-logo@2x.png`（2倍解像度）、`react-logo@3x.png`（3倍解像度）
+  - 例: `xxx.png`（標準解像度）、`xxx@2x.png`（2倍解像度）、`xxx@3x.png`（3倍解像度）
   - 新しい画像を追加する場合も、必要に応じてこの3種類（無印/`@2x`/`@3x`）を用意してください。
 - コンポーネント側からは `require('@/assets/images/xxx.png')` の形で読み込みます。表示には [`expo-image`](https://docs.expo.dev/versions/v54.0.0/sdk/image/) を利用してください。
 - `app.json` から参照するアイコン・スプラッシュ画像のサイズ要件は、[Expo SDK 54 のアプリアイコン設定ドキュメント](https://docs.expo.dev/versions/v54.0.0/) を確認してください。
