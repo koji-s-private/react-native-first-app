@@ -5,9 +5,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type PropsWithChildren,
 } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 
 import {
   cancelDailyReminderAsync,
@@ -117,6 +119,49 @@ export function DiaryReminderProvider({ children }: PropsWithChildren) {
     setSettings(next);
     AsyncStorage.setItem(DIARY_REMINDER_STORAGE_KEY, JSON.stringify(next)).catch(() => {});
   }, []);
+
+  // AppStateのリスナー(マウント時に一度だけ登録する)からは常に最新のsettings/
+  // permissionStatusを参照したいが、リスナー自体を都度re-subscribeするのは避けたいため、
+  // 依存配列に含めずrefで最新値を追う
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const permissionStatusRef = useRef(permissionStatus);
+  permissionStatusRef.current = permissionStatus;
+
+  // OSの設定画面で通知許可が取り消された場合、アプリ再起動まで気づけないと「ONに見えるのに
+  // 通知が届かない」状態が放置されてしまう。フォアグラウンド復帰時(active)に限って許可状態を
+  // 再取得することで、アプリを閉じずに設定画面へ切り替えただけのケースにも対応する
+  // (バックグラウンド遷移時などは問い合わせ不要なので何もしない)
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: AppStateStatus) => {
+      if (nextAppState !== 'active') {
+        return;
+      }
+
+      getReminderPermissionStatusAsync()
+        .then((status) => {
+          const previousStatus = permissionStatusRef.current;
+          setPermissionStatus(status);
+
+          if (previousStatus === 'granted' && status === 'denied') {
+            // 許可が取り消されたことを検知した場合のみ、スイッチの見た目と実際のスケジュール
+            // 登録状況を一致させるためenabledをOFFへ戻す(denied→granted等の変化では
+            // ユーザーの明示的な操作なしにenabledを自動でONへは戻さない)
+            persist({ ...settingsRef.current, enabled: false });
+            cancelDailyReminderAsync().catch(() => {});
+          }
+        })
+        .catch(() => {
+          // 取得に失敗した場合は現在の許可状態を維持する
+        });
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => {
+      subscription.remove();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persist]);
 
   const setEnabled = useCallback(
     async (nextEnabled: boolean) => {

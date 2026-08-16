@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, renderHook } from '@testing-library/react-native';
 import type { PropsWithChildren } from 'react';
+import { AppState } from 'react-native';
 
 import {
   DIARY_REMINDER_STORAGE_KEY,
@@ -42,6 +43,19 @@ const wrapper = ({ children }: PropsWithChildren) => (
   <DiaryReminderProvider>{children}</DiaryReminderProvider>
 );
 
+// `react-native`のJestプリセットが提供する`AppState.addEventListener`は既定で`jest.fn()`化
+// されている(`{ remove: jest.fn() }`を返すだけ)ため、`change`イベント用に登録された
+// リスナー関数を`mock.calls`から取り出し、テスト側から直接呼び出すことでフォアグラウンド
+// 復帰(`'active'`)をシミュレートする。
+function getAppStateChangeListener(): (nextAppState: string) => void {
+  const addEventListenerMock = AppState.addEventListener as jest.Mock;
+  const call = addEventListenerMock.mock.calls.find(([eventName]) => eventName === 'change');
+  if (!call) {
+    throw new Error('AppState.addEventListener("change", ...) が呼び出されていません');
+  }
+  return call[1];
+}
+
 describe('DiaryReminderProvider / useDiaryReminder', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
@@ -49,6 +63,10 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
     // 明示的にモックを指定しないテストでは「未確認」を既定の挙動にしておく
     mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('undetermined');
     mockedNotificationsUtil.requestReminderPermissionAsync.mockResolvedValue('undetermined');
+    // 一部のテストが`mockRejectedValue`(永続的な上書き)で失敗をシミュレートするため、
+    // `jest.clearAllMocks()`(呼び出し履歴のクリアのみで実装はクリアされない)だけでは
+    // 後続テストに失敗が漏れてしまう。既定では成功させておく
+    mockedNotificationsUtil.scheduleDailyReminderAsync.mockResolvedValue(undefined);
   });
 
   it('defaults to disabled, 21:00, and "undetermined" permission before AsyncStorage/OS state has resolved (初期値)', () => {
@@ -407,6 +425,133 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
       // 通知の再スケジュールには失敗しているが、画面上の選択状態(見た目)は更新されたまま
       expect(result.current.hour).toBe(6);
       expect(result.current.minute).toBe(0);
+    });
+  });
+
+  describe('AppStateによるフォアグラウンド復帰時の再取得', () => {
+    it('refetches the permission status when the app returns to the foreground (正常系: active復帰時の再取得)', async () => {
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+      renderHook(() => useDiaryReminder(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(mockedNotificationsUtil.getReminderPermissionStatusAsync).toHaveBeenCalledTimes(1);
+
+      const handleAppStateChange = getAppStateChangeListener();
+      await act(async () => {
+        handleAppStateChange('active');
+        await Promise.resolve();
+      });
+
+      expect(mockedNotificationsUtil.getReminderPermissionStatusAsync).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not refetch when the app moves to the background (境界値: background遷移時は再取得しない)', async () => {
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+      renderHook(() => useDiaryReminder(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      const handleAppStateChange = getAppStateChangeListener();
+      await act(async () => {
+        handleAppStateChange('background');
+        await Promise.resolve();
+      });
+
+      expect(mockedNotificationsUtil.getReminderPermissionStatusAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it('turns enabled off and cancels the schedule when the permission changes from granted to denied while resuming (異常系: granted→deniedでenabledをOFFに戻す)', async () => {
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+      const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await result.current.setEnabled(true);
+      });
+      expect(result.current.enabled).toBe(true);
+      // `jest.clearAllMocks()`は`AppState.addEventListener`の呼び出し履歴も消してしまう
+      // (リスナー登録はマウント時の一度きりのため)ので、クリア前に取り出しておく
+      const handleAppStateChange = getAppStateChangeListener();
+      jest.clearAllMocks();
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('denied');
+
+      await act(async () => {
+        handleAppStateChange('active');
+        await Promise.resolve();
+      });
+
+      expect(result.current.permissionStatus).toBe('denied');
+      expect(result.current.enabled).toBe(false);
+      expect(mockedNotificationsUtil.cancelDailyReminderAsync).toHaveBeenCalledTimes(1);
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+        DIARY_REMINDER_STORAGE_KEY,
+        JSON.stringify({ enabled: false, hour: 21, minute: 0 }),
+      );
+    });
+
+    it('keeps enabled unchanged when the permission stays granted while resuming (正常系: granted→grantedはenabled不変)', async () => {
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+      const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await result.current.setEnabled(true);
+      });
+      const handleAppStateChange = getAppStateChangeListener();
+      jest.clearAllMocks();
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+
+      await act(async () => {
+        handleAppStateChange('active');
+        await Promise.resolve();
+      });
+
+      expect(result.current.permissionStatus).toBe('granted');
+      expect(result.current.enabled).toBe(true);
+      expect(mockedNotificationsUtil.cancelDailyReminderAsync).not.toHaveBeenCalled();
+    });
+
+    it('does not turn enabled on automatically when the permission changes from denied to granted while resuming (境界値: denied→grantedでもenabledは自動でONにしない)', async () => {
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('denied');
+      const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(result.current.enabled).toBe(false);
+      const handleAppStateChange = getAppStateChangeListener();
+      jest.clearAllMocks();
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+
+      await act(async () => {
+        handleAppStateChange('active');
+        await Promise.resolve();
+      });
+
+      expect(result.current.permissionStatus).toBe('granted');
+      expect(result.current.enabled).toBe(false);
+    });
+
+    it('removes the AppState subscription on unmount (境界値: アンマウント時のクリーンアップ)', async () => {
+      const addEventListenerMock = AppState.addEventListener as jest.Mock;
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+      const { unmount } = renderHook(() => useDiaryReminder(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      const call = addEventListenerMock.mock.calls.find(
+        ([eventName]) => eventName === 'change',
+      ) as [string, (...args: unknown[]) => void];
+      const resultIndex = addEventListenerMock.mock.calls.indexOf(call);
+      const removeMock = addEventListenerMock.mock.results[resultIndex].value.remove as jest.Mock;
+
+      unmount();
+
+      expect(removeMock).toHaveBeenCalledTimes(1);
     });
   });
 
