@@ -1,6 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
-import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
@@ -58,28 +57,45 @@ jest.mock('@/utils/diary-reminder-notifications', () => ({
   cancelDailyReminderAsync: jest.fn(() => Promise.resolve()),
 }));
 
-// `expo-file-system/legacy`はJest環境ではネイティブモジュールが存在せず、`cacheDirectory`は
-// 常に`null`になる(実機のiOS/Androidではキャッシュディレクトリのパス文字列が入る)。
-// エクスポート機能の正常系(ファイル書き出し→共有)を検証するため、固定のパスと
-// 書き込み成功を返すモックに差し替える。
+// `expo-file-system`(新API)はJest環境ではネイティブモジュールが存在せず、`Paths.cache`を
+// 参照した時点で例外になる(実機ではキャッシュディレクトリを指す`Directory`インスタンスが返る)。
+// エクスポート機能の正常系(ファイル書き出し→共有)を検証するため、固定のURIを返す`Paths.cache`と、
+// 書き込み内容を記録できる`File`のモックに差し替える。
 //
-// `cacheDirectory`は一部のテストで`null`に上書きしたいが、`import * as FileSystem`は
-// Babelのwildcard importヘルパー(`_interopRequireWildcard`)によりファイルごとに別の
-// namespaceオブジェクトへコピーされるため、単純な文字列プロパティのままだと
-// このテストファイル側での代入が`app/(tabs)/settings.tsx`側のコピーには反映されない
-// (関数プロパティは参照コピーのため影響を受けないが、プリミティブ値は値コピーになるため)。
-// get/setアクセサとして定義し、実体を外側のクロージャ変数に持たせることで、
-// どちらのファイルのコピーを経由しても同じ実体を読み書きできるようにしている。
-jest.mock('expo-file-system/legacy', () => {
-  const state: { cacheDirectory: string | null } = { cacheDirectory: 'file:///mock-cache/' };
+// `Paths.cache`を一部のテストで「取得できない」状態(実機ではキャッシュディレクトリの参照自体が
+// 例外を投げる状況を想定)に上書きしたいが、状態を外側のクロージャ変数(`state`)に持たせることで、
+// このテストファイルと`app/(tabs)/settings.tsx`のどちらの`import`経由でも同じ実体を読み書きできる。
+// `File#write`は同期メソッド(Promiseを返さない)のため、書き込み内容の検証や書き込み失敗の
+// シミュレーションは単一のjest.fn(`write`)への差し替えで行う。
+jest.mock('expo-file-system', () => {
+  const state: { cacheDirectoryUri: string | null } = { cacheDirectoryUri: 'file:///mock-cache/' };
+  const write = jest.fn();
+
+  class MockFile {
+    uri: string;
+
+    constructor(directory: { uri: string }, fileName: string) {
+      this.uri = `${directory.uri}${fileName}`;
+    }
+
+    write(content: string) {
+      return write(this.uri, content);
+    }
+  }
+
   return {
-    get cacheDirectory() {
-      return state.cacheDirectory;
+    Paths: {
+      get cache() {
+        if (state.cacheDirectoryUri === null) {
+          // 実機で`Paths.cache`(内部の`Directory`パス検証)が失敗する状況を模倣する
+          throw new Error('キャッシュディレクトリを取得できませんでした');
+        }
+        return { uri: state.cacheDirectoryUri };
+      },
     },
-    set cacheDirectory(value: string | null) {
-      state.cacheDirectory = value;
-    },
-    writeAsStringAsync: jest.fn(() => Promise.resolve()),
+    File: MockFile,
+    __mockState: state,
+    __mockWrite: write,
   };
 });
 
@@ -126,6 +142,14 @@ const mockedDiaryReminderNotifications = require('@/utils/diary-reminder-notific
   requestReminderPermissionAsync: jest.Mock;
   scheduleDailyReminderAsync: jest.Mock;
   cancelDailyReminderAsync: jest.Mock;
+};
+
+// jest.mockした'expo-file-system'の内部状態(キャッシュディレクトリの有無)・書き込み呼び出しを
+// テストごとに操作/検証するための参照
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const mockedFileSystem = require('expo-file-system') as {
+  __mockState: { cacheDirectoryUri: string | null };
+  __mockWrite: jest.Mock;
 };
 
 describe('SettingsScreen', () => {
@@ -482,9 +506,8 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
     await AsyncStorage.clear();
     jest.clearAllMocks();
     // 各テストごとにモックの既定挙動をリセットする(個別のテストで上書きするため)
-    (FileSystem as unknown as { cacheDirectory: string | null }).cacheDirectory =
-      'file:///mock-cache/';
-    (FileSystem.writeAsStringAsync as jest.Mock).mockResolvedValue(undefined);
+    mockedFileSystem.__mockState.cacheDirectoryUri = 'file:///mock-cache/';
+    mockedFileSystem.__mockWrite.mockReturnValue(undefined);
     (Sharing.isAvailableAsync as jest.Mock).mockResolvedValue(true);
     (Sharing.shareAsync as jest.Mock).mockResolvedValue(undefined);
     Platform.OS = originalPlatformOS;
@@ -515,7 +538,7 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
         '日記を書いてからもう一度お試しください。',
       ),
     );
-    expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(mockedFileSystem.__mockWrite).not.toHaveBeenCalled();
     expect(Sharing.isAvailableAsync).not.toHaveBeenCalled();
     expect(Sharing.shareAsync).not.toHaveBeenCalled();
   });
@@ -530,10 +553,10 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
       fireEvent.press(screen.getByText(EXPORT_BUTTON_LABEL));
     });
 
-    await waitFor(() => expect(FileSystem.writeAsStringAsync).toHaveBeenCalledTimes(1));
-    const [fileUri, content] = (FileSystem.writeAsStringAsync as jest.Mock).mock.calls[0];
+    await waitFor(() => expect(mockedFileSystem.__mockWrite).toHaveBeenCalledTimes(1));
+    const [fileUri, writtenContent] = mockedFileSystem.__mockWrite.mock.calls[0];
     expect(fileUri).toMatch(/^file:\/\/\/mock-cache\/diary-export-\d{8}-\d{6}\.json$/);
-    expect(JSON.parse(content)).toEqual(JSON.parse(sampleEntriesJson));
+    expect(JSON.parse(writtenContent)).toEqual(JSON.parse(sampleEntriesJson));
 
     await waitFor(() => expect(Sharing.isAvailableAsync).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(Sharing.shareAsync).toHaveBeenCalledTimes(1));
@@ -569,7 +592,9 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
   it('shows a failure alert when writing the export file fails (異常系: ファイル書き込み失敗)', async () => {
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, sampleEntriesJson);
-    (FileSystem.writeAsStringAsync as jest.Mock).mockRejectedValue(new Error('disk full'));
+    mockedFileSystem.__mockWrite.mockImplementation(() => {
+      throw new Error('disk full');
+    });
     render(<SettingsScreen />);
 
     await act(async () => {
@@ -609,11 +634,13 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
   it('dims the button (opacity 0.5) and sets accessibilityState.disabled to true while exporting, then restores both once finished (Issue #167: 処理中の視覚的フィードバック)', async () => {
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, sampleEntriesJson);
-    // FileSystem.writeAsStringAsyncが完了するまで解決しないPromiseにして、処理中の一瞬の状態を検証する
-    let resolveWrite: () => void = () => {};
-    (FileSystem.writeAsStringAsync as jest.Mock).mockReturnValue(
-      new Promise<void>((resolve) => {
-        resolveWrite = resolve;
+    // `file.write()`は同期メソッドのため、書き込み自体は即座に終わってしまい処理中の状態を
+    // 作れない。その代わり、書き込み後に呼ばれる`Sharing.isAvailableAsync`が完了するまで
+    // 解決しないPromiseにして、処理中(isExporting === true)の一瞬の状態を検証する。
+    let resolveIsAvailable: (value: boolean) => void = () => {};
+    (Sharing.isAvailableAsync as jest.Mock).mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        resolveIsAvailable = resolve;
       }),
     );
     render(<SettingsScreen />);
@@ -626,8 +653,9 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
       expect.objectContaining({ disabled: true }),
     );
 
-    await waitFor(() => expect(FileSystem.writeAsStringAsync).toHaveBeenCalledTimes(1));
-    resolveWrite();
+    // この時点で書き込み自体はすでに完了していること(同期メソッドのため)も合わせて確認する
+    await waitFor(() => expect(mockedFileSystem.__mockWrite).toHaveBeenCalledTimes(1));
+    resolveIsAvailable(true);
 
     await waitFor(() => {
       const buttonAfterExporting = screen.getByRole('button', { name: EXPORT_BUTTON_LABEL });
@@ -638,10 +666,10 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
     ).toEqual(expect.objectContaining({ disabled: false }));
   });
 
-  it('shows a failure alert when the cache directory is unavailable (境界値: FileSystem.cacheDirectoryがnull)', async () => {
+  it('shows a failure alert when the cache directory is unavailable (境界値: Paths.cacheが取得できない場合)', async () => {
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, sampleEntriesJson);
-    (FileSystem as unknown as { cacheDirectory: string | null }).cacheDirectory = null;
+    mockedFileSystem.__mockState.cacheDirectoryUri = null;
     render(<SettingsScreen />);
 
     await act(async () => {
@@ -654,7 +682,7 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
         'もう一度お試しください。',
       ),
     );
-    expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(mockedFileSystem.__mockWrite).not.toHaveBeenCalled();
   });
 
   describe('Web版(Platform.OS === "web")', () => {
@@ -696,7 +724,7 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
 
       await waitFor(() => expect(createdAnchor.click).toHaveBeenCalledTimes(1));
       expect(createdAnchor.download).toMatch(/^diary-export-\d{8}-\d{6}\.json$/);
-      expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
+      expect(mockedFileSystem.__mockWrite).not.toHaveBeenCalled();
       expect(Sharing.isAvailableAsync).not.toHaveBeenCalled();
       expect(Sharing.shareAsync).not.toHaveBeenCalled();
       expect(Alert.alert).not.toHaveBeenCalled();
