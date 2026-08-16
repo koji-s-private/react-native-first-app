@@ -265,7 +265,8 @@ function DeleteAllDiaryDataButton() {
       onPress={handlePress}
       disabled={isDeleting}
       accessibilityRole="button"
-      style={styles.dangerButton}
+      accessibilityState={{ disabled: isDeleting }}
+      style={[styles.dangerButton, { opacity: isDeleting ? 0.5 : 1 }]}
     >
       <ThemedText style={[styles.dangerButtonText, { color: errorColor }]}>
         日記データを全件削除
@@ -353,7 +354,8 @@ function ExportDiaryDataButton() {
       onPress={handleExport}
       disabled={isExporting}
       accessibilityRole="button"
-      style={styles.exportButton}
+      accessibilityState={{ disabled: isExporting }}
+      style={[styles.exportButton, { opacity: isExporting ? 0.5 : 1 }]}
     >
       <ThemedText type="link">日記データをエクスポート</ThemedText>
     </Pressable>
