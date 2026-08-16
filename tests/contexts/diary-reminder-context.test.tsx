@@ -535,6 +535,33 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
       expect(result.current.enabled).toBe(false);
     });
 
+    it('keeps the previous permission status and enabled state without crashing when getReminderPermissionStatusAsync rejects while resuming (異常系: active復帰時の許可状態再取得に失敗)', async () => {
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+      const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await result.current.setEnabled(true);
+      });
+      expect(result.current.enabled).toBe(true);
+      const handleAppStateChange = getAppStateChangeListener();
+      jest.clearAllMocks();
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockRejectedValueOnce(
+        new Error('permission query error'),
+      );
+
+      await act(async () => {
+        handleAppStateChange('active');
+        await Promise.resolve();
+      });
+
+      // 再取得に失敗した場合は既存の状態(許可状態・enabled)をそのまま維持し、クラッシュもしない
+      expect(result.current.permissionStatus).toBe('granted');
+      expect(result.current.enabled).toBe(true);
+      expect(mockedNotificationsUtil.cancelDailyReminderAsync).not.toHaveBeenCalled();
+    });
+
     it('removes the AppState subscription on unmount (境界値: アンマウント時のクリーンアップ)', async () => {
       const addEventListenerMock = AppState.addEventListener as jest.Mock;
       mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
