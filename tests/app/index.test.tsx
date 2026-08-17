@@ -278,6 +278,20 @@ describe('HomeScreen', () => {
     mockRandomUUID.mockImplementation(() => `mock-uuid-${uuidCounter++}`);
   });
 
+  // FlatList(VirtualizedList)は初回マウント・更新のたびに、表示するセルの範囲を再計算する
+  // `updateCellsBatchingPeriod`(既定50ms)のsetTimeoutを内部で予約する。`@testing-library/react-native`の
+  // 自動アンマウント(モジュール読み込み時に最上位で登録される`afterEach`)はマイクロタスク1回分しか
+  // 待たずにunmountするため、CPU負荷が高い環境ではこのタイマーがunmount前後どちらで発火するか
+  // タイミング競合し、act()外でのstate更新警告(`An update to VirtualizedList ... was not wrapped in
+  // act(...)`)を引き起こすことがある(Issue #196)。Jestはネストした`describe`内の`afterEach`を
+  // 外側(モジュールレベル)より先に実行するため、ここで実際のマウント状態のまま50msより長く待つことで、
+  // 予約されていたタイマーをunmountされる前に確実にact()内で発火させ、警告の発生を防ぐ。
+  afterEach(async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+  });
+
   it('renders the diary title', async () => {
     render(<HomeScreen />);
 
