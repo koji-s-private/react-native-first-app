@@ -2295,7 +2295,6 @@ describe('HomeScreen', () => {
     });
   });
 
-
   describe('カレンダーの年月ジャンプ用ピッカー(Issue #76)', () => {
     // react-native-calendarsに設定しているロケール(実装側のJA_MONTH_NAMES)と同じ表記。
     // 実装からは直接importできないため、テスト側でも同じ配列を用意する
@@ -2442,7 +2441,7 @@ describe('HomeScreen', () => {
       expect(screen.queryByText(`${now.getFullYear() + 2}年`)).toBeNull();
     });
 
-    it('syncs the header heading and the picker\'s initial year to the new month when the calendar reports a month change via swipe/arrow navigation, crossing a year boundary forward (境界値: 12月→翌年1月)', async () => {
+    it("syncs the header heading and the picker's initial year to the new month when the calendar reports a month change via swipe/arrow navigation, crossing a year boundary forward (境界値: 12月→翌年1月)", async () => {
       const now = new Date();
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
@@ -2505,7 +2504,7 @@ describe('HomeScreen', () => {
       expect(otherMonthButton.props.accessibilityState?.selected).toBe(false);
     });
 
-    it('does not mark any month button as selected once the picker year has been stepped away from the currently displayed year, since none of that year\'s months match the display (境界値/異常系)', async () => {
+    it("does not mark any month button as selected once the picker year has been stepped away from the currently displayed year, since none of that year's months match the display (境界値/異常系)", async () => {
       const now = new Date();
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
@@ -2519,6 +2518,7 @@ describe('HomeScreen', () => {
       }
     });
   });
+
   describe('カレンダーセルの複数件数バッジ(Issue #72)', () => {
     // 同じ日に2件以上の日記がある場合、カレンダーセルの右上に「+N」の件数バッジを表示する。
     // バッジの本体View(styles.entryCountBadge)は`minWidth: 16, height: 16`という
