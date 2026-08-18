@@ -25,18 +25,15 @@ import { TabScreenContainer } from '@/components/tab-screen-container';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
 import {
-  DIARY_ENTRIES_STORAGE_KEY,
+  deleteDiaryEntry,
   getAllDiaryEntries,
+  saveDiaryEntry,
   type DiaryEntry,
 } from '@/utils/diary-storage';
 
-// 日記データのAsyncStorageキーは、設定画面からの全件削除機能(utils/diary-storage.ts)と
-// 共有するため、そちらで定義した定数を参照する
-const STORAGE_KEY = DIARY_ENTRIES_STORAGE_KEY;
-
-// 保存前の下書き(draft)を自動保存するためのAsyncStorageキー。日記本文の保存キー(STORAGE_KEY)とは
+// 保存前の下書き(draft)を自動保存するためのAsyncStorageキー。日記本文の保存キー(エントリ単位の
+// 個別キー、utils/diary-storage.ts参照)とは
 // 別キーにすることで、保存済みエントリの一覧データとは独立して読み書きできるようにする。
 // 「保存」ボタンを押すまで下書きが永続化されないと、入力途中でアプリがバックグラウンド化・
 // 強制終了された場合に内容が失われてしまうため、入力が止まってから一定時間後に自動保存し、
@@ -73,6 +70,11 @@ const CALENDAR_WEEK_ROW_MARGIN = 14;
 // react-native-calendarsが使うdayComponentのpropsの型(ライブラリ側から直接exportされていないため、
 // CalendarPropsから抽出して利用する)
 type DayComponentProps = ComponentProps<NonNullable<CalendarProps['dayComponent']>>;
+
+// enqueueDiaryWrite(永続化処理を直列化するキュー)に積む「今回行う1つの操作」を表す型。
+// エントリ単位のAsyncStorageキーへ移行したことで(Issue #83)、キュー内のタスクはもはや
+// 全件配列を読み直して編集する必要がなく、保存/削除どちらの操作かだけを持てばよい
+type DiaryWriteOperation = { type: 'save'; entry: DiaryEntry } | { type: 'delete'; id: string };
 
 // 日本語の月名。react-native-calendarsのロケール設定(月名・月省略名)と、
 // 年月ジャンプ用ピッカーの月ボタン表示の両方で共有する
@@ -298,36 +300,33 @@ export default function HomeScreen() {
     setIsLoading(false);
   }, []);
 
-  // mutateは「読み直した最新entries」を受け取り、実際に書き込むべき次のentriesを返す。
-  // 戻り値のPromiseは実際に永続化された(=書き込みに使われた)entriesで解決する
-  const enqueueDiaryWrite = useCallback(
-    (mutate: (latestEntries: DiaryEntry[]) => DiaryEntry[]): Promise<DiaryEntry[]> => {
-      // タスクをキューに積んだ時点(実行完了を待たず)で同期的にインクリメントする。
-      // これにより、この関数の呼び出し直後にloadEntriesが走った場合でも、
-      // まだ実行順が回ってきていないタスクの存在を正しく検知できる
-      pendingWriteCountRef.current += 1;
-      const task = writeQueueRef.current.then(async () => {
-        const latestEntries = await getAllDiaryEntries();
-        const nextEntries = mutate(latestEntries);
-        const key = await getOrCreateEncryptionKey();
-        await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(nextEntries), key));
-        return nextEntries;
-      });
-      // キュー自体は個々のタスクの成否に関わらず先に進める(失敗はtask側のcatchで呼び出し元に伝える)。
-      // 併せてpendingWriteCountRefも、成否に関わらずタスクが完了(=もはやpendingではなくなる)
-      // 時点でデクリメントする
-      writeQueueRef.current = task.then(
-        () => {
-          pendingWriteCountRef.current -= 1;
-        },
-        () => {
-          pendingWriteCountRef.current -= 1;
-        },
-      );
-      return task;
-    },
-    [],
-  );
+  // operationは「今回行う1つの操作」(新規保存・編集保存・削除のいずれか)を表す。
+  // エントリ単位の個別キーで保存するため、他のエントリの読み書きは発生しない
+  const enqueueDiaryWrite = useCallback((operation: DiaryWriteOperation): Promise<void> => {
+    // タスクをキューに積んだ時点(実行完了を待たず)で同期的にインクリメントする。
+    // これにより、この関数の呼び出し直後にloadEntriesが走った場合でも、
+    // まだ実行順が回ってきていないタスクの存在を正しく検知できる
+    pendingWriteCountRef.current += 1;
+    const task = writeQueueRef.current.then(async () => {
+      if (operation.type === 'save') {
+        await saveDiaryEntry(operation.entry);
+      } else {
+        await deleteDiaryEntry(operation.id);
+      }
+    });
+    // キュー自体は個々のタスクの成否に関わらず先に進める(失敗はtask側のcatchで呼び出し元に伝える)。
+    // 併せてpendingWriteCountRefも、成否に関わらずタスクが完了(=もはやpendingではなくなる)
+    // 時点でデクリメントする
+    writeQueueRef.current = task.then(
+      () => {
+        pendingWriteCountRef.current -= 1;
+      },
+      () => {
+        pendingWriteCountRef.current -= 1;
+      },
+    );
+    return task;
+  }, []);
 
   // expo-routerの`Tabs`はデフォルトで一度訪れたタブ画面をアンマウントせず保持するため、
   // マウント時に一度だけ読み込む`useEffect`だと、設定タブでの全件削除のように他画面から
@@ -413,7 +412,6 @@ export default function HomeScreen() {
     const previousEntries = entries;
     const previousDraft = draft;
     // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
-    // (実際にAsyncStorageへ書き込む内容はenqueueDiaryWrite内で読み直した最新データを元にする)
     setEntries([newEntry, ...entries]);
     setDraft('');
     // pending開始時点ではまだ編集操作が発生していないことを表すため、フラグをリセットする
@@ -423,13 +421,10 @@ export default function HomeScreen() {
     try {
       // 日記本文を平文のままAsyncStorageに保存しないよう、SecureStoreで保護した鍵で
       // AES-256-GCM暗号化してから保存する。他の保存/編集/削除処理と競合しないよう、
-      // 書き込みはキュー経由で直列化し、実行直前に読み直した最新データに新規エントリを追加する
-      const persistedEntries = await enqueueDiaryWrite((latestEntries) => [
-        newEntry,
-        ...latestEntries,
-      ]);
-      // 実際に永続化された内容でUIを真の永続化状態と一致させる
-      setEntries(persistedEntries);
+      // 書き込みはキュー経由で直列化する(このエントリ専用のキーへの書き込みのみで完結する)
+      await enqueueDiaryWrite({ type: 'save', entry: newEntry });
+      // 既に楽観的更新でReact stateは正しい内容になっているため、永続化された内容での
+      // setEntriesによる再同期は不要
 
       // 保存に成功したので、自動保存していた下書きは不要になったためクリアする。
       // draft自体は既にsetDraft('')で空にしているが、AsyncStorage側に下書きキーが残ったままだと
@@ -507,26 +502,28 @@ export default function HomeScreen() {
       return;
     }
 
+    // 編集対象エントリのcreatedAtは変更せず引き継ぐ(存在しない場合は早期return。
+    // 通常はUIの導線上あり得ないが、念のための防御)
+    const targetEntry = entries.find((entry) => entry.id === editingEntryId);
+    if (!targetEntry) {
+      return;
+    }
+    const updatedEntry: DiaryEntry = { ...targetEntry, text: trimmed };
+
     setIsSavingEdit(true);
 
     const previousEntries = entries;
     // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
-    // (実際にAsyncStorageへ書き込む内容はenqueueDiaryWrite内で読み直した最新データを元にする)
-    setEntries(
-      entries.map((entry) => (entry.id === editingEntryId ? { ...entry, text: trimmed } : entry)),
-    );
+    // (実際にAsyncStorageへ書き込む内容はenqueueDiaryWriteに渡すupdatedEntryそのもの)
+    setEntries(entries.map((entry) => (entry.id === editingEntryId ? updatedEntry : entry)));
     setEditError(null);
 
     try {
-      // 他の保存/編集/削除処理と競合しないよう、書き込みはキュー経由で直列化し、
-      // 実行直前に読み直した最新データに対して対象エントリのtextのみを更新する(createdAtは変更しない)
-      const persistedEntries = await enqueueDiaryWrite((latestEntries) =>
-        latestEntries.map((entry) =>
-          entry.id === editingEntryId ? { ...entry, text: trimmed } : entry,
-        ),
-      );
-      // 実際に永続化された内容でUIを真の永続化状態と一致させる
-      setEntries(persistedEntries);
+      // 他の保存/編集/削除処理と競合しないよう、書き込みはキュー経由で直列化する
+      // (このエントリ専用のキーへの書き込みのみで完結する)
+      await enqueueDiaryWrite({ type: 'save', entry: updatedEntry });
+      // 既に楽観的更新でReact stateは正しい内容になっているため、永続化された内容での
+      // setEntriesによる再同期は不要
       // 永続化に成功した場合のみ編集モーダルを閉じる
       setEditingEntryId(null);
       setEditDraft('');
@@ -552,17 +549,14 @@ export default function HomeScreen() {
     async (entryId: string) => {
       const previousEntries = entries;
       // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
-      // (実際にAsyncStorageへ書き込む内容はenqueueDiaryWrite内で読み直した最新データを元にする)
       setEntries(entries.filter((entry) => entry.id !== entryId));
 
       try {
-        // 他の保存/編集/削除処理と競合しないよう、書き込みはキュー経由で直列化し、
-        // 実行直前に読み直した最新データから対象エントリを取り除く
-        const persistedEntries = await enqueueDiaryWrite((latestEntries) =>
-          latestEntries.filter((entry) => entry.id !== entryId),
-        );
-        // 実際に永続化された内容でUIを真の永続化状態と一致させる
-        setEntries(persistedEntries);
+        // 他の保存/編集/削除処理と競合しないよう、書き込みはキュー経由で直列化する
+        // (このエントリ専用のキーの削除のみで完結する)
+        await enqueueDiaryWrite({ type: 'delete', id: entryId });
+        // 既に楽観的更新でReact stateは正しい内容になっているため、永続化された内容での
+        // setEntriesによる再同期は不要
       } catch {
         // 永続化に失敗した場合は削除前の状態に戻す
         setEntries(previousEntries);

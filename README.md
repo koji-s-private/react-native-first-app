@@ -183,23 +183,23 @@ type DiaryEntry = {
 ```
 
 - **保存先**: `@react-native-async-storage/async-storage`（端末内ストレージ）
-- **保存キー**: `'diary-entries'`
-- **保存形式**: `DiaryEntry[]`（新しいエントリが配列の先頭に追加される）を `JSON.stringify` した文字列を、`utils/diary-encryption.ts` の `encryptText()` でAES-256-GCM暗号化した文字列（`'encrypted:v1:'` から始まる）
+- **保存キー**: エントリ1件ごとに個別のキー `diary-entry:<id>`（Issue #83。1件の保存/削除の書き込みコストがエントリ総数に依存しない）。移行元となる旧方式の単一キー `'diary-entries'`（全件を1つの配列としてまとめて保存する方式）も、後方互換のため`utils/diary-storage.ts`に定数として残っている
+- **保存形式**: `DiaryEntry` 1件分を `JSON.stringify` した文字列を、`utils/diary-encryption.ts` の `encryptText()` でAES-256-GCM暗号化した文字列（`'encrypted:v1:'` から始まる）にして、対応する個別キーへ保存する
 - **暗号鍵の管理**: 端末ごとに一度だけ `expo-crypto` の `getRandomBytes()` で生成した256bit鍵を `expo-secure-store`（iOSはKeychain、AndroidはKeystoreに保存される）に保持する。鍵自体がAsyncStorageや平文で保存されることはない
-- **読み込み**: 画面表示時（`useEffect`）に `AsyncStorage.getItem('diary-entries')` を呼び出し、保存値が暗号化形式(`'encrypted:v1:'`始まり)であれば復号してから、そうでなければ暗号化対応前の平文JSONとしてそのまま `JSON.parse` して state にセットする（後方互換のマイグレーション。次回保存時から暗号化形式に移行する）。ストレージが壊れている・スキーマ不整合・復号失敗の場合は空配列にフォールバックする
+- **読み込み**: 画面表示時（`useFocusEffect`）に `utils/diary-storage.ts` の `getAllDiaryEntries()` を呼び出す。まず旧方式の単一キー（`'diary-entries'`）にデータが残っていないか確認し、残っていれば個別キー方式へ自動移行してから、`AsyncStorage.getAllKeys()`/`multiGet()` で個別キーを全件読み込む（保存値が暗号化形式でなければ暗号化対応前の平文JSONとしてそのまま `JSON.parse` する、後方互換のマイグレーション）。`createdAt` の降順（新しい順）にソートして返す。ストレージが壊れている・スキーマ不整合・復号失敗の場合は該当エントリのみスキップし、全体が読み込めない場合は空配列にフォールバックする
 - **保存失敗時の挙動**: 保存前の state に巻き戻し、画面にエラーメッセージ（`保存に失敗しました。もう一度お試しください。`）を表示する
-- **全件削除**: ストアのデータ削除要件（Google Play/Apple双方でユーザーによるデータ削除手段の提供が求められる）に対応するため、設定タブ（`app/(tabs)/settings.tsx`）から確認ダイアログ（キャンセル可能）付きで日記データを全件削除できる。実体は `utils/diary-storage.ts` の `clearAllDiaryEntries()`（`AsyncStorage.removeItem('diary-entries')`）で、暗号鍵など他のキーには影響しない
+- **全件削除**: ストアのデータ削除要件（Google Play/Apple双方でユーザーによるデータ削除手段の提供が求められる）に対応するため、設定タブ（`app/(tabs)/settings.tsx`）から確認ダイアログ（キャンセル可能）付きで日記データを全件削除できる。実体は `utils/diary-storage.ts` の `clearAllDiaryEntries()`（個別キーを`multiRemove`し、念のため旧方式の単一キーも`removeItem`する）で、暗号鍵など他のキーには影響しない
 
 ### ER図
 
-[AsyncStorage](https://react-native-async-storage.github.io/async-storage/) はキー・バリュー型のストレージであり、RDBのような「テーブル」は存在しませんが、保存キー `diary-entries` に配列として永続化される `DiaryEntry` を1つの概念的なエンティティとみなし、[Mermaid](https://mermaid.js.org/) の `erDiagram` 記法で図示しています（GitHub上のMarkdownプレビューで追加パッケージなしにレンダリングされます）。
+[AsyncStorage](https://react-native-async-storage.github.io/async-storage/) はキー・バリュー型のストレージであり、RDBのような「テーブル」は存在しませんが、キー `diary-entry:<id>` に1件ずつ永続化される `DiaryEntry` を1つの概念的なエンティティとみなし、[Mermaid](https://mermaid.js.org/) の `erDiagram` 記法で図示しています（GitHub上のMarkdownプレビューで追加パッケージなしにレンダリングされます）。
 
 現時点ではエンティティが `DiaryEntry` の1つのみのためリレーションはありません。今後、AI分析結果や気分トレンドなど新しいデータ（エンティティ）を追加した場合は、このER図にもエンティティ・リレーションを追記していく想定です。
 
 ```mermaid
 erDiagram
     %% AsyncStorageはキー・バリューストアのため「テーブル」は概念的なものです。
-    %% 保存キー'diary-entries'に配列として保存されるDiaryEntryエンティティを表しています。
+    %% キー'diary-entry:<id>'に1件ずつ保存されるDiaryEntryエンティティを表しています。
     %% 今後AI分析・気分トレンドなど新しいエンティティを追加した際は、この図も更新してください。
     DiaryEntry {
         string id PK
