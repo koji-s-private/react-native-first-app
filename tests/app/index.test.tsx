@@ -16,6 +16,7 @@ import {
   useColorScheme,
   View,
 } from 'react-native';
+import { Calendar } from 'react-native-calendars';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import HomeScreen from '@/app/(tabs)/index';
@@ -2294,6 +2295,230 @@ describe('HomeScreen', () => {
     });
   });
 
+
+  describe('カレンダーの年月ジャンプ用ピッカー(Issue #76)', () => {
+    // react-native-calendarsに設定しているロケール(実装側のJA_MONTH_NAMES)と同じ表記。
+    // 実装からは直接importできないため、テスト側でも同じ配列を用意する
+    const MONTH_NAMES_JA = [
+      '1月',
+      '2月',
+      '3月',
+      '4月',
+      '5月',
+      '6月',
+      '7月',
+      '8月',
+      '9月',
+      '10月',
+      '11月',
+      '12月',
+    ];
+
+    // react-native-calendarsのヘッダーは`importantForAccessibility="no-hide-descendants"`で
+    // 内部テキストをアクセシビリティツリーから隠している(画面上には表示されている)ため、
+    // `includeHiddenElements`を指定して検索する(既存の「カレンダー表示とモーダル」テストと同様)
+    function findCalendarHeaderText(year: number, month: number) {
+      return screen.findByText(`${year}年${month}月 ▾`, { includeHiddenElements: true });
+    }
+
+    // モーダルは[日付一覧, 編集, 年月ピッカー]の順でJSXに並んでいる(実装側app/(tabs)/index.tsx参照)
+    function getMonthPickerModal() {
+      return screen.UNSAFE_getAllByType(Modal)[2];
+    }
+
+    async function openMonthPicker(now: Date) {
+      const headerText = await findCalendarHeaderText(now.getFullYear(), now.getMonth() + 1);
+      fireEvent.press(headerText);
+      await screen.findByText('年月を選択');
+    }
+
+    it('opens the month picker modal, showing a year stepper and all 12 month buttons, when the calendar header heading is tapped (正常系)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+
+      expect(screen.getByText(`${now.getFullYear()}年`)).toBeTruthy();
+      for (const monthName of MONTH_NAMES_JA) {
+        expect(screen.getByText(monthName)).toBeTruthy();
+      }
+    });
+
+    it('sets accessibilityRole="button" and a descriptive accessibilityLabel on the header heading, so it is discoverable as a tappable control by screen readers (正常系)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const headerButton = screen.getByLabelText(
+        `${now.getFullYear()}年${now.getMonth() + 1}月、年月を選択して移動`,
+        { includeHiddenElements: true },
+      );
+      expect(headerButton.props.accessibilityRole).toBe('button');
+    });
+
+    it('increments/decrements the picker year via the "›"/"‹" year stepper buttons, without jumping the calendar until a month button is pressed (正常系)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+
+      fireEvent.press(screen.getByLabelText('次の年'));
+      expect(screen.getByText(`${now.getFullYear() + 1}年`)).toBeTruthy();
+
+      fireEvent.press(screen.getByLabelText('前の年'));
+      fireEvent.press(screen.getByLabelText('前の年'));
+      expect(screen.getByText(`${now.getFullYear() - 1}年`)).toBeTruthy();
+
+      // 年ステッパーの操作だけではカレンダー本体の表示月はまだジャンプしていない
+      expect(await findCalendarHeaderText(now.getFullYear(), now.getMonth() + 1)).toBeTruthy();
+    });
+
+    it('jumps the calendar to the selected year/month and closes the modal when a month button is tapped (正常系)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+
+      fireEvent.press(screen.getByLabelText('次の年'));
+      const targetYear = now.getFullYear() + 1;
+      fireEvent.press(screen.getByLabelText(`${targetYear}年3月へ移動`));
+
+      // モーダルが閉じる
+      await waitFor(() => expect(screen.queryByText('年月を選択')).toBeNull());
+
+      // ヘッダーの見出しがジャンプ先の年月に更新される
+      expect(await findCalendarHeaderText(targetYear, 3)).toBeTruthy();
+
+      // Calendar本体へもジャンプ先のinitialDateが渡され、実際にその月へジャンプする
+      const [calendar] = screen.UNSAFE_getAllByType(Calendar);
+      expect(calendar.props.initialDate).toBe(`${targetYear}-03-01`);
+    });
+
+    it('closes the month picker modal without jumping when the semi-transparent background overlay is tapped, discarding unselected year-stepper changes (正常系: モーダルを閉じる操作)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+      fireEvent.press(screen.getByLabelText('次の年'));
+
+      const overlay = getModalOverlayPressable(getMonthPickerModal());
+      fireEvent.press(overlay);
+
+      await waitFor(() => expect(screen.queryByText('年月を選択')).toBeNull());
+      // 実際の表示年月は変わっていない
+      expect(await findCalendarHeaderText(now.getFullYear(), now.getMonth() + 1)).toBeTruthy();
+    });
+
+    it('closes the month picker modal via its own close button ("閉じる"), matching the pattern used by the other modals (正常系)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+      fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
+
+      await waitFor(() => expect(screen.queryByText('年月を選択')).toBeNull());
+    });
+
+    it('resets the picker to the currently displayed year each time it is reopened, discarding any unselected year-stepper changes from a previous open (境界値)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+      fireEvent.press(screen.getByLabelText('次の年'));
+      fireEvent.press(screen.getByLabelText('次の年'));
+      expect(screen.getByText(`${now.getFullYear() + 2}年`)).toBeTruthy();
+
+      fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
+      await waitFor(() => expect(screen.queryByText('年月を選択')).toBeNull());
+
+      await openMonthPicker(now);
+      expect(screen.getByText(`${now.getFullYear()}年`)).toBeTruthy();
+      expect(screen.queryByText(`${now.getFullYear() + 2}年`)).toBeNull();
+    });
+
+    it('syncs the header heading and the picker\'s initial year to the new month when the calendar reports a month change via swipe/arrow navigation, crossing a year boundary forward (境界値: 12月→翌年1月)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const [calendar] = screen.UNSAFE_getAllByType(Calendar);
+      const nextYear = now.getFullYear() + 1;
+      act(() => {
+        calendar.props.onMonthChange({
+          year: nextYear,
+          month: 1,
+          day: 1,
+          timestamp: new Date(nextYear, 0, 1).getTime(),
+          dateString: `${nextYear}-01-01`,
+        });
+      });
+
+      expect(await findCalendarHeaderText(nextYear, 1)).toBeTruthy();
+
+      // ピッカーを開くと、スワイプ後の新しい年が初期選択された状態になる
+      fireEvent.press(await findCalendarHeaderText(nextYear, 1));
+      expect(await screen.findByText(`${nextYear}年`)).toBeTruthy();
+      const januaryButton = screen.getByLabelText(`${nextYear}年1月へ移動`);
+      expect(januaryButton.props.accessibilityState?.selected).toBe(true);
+    });
+
+    it('syncs the header heading to the new month when the calendar reports a month change crossing a year boundary backward (境界値: 1月→前年12月)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const [calendar] = screen.UNSAFE_getAllByType(Calendar);
+      const previousYear = now.getFullYear() - 1;
+      act(() => {
+        calendar.props.onMonthChange({
+          year: previousYear,
+          month: 12,
+          day: 1,
+          timestamp: new Date(previousYear, 11, 1).getTime(),
+          dateString: `${previousYear}-12-01`,
+        });
+      });
+
+      expect(await findCalendarHeaderText(previousYear, 12)).toBeTruthy();
+    });
+
+    it('marks the month button matching the currently displayed year/month as selected (accessibilityState.selected), and other months as not selected (正常系/境界値)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+
+      const currentMonthLabel = `${now.getFullYear()}年${MONTH_NAMES_JA[now.getMonth()]}へ移動`;
+      const currentMonthButton = screen.getByLabelText(currentMonthLabel);
+      expect(currentMonthButton.props.accessibilityState?.selected).toBe(true);
+
+      const otherMonthIndex = (now.getMonth() + 6) % 12;
+      const otherMonthLabel = `${now.getFullYear()}年${MONTH_NAMES_JA[otherMonthIndex]}へ移動`;
+      const otherMonthButton = screen.getByLabelText(otherMonthLabel);
+      expect(otherMonthButton.props.accessibilityState?.selected).toBe(false);
+    });
+
+    it('does not mark any month button as selected once the picker year has been stepped away from the currently displayed year, since none of that year\'s months match the display (境界値/異常系)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+      fireEvent.press(screen.getByLabelText('次の年'));
+
+      for (const monthName of MONTH_NAMES_JA) {
+        const button = screen.getByLabelText(`${now.getFullYear() + 1}年${monthName}へ移動`);
+        expect(button.props.accessibilityState?.selected).toBe(false);
+      }
+    });
+  });
   describe('カレンダーセルの複数件数バッジ(Issue #72)', () => {
     // 同じ日に2件以上の日記がある場合、カレンダーセルの右上に「+N」の件数バッジを表示する。
     // バッジの本体View(styles.entryCountBadge)は`minWidth: 16, height: 16`という
