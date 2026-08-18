@@ -1834,9 +1834,10 @@ describe('HomeScreen', () => {
 
       // react-native-calendarsのヘッダーは`importantForAccessibility="no-hide-descendants"`で
       // 内部テキストをアクセシビリティツリーから隠している(画面上には表示されている)ため、
-      // `includeHiddenElements`を指定して検索する。
+      // `includeHiddenElements`を指定して検索する。年月ジャンプ用ピッカー(Issue #76)を開ける
+      // ボタンであることを示す末尾の"▾"込みの表記になる。
       expect(
-        await screen.findByText(`${now.getFullYear()}年${now.getMonth() + 1}月`, {
+        await screen.findByText(`${now.getFullYear()}年${now.getMonth() + 1}月 ▾`, {
           includeHiddenElements: true,
         }),
       ).toBeTruthy();
@@ -2238,14 +2239,14 @@ describe('HomeScreen', () => {
       });
     });
 
-    it('sets statusBarTranslucent and navigationBarTranslucent on both the entry-list modal and the edit modal, so they match the edge-to-edge display of the screen behind them (Issue #94)', async () => {
+    it('sets statusBarTranslucent and navigationBarTranslucent on the entry-list modal, the edit modal, and the month picker modal, so they match the edge-to-edge display of the screen behind them (Issue #94)', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      // 日付タップ時の一覧モーダルと編集モーダルの2つが常にツリーに存在する
+      // 日付タップ時の一覧モーダル・編集モーダル・年月ピッカーモーダル(Issue #76)の3つが常にツリーに存在する
       // (visibleプロパティで表示/非表示を切り替えているだけで、条件付きレンダリングではないため)
       const modals = screen.UNSAFE_getAllByType(Modal);
-      expect(modals).toHaveLength(2);
+      expect(modals).toHaveLength(3);
       for (const modal of modals) {
         expect(modal.props.statusBarTranslucent).toBe(true);
         expect(modal.props.navigationBarTranslucent).toBe(true);

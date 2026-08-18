@@ -74,36 +74,27 @@ const CALENDAR_WEEK_ROW_MARGIN = 14;
 // CalendarPropsから抽出して利用する)
 type DayComponentProps = ComponentProps<NonNullable<CalendarProps['dayComponent']>>;
 
+// 日本語の月名。react-native-calendarsのロケール設定(月名・月省略名)と、
+// 年月ジャンプ用ピッカーの月ボタン表示の両方で共有する
+const JA_MONTH_NAMES = [
+  '1月',
+  '2月',
+  '3月',
+  '4月',
+  '5月',
+  '6月',
+  '7月',
+  '8月',
+  '9月',
+  '10月',
+  '11月',
+  '12月',
+];
+
 // アプリ全体が日本語UIのため、カレンダーの月名・曜日名・「今日」ボタンの表記も日本語化する
 LocaleConfig.locales.ja = {
-  monthNames: [
-    '1月',
-    '2月',
-    '3月',
-    '4月',
-    '5月',
-    '6月',
-    '7月',
-    '8月',
-    '9月',
-    '10月',
-    '11月',
-    '12月',
-  ],
-  monthNamesShort: [
-    '1月',
-    '2月',
-    '3月',
-    '4月',
-    '5月',
-    '6月',
-    '7月',
-    '8月',
-    '9月',
-    '10月',
-    '11月',
-    '12月',
-  ],
+  monthNames: JA_MONTH_NAMES,
+  monthNamesShort: JA_MONTH_NAMES,
   dayNames: ['日曜日', '月曜日', '火曜日', '水曜日', '木曜日', '金曜日', '土曜日'],
   dayNamesShort: ['日', '月', '火', '水', '木', '金', '土'],
   today: '今日',
@@ -252,6 +243,21 @@ export default function HomeScreen() {
   // `flex: 1`で使い切るView)の実測高さ(onLayoutで取得)。この外枠自体に枠線・角丸を付け、
   // 日付グリッドの高さもこの実測値を基準に算出することで、外枠と日付グリッドの基準を一致させる
   const [wrapperHeight, setWrapperHeight] = useState(0);
+  // カレンダーに現在表示中の年・月。react-native-calendarsのCalendarは`current`propを
+  // 初回マウント時にしか参照しないため(以降のジャンプにはinitialDateを使う。下記
+  // calendarInitialDateのコメント参照)、ヘッダーの年月表示・年月ピッカーの初期選択・
+  // 月ボタンのハイライトはこのstateを正とする。onMonthChangeでユーザーのスワイプ/矢印操作にも追従する
+  const [displayedYear, setDisplayedYear] = useState(() => new Date().getFullYear());
+  const [displayedMonth, setDisplayedMonth] = useState(() => new Date().getMonth() + 1);
+  // Calendarへ渡す'YYYY-MM-DD'形式の日付。react-native-calendars内部の実装上、`current`propは
+  // 初回マウント時の初期値としてしか使われず、マウント後に値を変えても表示月は追従しない一方、
+  // `initialDate`propは値が変わるたびにその月へ強制的にジャンプする挙動になっているため、
+  // 年月ピッカーで選択された年月へジャンプさせる用途にはこちらを使う
+  const [calendarInitialDate, setCalendarInitialDate] = useState(() => toDateKey(new Date()));
+  // 年月ジャンプ用ピッカーモーダルの表示状態と、ピッカー内で選択中の年
+  // (月は上のdisplayedMonthをそのまま参照する)
+  const [isMonthPickerVisible, setIsMonthPickerVisible] = useState(false);
+  const [pickerYear, setPickerYear] = useState(displayedYear);
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
   const backgroundColor = useThemeColor({}, 'background');
@@ -639,6 +645,59 @@ export default function HomeScreen() {
     return Math.max(DEFAULT_DAY_CELL_HEIGHT, perRowHeight);
   }, [wrapperHeight]);
 
+  // スワイプ・矢印操作でカレンダーの表示月が変わった際、ヘッダー表示と年月ピッカーの
+  // ハイライトをその月に追従させる(ピッカー経由のジャンプ以外の全ての月変更手段をカバーする)
+  const handleMonthChange = useCallback((date: DateData) => {
+    setDisplayedYear(date.year);
+    setDisplayedMonth(date.month);
+  }, []);
+
+  // ヘッダーの年月表示をタップすると、現在表示中の年を初期選択状態にしてピッカーを開く
+  const handleOpenMonthPicker = useCallback(() => {
+    setPickerYear(displayedYear);
+    setIsMonthPickerVisible(true);
+  }, [displayedYear]);
+
+  const handleCloseMonthPicker = useCallback(() => {
+    setIsMonthPickerVisible(false);
+  }, []);
+
+  const handlePickerYearStep = useCallback((delta: number) => {
+    setPickerYear((year) => year + delta);
+  }, []);
+
+  // 月ボタンが選択されたら、その年月の1日をcalendarInitialDateへセットしてカレンダーをジャンプさせる
+  const handleSelectMonth = useCallback(
+    (month: number) => {
+      setDisplayedYear(pickerYear);
+      setDisplayedMonth(month);
+      setCalendarInitialDate(`${pickerYear}-${`${month}`.padStart(2, '0')}-01`);
+      setIsMonthPickerVisible(false);
+    },
+    [pickerYear],
+  );
+
+  // react-native-calendarsのrenderHeaderは矢印・曜日行はそのまま維持しつつ、中央の見出し部分のみを
+  // 差し替える仕組みのため、既存のスワイプ・矢印での月送りやレイアウトに影響を与えず、
+  // 見出しをタップ可能なボタンに置き換えられる
+  const renderCalendarHeader = useCallback(() => {
+    return (
+      <Pressable
+        onPress={handleOpenMonthPicker}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={`${displayedYear}年${displayedMonth}月、年月を選択して移動`}
+      >
+        <ThemedText
+          allowFontScaling={false}
+          style={[styles.calendarHeaderText, { color: textColor }]}
+        >
+          {displayedYear}年{displayedMonth}月 ▾
+        </ThemedText>
+      </Pressable>
+    );
+  }, [displayedYear, displayedMonth, handleOpenMonthPicker, textColor]);
+
   const handleDayPress = useCallback(
     (date: DateData) => {
       // 日記が無い日は何も表示しない(タップしても反応しない)
@@ -878,19 +937,20 @@ export default function HomeScreen() {
                     textSectionTitleColor: textColor,
                     textDayHeaderFontWeight: '600',
                     dayTextColor: textColor,
-                    // 月・年の見出しも大きく太字にして、矢印の間で確実に視認できるようにする
-                    monthTextColor: textColor,
-                    textMonthFontWeight: '700',
-                    textMonthFontSize: 18,
                     arrowColor: tintColor,
                     todayTextColor: tintColor,
                   }}
-                  // 「2026年8月」のように年→月の順で表示する(デフォルトの'MMMM yyyy'は英語の語順のまま
-                  // 月名だけ日本語化されてしまい不自然なため)
-                  monthFormat="yyyy年M月"
                   dayComponent={renderDay}
                   onDayPress={handleDayPress}
+                  // 月・年の見出しを「2026年8月」のような日本語の語順で表示しつつ、タップで
+                  // 年月ジャンプ用ピッカーを開けるボタンに差し替える(矢印・曜日行はそのまま維持される)
+                  renderHeader={renderCalendarHeader}
                   enableSwipeMonths
+                  // ピッカーから任意の年月へジャンプするための制御用prop(詳細は
+                  // calendarInitialDate stateのコメント参照)。スワイプ・矢印操作による
+                  // 表示月の変化はonMonthChangeでstate側に反映する
+                  initialDate={calendarInitialDate}
+                  onMonthChange={handleMonthChange}
                   // 月によって行数(4〜6週)が変わって高さがガタつかないよう、常に6週分の高さで揃える
                   showSixWeeks
                 />
@@ -1042,6 +1102,79 @@ export default function HomeScreen() {
             </Pressable>
           </KeyboardAvoidingView>
         </Modal>
+
+        <Modal
+          visible={isMonthPickerVisible}
+          animationType="slide"
+          transparent
+          onRequestClose={handleCloseMonthPicker}
+          statusBarTranslucent
+          navigationBarTranslucent
+        >
+          {/* 背景の半透明オーバーレイをタップした場合はモーダルを閉じる(他のモーダルと同じパターン) */}
+          <Pressable style={styles.modalOverlay} onPress={handleCloseMonthPicker}>
+            <ThemedView
+              style={[styles.modalContent, { borderColor: iconColor }]}
+              // オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
+              // modalContent内でのタッチ開始をこのViewがレスポンダーとして引き受け、伝播を止める
+              onStartShouldSetResponder={() => true}
+            >
+              <View style={styles.modalHeader}>
+                <ThemedText type="subtitle">年月を選択</ThemedText>
+                <Pressable onPress={handleCloseMonthPicker}>
+                  <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
+                    閉じる
+                  </ThemedText>
+                </Pressable>
+              </View>
+              <View style={styles.yearStepperRow}>
+                <Pressable
+                  onPress={() => handlePickerYearStep(-1)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="前の年"
+                >
+                  <ThemedText style={[styles.yearStepperArrow, { color: tintColor }]}>‹</ThemedText>
+                </Pressable>
+                <ThemedText type="subtitle">{pickerYear}年</ThemedText>
+                <Pressable
+                  onPress={() => handlePickerYearStep(1)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="次の年"
+                >
+                  <ThemedText style={[styles.yearStepperArrow, { color: tintColor }]}>›</ThemedText>
+                </Pressable>
+              </View>
+              <View style={styles.monthGrid}>
+                {JA_MONTH_NAMES.map((monthName, index) => {
+                  const month = index + 1;
+                  const isSelected = pickerYear === displayedYear && month === displayedMonth;
+                  return (
+                    <Pressable
+                      key={monthName}
+                      style={[
+                        styles.monthGridButton,
+                        { borderColor: iconColor },
+                        isSelected ? { backgroundColor: tintColor, borderColor: tintColor } : null,
+                      ]}
+                      onPress={() => handleSelectMonth(month)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${pickerYear}年${monthName}へ移動`}
+                      accessibilityState={{ selected: isSelected }}
+                    >
+                      <ThemedText
+                        style={isSelected ? { color: backgroundColor } : { color: textColor }}
+                      >
+                        {monthName}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </ThemedView>
+          </Pressable>
+        </Modal>
       </TabScreenContainer>
     </KeyboardAvoidingView>
   );
@@ -1135,6 +1268,37 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     // 実測に多少の誤差があっても、日付グリッドが外枠からはみ出して見えないようにする保険
     overflow: 'hidden',
+  },
+  calendarHeaderText: {
+    // react-native-calendarsのデフォルト見出し(textMonthFontSize/textMonthFontWeight)と
+    // 揃えた見た目にしつつ、タップ可能なボタンであることが伝わるよう末尾に▾を付けている
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  yearStepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 24,
+  },
+  yearStepperArrow: {
+    fontSize: 24,
+    fontWeight: '700',
+    paddingHorizontal: 8,
+  },
+  monthGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  monthGridButton: {
+    // 3列×4行で12ヶ月分を均等に並べる(gap込みで4等分すると幅がはみ出すため、
+    // gap分の余白を差し引いてから3等分している)
+    width: '31%',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
   },
   dayCell: {
     alignItems: 'center',
