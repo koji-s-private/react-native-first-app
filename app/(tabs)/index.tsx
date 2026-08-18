@@ -757,6 +757,9 @@ export default function HomeScreen() {
               value={draft}
               onChangeText={handleChangeDraft}
               multiline
+              // placeholderはフォーカス後に読み上げられない環境があるため、
+              // スクリーンリーダー向けに明示的なラベルを付ける
+              accessibilityLabel="日記本文"
               // maxLength propはUTF-16コードユニット単位でしか制限できないためあえて指定せず、
               // handleChangeDraft側でgrapheme単位の切り詰めを行っている
             />
@@ -781,6 +784,9 @@ export default function HomeScreen() {
                 ]}
                 onPress={handleSave}
                 disabled={!draft.trim() || isSaving}
+                accessibilityRole="button"
+                accessibilityLabel="保存"
+                accessibilityState={{ disabled: !draft.trim() || isSaving }}
               >
                 <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
                   保存
@@ -994,6 +1000,8 @@ export default function HomeScreen() {
                   value={editDraft}
                   onChangeText={handleChangeEditDraft}
                   multiline
+                  // draft用TextInputと同様、スクリーンリーダー向けに明示的なラベルを付ける
+                  accessibilityLabel="日記本文"
                   // draft用TextInputと同様の理由でmaxLength propはあえて指定しない
                 />
                 <View style={styles.composerFooter}>
@@ -1016,6 +1024,9 @@ export default function HomeScreen() {
                     ]}
                     onPress={handleSaveEdit}
                     disabled={!editDraft.trim() || isSavingEdit}
+                    accessibilityRole="button"
+                    accessibilityLabel="保存"
+                    accessibilityState={{ disabled: !editDraft.trim() || isSavingEdit }}
                   >
                     <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
                       保存
