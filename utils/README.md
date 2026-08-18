@@ -23,10 +23,13 @@ utils/
 
 ## `diary-storage.ts` の構成
 
-日記データのAsyncStorageキー(`diary-entries`)を`app/(tabs)/index.tsx`(保存・読み込み)と設定画面(全件削除)で共有するためのユーティリティです。
+日記データのAsyncStorageキーを`app/(tabs)/index.tsx`(保存・読み込み)と設定画面(全件削除・エクスポート)で共有するためのユーティリティです。エントリ1件ごとに個別のAsyncStorageキー(`diary-entry:<id>`)へ保存する方式を採用しており(Issue #83)、1件の保存/削除の書き込みコストがエントリ総数に依存しない(O(1))ようにしています。
 
-- `DIARY_ENTRIES_STORAGE_KEY`: 日記データのAsyncStorageキーの定数。
-- `clearAllDiaryEntries()`: 日記データのみをAsyncStorageから`removeItem`で削除します。暗号鍵(`expo-secure-store`側)など日記データ以外のキーには影響しません。ストアのデータ削除要件(Google Play/Apple双方でユーザーによるデータ削除手段の提供が求められる)に対応するため、[`app/(tabs)/settings.tsx`](<../app/(tabs)/settings.tsx>)の確認ダイアログ付きボタンから呼び出されます。
+- `DIARY_ENTRIES_STORAGE_KEY`: 旧方式(全件を1つの配列としてまとめて保存する単一キー)のAsyncStorageキーの定数。現在は移行(マイグレーション)元としてのみ参照されます。
+- `DIARY_ENTRY_KEY_PREFIX` / `buildDiaryEntryKey(id)`: エントリ単位の個別キー(`diary-entry:<id>`)のプレフィックスと、idからキー文字列を組み立てる関数です。
+- `getAllDiaryEntries()`: 保存済みの日記データを全件取得します。呼び出しの冒頭で`DIARY_ENTRIES_STORAGE_KEY`にレガシーデータが残っていないか確認し、残っていれば個別キー方式へ自動移行してから読み込みます(移行は複数回呼ばれても安全)。`createdAt`の降順(新しい順)にソートして返します。
+- `saveDiaryEntry(entry)` / `deleteDiaryEntry(id)`: エントリ1件を、対応する個別キーに対してのみ保存・削除します。
+- `clearAllDiaryEntries()`: 日記データ(個別キー方式のエントリ、および念のためレガシーキー)のみをAsyncStorageから削除します。暗号鍵(`expo-secure-store`側)など日記データ以外のキーには影響しません。ストアのデータ削除要件(Google Play/Apple双方でユーザーによるデータ削除手段の提供が求められる)に対応するため、[`app/(tabs)/settings.tsx`](<../app/(tabs)/settings.tsx>)の確認ダイアログ付きボタンから呼び出されます。
 
 ## `onboarding-storage.ts` の構成
 

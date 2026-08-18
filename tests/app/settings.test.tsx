@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
+import * as SecureStore from 'expo-secure-store';
 import * as Sharing from 'expo-sharing';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
@@ -89,6 +90,42 @@ jest.mock('expo-sharing', () => ({
   shareAsync: jest.fn(() => Promise.resolve()),
 }));
 
+// `getAllDiaryEntries`はレガシー(平文)データの移行時も含め、常に個別キーへの暗号化書き込みで
+// `getOrCreateEncryptionKey`(expo-crypto/expo-secure-store経由)を使うようになったため(Issue #83)、
+// `tests/app/index.test.tsx`と同じくNode標準の`crypto`モジュールで代替するモックが必要になる。
+jest.mock('expo-crypto', () => {
+  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
+  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const nodeCrypto = require('crypto');
+  return {
+    getRandomBytes: jest.fn((length: number) => new Uint8Array(nodeCrypto.randomBytes(length))),
+    randomUUID: jest.fn(() => nodeCrypto.randomUUID()),
+  };
+});
+
+// expo-secure-storeはjest-expoのオートモックだと`getItemAsync`が常に`undefined`を返し、
+// 状態を永続化しない。`tests/app/index.test.tsx`と同様、インメモリでキーと値を保持する
+// 独自モックに差し替える。
+jest.mock('expo-secure-store', () => {
+  let store: Record<string, string> = {};
+  return {
+    getItemAsync: jest.fn((key: string) => Promise.resolve(store[key] ?? null)),
+    setItemAsync: jest.fn((key: string, value: string) => {
+      store[key] = value;
+      return Promise.resolve();
+    }),
+    deleteItemAsync: jest.fn((key: string) => {
+      delete store[key];
+      return Promise.resolve();
+    }),
+    // テスト間で鍵の永続化状態を分離するためのヘルパー(実際のexpo-secure-storeには存在しない)
+    __reset: () => {
+      store = {};
+    },
+  };
+});
+
 // `ExternalLink`(内部で`expo-router`の`Link`を使う)や`Link`自体は、実機ではナビゲーション/
 // ルーターのコンテキストを必要とするため、画面を単体でレンダリングするこのテストでは利用できない。
 // 他のテスト(`tests/app/oss-licenses.test.tsx`等)と同じくパススルーのモックに差し替えるが、
@@ -124,6 +161,9 @@ const mockedDiaryReminderNotifications = require('@/utils/diary-reminder-notific
   scheduleDailyReminderAsync: jest.Mock;
   cancelDailyReminderAsync: jest.Mock;
 };
+
+// テストごとに暗号鍵の永続化状態を分離するための参照(tests/app/index.test.tsxと同じ方式)
+const secureStoreMock = SecureStore as unknown as { __reset: () => void };
 
 // jest.mockした'expo-file-system'の内部状態(キャッシュディレクトリの有無)・書き込み呼び出しを
 // テストごとに操作/検証するための参照
@@ -464,15 +504,17 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
 
 describe('日記データをエクスポートボタン(Issue #51: データ管理セクション)', () => {
   const EXPORT_BUTTON_LABEL = '日記データをエクスポート';
+  // getAllDiaryEntriesはcreatedAtの降順(新しい順)で返すため、あらかじめその順序で定義しておく
   const sampleEntriesJson = JSON.stringify([
-    { id: '1', text: '今日はいい天気でした。', createdAt: '2026-01-01T00:00:00.000Z' },
     { id: '2', text: '公園を散歩しました。', createdAt: '2026-01-02T00:00:00.000Z' },
+    { id: '1', text: '今日はいい天気でした。', createdAt: '2026-01-01T00:00:00.000Z' },
   ]);
 
   const originalPlatformOS = Platform.OS;
 
   beforeEach(async () => {
     await AsyncStorage.clear();
+    secureStoreMock.__reset();
     jest.clearAllMocks();
     // 各テストごとにモックの既定挙動をリセットする(個別のテストで上書きするため)
     mockedFileSystem.__mockState.cacheDirectoryUri = 'file:///mock-cache/';
@@ -659,6 +701,7 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
     let createdAnchor: { href: string; download: string; click: jest.Mock };
     const originalCreateObjectURL = URL.createObjectURL;
     const originalRevokeObjectURL = URL.revokeObjectURL;
+    let localStorageStore: Record<string, string>;
 
     beforeEach(() => {
       Platform.OS = 'web';
@@ -668,12 +711,32 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
       } as unknown as Document;
       URL.createObjectURL = jest.fn(() => 'blob:mock-url');
       URL.revokeObjectURL = jest.fn();
+      // Web版では暗号鍵の保存先がexpo-secure-storeではなくlocalStorageになる
+      // (utils/diary-encryption.ts参照)。テスト実行環境(Node)にはlocalStorageが存在しないため、
+      // `tests/utils/diary-encryption.test.ts`と同じ最小限のインメモリ実装を用意しておかないと、
+      // getAllDiaryEntries内で毎回異なる鍵が生成されてしまい復号に失敗する
+      localStorageStore = {};
+      (global as unknown as { localStorage: Storage }).localStorage = {
+        getItem: jest.fn((key: string) => localStorageStore[key] ?? null),
+        setItem: jest.fn((key: string, value: string) => {
+          localStorageStore[key] = value;
+        }),
+        removeItem: jest.fn((key: string) => {
+          delete localStorageStore[key];
+        }),
+        clear: jest.fn(() => {
+          localStorageStore = {};
+        }),
+        key: jest.fn(() => null),
+        length: 0,
+      } as unknown as Storage;
     });
 
     afterEach(() => {
       delete (global as unknown as { document?: Document }).document;
       URL.createObjectURL = originalCreateObjectURL;
       URL.revokeObjectURL = originalRevokeObjectURL;
+      delete (global as unknown as { localStorage?: Storage }).localStorage;
     });
 
     it('triggers a browser download instead of calling expo-file-system/expo-sharing (正常系: Webフォールバック)', async () => {

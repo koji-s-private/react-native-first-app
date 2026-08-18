@@ -23,6 +23,7 @@ import HomeScreen from '@/app/(tabs)/index';
 import { TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID } from '@/components/tab-screen-container';
 import { Colors } from '@/constants/theme';
 import { decryptText, encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
+import { buildDiaryEntryKey, type DiaryEntry } from '@/utils/diary-storage';
 
 // `expo-router`の`Link`(Trigger/Preview/Menuを伴う複合API)はナビゲーション/routerコンテキストを
 // 要求するため、単体レンダリングでも動くよう単純なパススルーコンポーネントに差し替える。
@@ -187,11 +188,34 @@ function queryCalendarDayButtons() {
 }
 
 // AsyncStorageに実際に永続化された値(暗号化済み文字列)を、テストで検証しやすいよう
-// 復号してJSONとしてパースするヘルパー。`getOrCreateEncryptionKey`は
+// 復号してJSONとしてパースするヘルパー。エントリ単位のキー方式(Issue #83)では
+// 1つの暗号化文字列は常に1エントリ分のオブジェクトを表す。`getOrCreateEncryptionKey`は
 // SecureStoreモックに永続化された鍵をそのまま返すため、画面側が使った鍵と同じ鍵が得られる。
-async function decryptPersistedEntries(encryptedValue: string): Promise<unknown> {
+async function decryptPersistedEntry(encryptedValue: string): Promise<unknown> {
   const key = await getOrCreateEncryptionKey();
   return JSON.parse(decryptText(encryptedValue, key));
+}
+
+// テストの事前状態として、指定したエントリ群をエントリ単位の個別キー(`diary-entry:<id>`)へ
+// 暗号化して直接書き込むヘルパー。実装側(utils/diary-storage.ts)の保存方式と揃えることで、
+// レガシーの単一キー方式からの移行(マイグレーション)を経由せずに直接テスト対象の状態を作れる。
+async function seedDiaryEntries(entries: DiaryEntry[]): Promise<void> {
+  const key = await getOrCreateEncryptionKey();
+  for (const entry of entries) {
+    await AsyncStorage.setItem(
+      buildDiaryEntryKey(entry.id),
+      encryptText(JSON.stringify(entry), key),
+    );
+  }
+}
+
+// 個別キー方式で保存されているエントリを1件、AsyncStorageから直接読み取って復号するヘルパー
+async function readPersistedEntry(id: string): Promise<DiaryEntry | null> {
+  const stored = await AsyncStorage.getItem(buildDiaryEntryKey(id));
+  if (!stored) {
+    return null;
+  }
+  return (await decryptPersistedEntry(stored)) as DiaryEntry;
 }
 
 // `Calendar`はcurrent/initialDate未指定のため実行時点の「今日」を含む月を表示する。
@@ -620,9 +644,8 @@ describe('HomeScreen', () => {
       expect((value as string).startsWith(ENCRYPTED_PREFIX)).toBe(true);
       expect(() => JSON.parse(value)).toThrow();
 
-      const persisted = (await decryptPersistedEntries(value)) as { text: string }[];
-      expect(persisted).toHaveLength(1);
-      expect(persisted[0].text).toBe(exactlyMaxLength);
+      const persisted = (await decryptPersistedEntry(value)) as { text: string };
+      expect(persisted.text).toBe(exactlyMaxLength);
     });
 
     it('renders the character counter in red once the max length is reached, and in the normal color just below it (boundary)', async () => {
@@ -833,32 +856,35 @@ describe('HomeScreen', () => {
       expect(texts.indexOf('1件目の日記')).toBeLessThan(texts.indexOf('2件目の日記'));
     });
 
-    it('migrates plaintext entries to encrypted storage the next time an entry is saved', async () => {
+    it('migrates a legacy plaintext entry into its own encrypted per-entry key on load, and persists newly saved entries independently', async () => {
       const now = new Date();
       const storedEntries = [
         { id: 'old', text: '過去の日記', createdAt: isoAt(now, now.getDate(), 0, 0) },
       ];
-      // 暗号化対応前に保存された想定の平文JSON
+      // 暗号化対応前に保存された想定の平文JSON(レガシーの単一キー形式)
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
       jest.clearAllMocks();
 
       render(<HomeScreen />);
       await screen.findByText('過去の日記');
 
+      // マウント時の読み込みで、レガシーの単一キーは個別キー方式(暗号化済み)へ移行済みになっている
+      expect(await readPersistedEntry('old')).toEqual(storedEntries[0]);
+      expect(await AsyncStorage.getItem(STORAGE_KEY)).toBeNull();
+
       fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '今日の日記');
       fireEvent.press(screen.getByText('保存'));
 
       await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
       const [key, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
-      expect(key).toBe(STORAGE_KEY);
-
-      // 保存後は平文だったデータも含めて暗号化形式で書き戻される(後方互換マイグレーション)
+      // 新規保存は自分専用の個別キーにのみ書き込まれ、移行済みの過去の日記のキーには触れない
+      expect(key).not.toBe(STORAGE_KEY);
       expect((value as string).startsWith(ENCRYPTED_PREFIX)).toBe(true);
 
-      const persisted = (await decryptPersistedEntries(value)) as { text: string }[];
-      expect(persisted).toHaveLength(2);
-      expect(persisted.some((entry) => entry.text === '今日の日記')).toBe(true);
-      expect(persisted.some((entry) => entry.text === '過去の日記')).toBe(true);
+      const persisted = (await decryptPersistedEntry(value)) as { text: string };
+      expect(persisted.text).toBe('今日の日記');
+      // 移行済みの過去の日記はそのまま残っている
+      expect(await readPersistedEntry('old')).toEqual(storedEntries[0]);
 
       // セルのタイトルは変わらず一番早い時刻の「過去の日記」のまま
       expect(screen.getByText('過去の日記')).toBeTruthy();
@@ -903,8 +929,9 @@ describe('HomeScreen', () => {
       await screen.findByText('削除されるはずの日記');
       unmount();
 
-      // 設定タブでの「日記データを全件削除」操作を模して、AsyncStorageを直接空にする
-      await AsyncStorage.removeItem(STORAGE_KEY);
+      // 設定タブでの「日記データを全件削除」操作を模して、移行済みの個別キーを直接削除する
+      // (マウント時の読み込みでレガシーの単一キーは既に個別キー方式へ移行済みになっている)
+      await AsyncStorage.removeItem(buildDiaryEntryKey('old'));
 
       // 日記タブに戻ってくる(再フォーカス)と、保持していたstateではなくAsyncStorageを読み直す
       render(<HomeScreen />);
@@ -918,9 +945,10 @@ describe('HomeScreen', () => {
       await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalled());
       const setItemMock = AsyncStorage.setItem as jest.Mock;
       const [, value] = setItemMock.mock.calls[setItemMock.mock.calls.length - 1];
-      const persisted = (await decryptPersistedEntries(value)) as { text: string }[];
-      expect(persisted).toHaveLength(1);
-      expect(persisted[0].text).toBe('新しい日記');
+      const persisted = (await decryptPersistedEntry(value)) as { text: string };
+      expect(persisted.text).toBe('新しい日記');
+      // 削除済みだった過去のエントリは復活していない
+      expect(await readPersistedEntry('old')).toBeNull();
     });
 
     it('saves a new entry, persists it to AsyncStorage encrypted, and shows it together with an existing entry for the same day', async () => {
@@ -941,12 +969,13 @@ describe('HomeScreen', () => {
 
       await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
       const [savedKey, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
-      expect(savedKey).toBe(STORAGE_KEY);
+      // 新規保存は自分専用の個別キー(diary-entry:<uuid>)に書き込まれる
+      expect(savedKey).not.toBe(STORAGE_KEY);
 
-      const persisted = (await decryptPersistedEntries(value)) as { text: string }[];
-      expect(persisted).toHaveLength(2);
-      expect(persisted.some((entry) => entry.text === '今日の日記')).toBe(true);
-      expect(persisted.some((entry) => entry.text === '過去の日記')).toBe(true);
+      const persisted = (await decryptPersistedEntry(value)) as { text: string };
+      expect(persisted.text).toBe('今日の日記');
+      // 既存(移行済み)の過去の日記もそのまま残っている
+      expect(await readPersistedEntry('old')).toEqual(storedEntries[0]);
 
       // セルのタイトルは変わらず一番早い時刻の「過去の日記」のまま
       expect(screen.getByText('過去の日記')).toBeTruthy();
@@ -1132,8 +1161,8 @@ describe('HomeScreen', () => {
       // 送信した「保存中の日記」自体は正しく永続化される(ただし過去の日記の方が時刻が早いため、
       // カレンダーセルのタイトルは引き続き「過去の日記」のまま)
       const [, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
-      const persisted = (await decryptPersistedEntries(value)) as { text: string }[];
-      expect(persisted.some((entry) => entry.text === '保存中の日記')).toBe(true);
+      const persisted = (await decryptPersistedEntry(value)) as { text: string };
+      expect(persisted.text).toBe('保存中の日記');
 
       // 成功パスはcatch節を通らずdraftに触れないため、ユーザーが新しく入力した内容が
       // そのまま保持され、エラーメッセージも表示されない
@@ -1176,8 +1205,8 @@ describe('HomeScreen', () => {
 
       // 永続化された内容にも1件のみ含まれ、重複していない
       const [, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
-      const persisted = (await decryptPersistedEntries(value)) as { text: string }[];
-      expect(persisted).toHaveLength(1);
+      const persisted = (await decryptPersistedEntry(value)) as { text: string };
+      expect(persisted.text).toBe('連打される日記');
 
       // pending解消後は再度保存できる(実行中フラグが正しく戻っている)
       fireEvent.changeText(input, '次の日記');
@@ -1213,11 +1242,15 @@ describe('HomeScreen', () => {
 
       expect(mockRandomUUID).toHaveBeenCalledTimes(3);
 
-      const lastCall = (AsyncStorage.setItem as jest.Mock).mock.calls[2];
-      const persisted = (await decryptPersistedEntries(lastCall[1])) as { id: string }[];
+      // 各保存は自分専用の個別キーに書き込まれるため、3回のsetItem呼び出しそれぞれから
+      // 1件ずつ復号し、idの一意性を確認する
+      const setItemMock = AsyncStorage.setItem as jest.Mock;
+      const persistedEntries = (await Promise.all(
+        setItemMock.mock.calls.map(([, value]) => decryptPersistedEntry(value)),
+      )) as { id: string }[];
 
-      expect(persisted).toHaveLength(3);
-      const ids = persisted.map((entry) => entry.id);
+      expect(persistedEntries).toHaveLength(3);
+      const ids = persistedEntries.map((entry) => entry.id);
       expect(new Set(ids).size).toBe(ids.length);
 
       // 同じ日に書かれた3件すべてが、セルをタップした一覧に表示される
@@ -3106,7 +3139,8 @@ describe('HomeScreen', () => {
 
       await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
       const [savedKey, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
-      expect(savedKey).toBe(STORAGE_KEY);
+      // 編集保存も対象エントリ専用の個別キーに書き込まれる(レガシーの単一キーではない)
+      expect(savedKey).toBe(buildDiaryEntryKey('1'));
       expect((value as string).startsWith(ENCRYPTED_PREFIX)).toBe(true);
 
       // 保存が成功すると編集モーダルは閉じ、一覧・カレンダーセルの表示が更新される
@@ -3115,15 +3149,14 @@ describe('HomeScreen', () => {
       expect(screen.getAllByText('編集後の日記').length).toBeGreaterThanOrEqual(1);
 
       // 永続化された内容もtextのみ更新され、createdAtは変わらない
-      const persisted = (await decryptPersistedEntries(value)) as {
+      const persisted = (await decryptPersistedEntry(value)) as {
         id: string;
         text: string;
         createdAt: string;
-      }[];
-      expect(persisted).toHaveLength(1);
-      expect(persisted[0].id).toBe('1');
-      expect(persisted[0].text).toBe('編集後の日記');
-      expect(persisted[0].createdAt).toBe(createdAt);
+      };
+      expect(persisted.id).toBe('1');
+      expect(persisted.text).toBe('編集後の日記');
+      expect(persisted.createdAt).toBe(createdAt);
     });
 
     it('does not save and disables the save button when the edited text is emptied out (defense in depth)', async () => {
@@ -3372,9 +3405,8 @@ describe('HomeScreen', () => {
 
       // 永続化された内容にも1件のみ含まれ、重複していない
       const [, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
-      const persisted = (await decryptPersistedEntries(value)) as { text: string }[];
-      expect(persisted).toHaveLength(1);
-      expect(persisted[0].text).toBe('連打される編集');
+      const persisted = (await decryptPersistedEntry(value)) as { text: string };
+      expect(persisted.text).toBe('連打される編集');
     });
   });
 
@@ -3432,7 +3464,9 @@ describe('HomeScreen', () => {
         { id: '1', text: '残る日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
         { id: '2', text: '削除される日記', createdAt: isoAt(now, dayWithEntry, 12, 0) },
       ];
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      // レガシーキー経由の移行時に発生するremoveItem呼び出しと区別できるよう、個別キー方式で
+      // 直接シードしておく(この後の削除操作によるremoveItem呼び出し回数だけを検証したいため)
+      await seedDiaryEntries(storedEntries);
       jest.clearAllMocks();
       jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
@@ -3447,19 +3481,18 @@ describe('HomeScreen', () => {
       fireEvent.press(deleteButtons[1]);
       await pressAlertButton('削除');
 
-      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
-      const [savedKey, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
-      expect(savedKey).toBe(STORAGE_KEY);
-      expect((value as string).startsWith(ENCRYPTED_PREFIX)).toBe(true);
+      // 削除はentry専用の個別キーのremoveItemのみで完結し、setItemは呼ばれない
+      await waitFor(() => expect(AsyncStorage.removeItem).toHaveBeenCalledTimes(1));
+      expect(AsyncStorage.removeItem).toHaveBeenCalledWith(buildDiaryEntryKey('2'));
+      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
 
       // 削除された方は一覧から消え、残る方はそのまま表示される
       expect(screen.queryByText('削除される日記')).toBeNull();
       expect(screen.getAllByText('残る日記').length).toBeGreaterThanOrEqual(1);
 
-      const persisted = (await decryptPersistedEntries(value)) as { id: string; text: string }[];
-      expect(persisted).toHaveLength(1);
-      expect(persisted[0].id).toBe('1');
-      expect(persisted[0].text).toBe('残る日記');
+      // 残る方の個別キーはそのまま残っており、削除された方の個別キーは消えている
+      expect(await readPersistedEntry('1')).toEqual(storedEntries[0]);
+      expect(await AsyncStorage.getItem(buildDiaryEntryKey('2'))).toBeNull();
     });
 
     it('does not delete the entry when "キャンセル" is chosen in the confirmation dialog (正常系)', async () => {
@@ -3486,18 +3519,15 @@ describe('HomeScreen', () => {
       expect(screen.getAllByText('キャンセル対象の日記').length).toBeGreaterThanOrEqual(1);
     });
 
-    it('rolls back the deletion (keeps the entry visible) and does not crash when AsyncStorage.setItem fails during delete (異常系)', async () => {
+    it('rolls back the deletion (keeps the entry visible) and does not crash when AsyncStorage.removeItem fails during delete (異常系)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([
-          { id: '1', text: '削除失敗する日記', createdAt: isoAt(now, dayWithEntry) },
-        ]),
-      );
+      await seedDiaryEntries([
+        { id: '1', text: '削除失敗する日記', createdAt: isoAt(now, dayWithEntry) },
+      ]);
       jest.clearAllMocks();
       jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
+      jest.spyOn(AsyncStorage, 'removeItem').mockRejectedValueOnce(new Error('remove failed'));
 
       render(<HomeScreen />);
       await screen.findByText('削除失敗する日記');
@@ -3541,7 +3571,9 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText('削除'));
       await pressAlertButton('削除');
 
-      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+      await waitFor(() =>
+        expect(AsyncStorage.removeItem).toHaveBeenCalledWith(buildDiaryEntryKey('1')),
+      );
       // 一覧モーダルはまだ開いたままだが、日記自体はもう表示されない(entriesByDateから消えた)
       expect(screen.queryByText('その日最後の日記')).toBeNull();
 
@@ -3567,41 +3599,40 @@ describe('HomeScreen', () => {
       });
     }
 
-    it("persists both a delete of entry A and a concurrent edit of entry B, even though A's persistence write is still pending when B's edit save is requested (regression for Issue #130: without the write queue, A's later-completing write would overwrite B's edit with a stale snapshot)", async () => {
+    it("persists both a delete of entry A and a concurrent edit of entry B, even though A's persistence write is still pending when B's edit save is requested (regression for Issue #130: the write queue still serializes independent per-entry writes, each of which touches only its own AsyncStorage key)", async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       const storedEntries = [
         { id: 'a', text: 'Aの日記(削除される)', createdAt: isoAt(now, dayWithEntry, 7, 0) },
         { id: 'b', text: 'Bの日記(編集前)', createdAt: isoAt(now, dayWithEntry, 12, 0) },
       ];
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      await seedDiaryEntries(storedEntries);
       jest.clearAllMocks();
       jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
-      // 1回目(Aの削除)・2回目(Bの編集)のsetItemの解決タイミングを個別に制御する。実際の書き込みは
-      // 元の実装(spyOn前のsetItem)経由で行い「完了タイミングだけ遅延させる」(単に解決を遅らせる
-      // だけだと実際には書き込まれないまま次のタスクが読み直してしまい、直列化の検証にならない)
+      // Aの削除(removeItem)・Bの編集保存(setItem)、それぞれの完了タイミングを個別に制御する。
+      // 実際の書き込みは元の実装(spyOn前の関数)経由で行い「完了タイミングだけ遅延させる」
+      // (単に解決を遅らせるだけだと実際には書き込まれないまま直列化の検証にならない)
+      const originalRemoveItem = AsyncStorage.removeItem;
       const originalSetItem = AsyncStorage.setItem;
       let resolveDeleteWrite: () => void = () => {};
       let resolveEditWrite: () => void = () => {};
-      jest
-        .spyOn(AsyncStorage, 'setItem')
-        .mockImplementationOnce(
-          (key: string, value: string) =>
-            new Promise<void>((resolve) => {
-              resolveDeleteWrite = () => {
-                originalSetItem(key, value).then(resolve);
-              };
-            }),
-        )
-        .mockImplementationOnce(
-          (key: string, value: string) =>
-            new Promise<void>((resolve) => {
-              resolveEditWrite = () => {
-                originalSetItem(key, value).then(resolve);
-              };
-            }),
-        );
+      jest.spyOn(AsyncStorage, 'removeItem').mockImplementationOnce(
+        (key: string) =>
+          new Promise<void>((resolve) => {
+            resolveDeleteWrite = () => {
+              originalRemoveItem(key).then(resolve);
+            };
+          }),
+      );
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        (key: string, value: string) =>
+          new Promise<void>((resolve) => {
+            resolveEditWrite = () => {
+              originalSetItem(key, value).then(resolve);
+            };
+          }),
+      );
 
       render(<HomeScreen />);
       await screen.findByText('Aの日記(削除される)');
@@ -3610,13 +3641,13 @@ describe('HomeScreen', () => {
       await screen.findByText('Bの日記(編集前)');
 
       // Aの削除を確定する。楽観的UI更新は同期的に反映されるが、AsyncStorageへの
-      // 実際の書き込み(enqueueDiaryWrite内)は1回目のsetItemがpendingのまま止まる
+      // 実際の書き込み(enqueueDiaryWrite内のremoveItem)はpendingのまま止まる
       const deleteButtons = screen.getAllByText('削除');
       expect(deleteButtons).toHaveLength(2);
       fireEvent.press(deleteButtons[0]);
       await pressAlertButton('削除');
 
-      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1), {
+      await waitFor(() => expect(AsyncStorage.removeItem).toHaveBeenCalledTimes(1), {
         timeout: 5000,
       });
       // 楽観的UI更新により、Aは一覧からすでに消えている
@@ -3631,15 +3662,14 @@ describe('HomeScreen', () => {
       expect(saveButtons).toHaveLength(2);
       fireEvent.press(saveButtons[1]);
 
-      // 書き込みキューによって直列化されているため、Aの書き込みが完了する前に
-      // Bの書き込み(2回目のsetItem呼び出し)が発生することはない
-      // (このアサーションは、直列化前の実装では2回目のsetItemが即座に発生してしまい失敗する)
-      expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+      // 書き込みキューによって直列化されているため、Aの削除が完了する前に
+      // Bの編集保存(setItem呼び出し)が発生することはない
+      // (このアサーションは、直列化前の実装では即座に発生してしまい失敗する)
+      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
 
-      // Aの書き込みを完了させると、キューの次のタスク(Bの編集)がAsyncStorageから
-      // 最新データ(Aがすでに削除された状態)を読み直してから書き込みを開始する
+      // Aの書き込みを完了させると、キューの次のタスク(Bの編集保存)が実行される
       resolveDeleteWrite();
-      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(2), {
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1), {
         timeout: 5000,
       });
 
@@ -3650,16 +3680,14 @@ describe('HomeScreen', () => {
       });
 
       // 最終的にAsyncStorageへ永続化された内容には、Aの削除とBの編集の両方が反映されている
-      // (完了順序が入れ替わっても、どちらか一方が古いスナップショットで上書きされて消えない)
-      const setItemMock = AsyncStorage.setItem as jest.Mock;
-      const [, lastValue] = setItemMock.mock.calls[setItemMock.mock.calls.length - 1];
-      const persisted = (await decryptPersistedEntries(lastValue)) as {
-        id: string;
-        text: string;
-      }[];
-      expect(persisted).toHaveLength(1);
-      expect(persisted[0].id).toBe('b');
-      expect(persisted[0].text).toBe('Bの日記(編集後)');
+      // (エントリごとに独立したキーへ書き込むため、互いの操作が古いスナップショットで
+      // 上書きし合うことはない)
+      expect(await AsyncStorage.getItem(buildDiaryEntryKey('a'))).toBeNull();
+      expect(await readPersistedEntry('b')).toEqual({
+        id: 'b',
+        text: 'Bの日記(編集後)',
+        createdAt: storedEntries[1].createdAt,
+      });
 
       // 画面上の表示にも両方の変更が反映されている
       expect(screen.queryByText('Aの日記(削除される)')).toBeNull();
@@ -3673,32 +3701,31 @@ describe('HomeScreen', () => {
         { id: 'keep', text: '残る日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
         { id: 'todelete', text: '削除される日記', createdAt: isoAt(now, dayWithEntry, 12, 0) },
       ];
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      await seedDiaryEntries(storedEntries);
       jest.clearAllMocks();
       jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
       // 同上の理由により、実際の書き込みは元の実装経由で行い完了タイミングのみを遅延させる
+      const originalRemoveItem = AsyncStorage.removeItem;
       const originalSetItem = AsyncStorage.setItem;
       let resolveDeleteWrite: () => void = () => {};
       let resolveSaveWrite: () => void = () => {};
-      jest
-        .spyOn(AsyncStorage, 'setItem')
-        .mockImplementationOnce(
-          (key: string, value: string) =>
-            new Promise<void>((resolve) => {
-              resolveDeleteWrite = () => {
-                originalSetItem(key, value).then(resolve);
-              };
-            }),
-        )
-        .mockImplementationOnce(
-          (key: string, value: string) =>
-            new Promise<void>((resolve) => {
-              resolveSaveWrite = () => {
-                originalSetItem(key, value).then(resolve);
-              };
-            }),
-        );
+      jest.spyOn(AsyncStorage, 'removeItem').mockImplementationOnce(
+        (key: string) =>
+          new Promise<void>((resolve) => {
+            resolveDeleteWrite = () => {
+              originalRemoveItem(key).then(resolve);
+            };
+          }),
+      );
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        (key: string, value: string) =>
+          new Promise<void>((resolve) => {
+            resolveSaveWrite = () => {
+              originalSetItem(key, value).then(resolve);
+            };
+          }),
+      );
 
       render(<HomeScreen />);
       await screen.findByText('残る日記');
@@ -3711,7 +3738,7 @@ describe('HomeScreen', () => {
       fireEvent.press(deleteButtons[1]);
       await pressAlertButton('削除');
 
-      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1), {
+      await waitFor(() => expect(AsyncStorage.removeItem).toHaveBeenCalledTimes(1), {
         timeout: 5000,
       });
 
@@ -3720,29 +3747,25 @@ describe('HomeScreen', () => {
       fireEvent.changeText(input, '新しい日記');
       fireEvent.press(screen.getByText('保存'));
 
-      // 書き込みキューにより、削除の書き込みが完了するまで新規保存の書き込み
-      // (2回目のsetItem呼び出し)は発生しない
-      expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+      // 書き込みキューにより、削除の書き込みが完了するまで新規保存の書き込み(setItem)は発生しない
+      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
 
       resolveDeleteWrite();
-      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(2), {
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1), {
         timeout: 5000,
       });
 
       resolveSaveWrite();
       expect(await screen.findByText('保存しました', {}, { timeout: 5000 })).toBeTruthy();
 
+      // 削除されたエントリのキーは消え、既存の1件・新規保存した1件はそれぞれ独立して残っている
+      expect(await AsyncStorage.getItem(buildDiaryEntryKey('todelete'))).toBeNull();
+      expect(await readPersistedEntry('keep')).toEqual(storedEntries[0]);
+
       const setItemMock = AsyncStorage.setItem as jest.Mock;
       const [, lastValue] = setItemMock.mock.calls[setItemMock.mock.calls.length - 1];
-      const persisted = (await decryptPersistedEntries(lastValue)) as {
-        id: string;
-        text: string;
-      }[];
-      // 削除されたエントリを含まず、既存の1件+新規保存した1件の合計2件が残っている
-      expect(persisted).toHaveLength(2);
-      expect(persisted.some((entry) => entry.id === 'keep')).toBe(true);
-      expect(persisted.some((entry) => entry.text === '新しい日記')).toBe(true);
-      expect(persisted.some((entry) => entry.id === 'todelete')).toBe(false);
+      const persistedNewEntry = (await decryptPersistedEntry(lastValue)) as { text: string };
+      expect(persistedNewEntry.text).toBe('新しい日記');
     });
   });
 
@@ -3817,15 +3840,13 @@ describe('HomeScreen', () => {
       expect(screen.getByText('新しい日記')).toBeTruthy();
       expect(screen.getByText('既存の日記')).toBeTruthy();
 
-      // 実際に永続化された内容にも新しい日記が反映されている
+      // 実際に永続化された内容にも新しい日記が反映されている(新規保存は自分専用の個別キーに書き込まれる)
       const setItemMock = AsyncStorage.setItem as jest.Mock;
       const [, lastValue] = setItemMock.mock.calls[setItemMock.mock.calls.length - 1];
-      const persisted = (await decryptPersistedEntries(lastValue)) as {
-        id: string;
-        text: string;
-      }[];
-      expect(persisted.some((entry) => entry.text === '新しい日記')).toBe(true);
-      expect(persisted.some((entry) => entry.id === 'existing')).toBe(true);
+      const persisted = (await decryptPersistedEntry(lastValue)) as { id: string; text: string };
+      expect(persisted.text).toBe('新しい日記');
+      // 既存のエントリも(個別キー方式へ移行済みのまま)引き続き残っている
+      expect(await readPersistedEntry('existing')).not.toBeNull();
     });
 
     // pending中の書き込みが無い通常時は、余分な待ち合わせをせず即座に読み直す従来通りの
