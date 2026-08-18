@@ -175,6 +175,16 @@ const CLOSE_BUTTON_TEXT = '閉じる';
 const EMPTY_STATE_TEXT = 'まだ日記がありません。最初の日記を書いてみましょう。';
 const KEYBOARD_AVOIDING_VIEW_TEST_ID = 'keyboard-avoiding-view';
 
+// Issue #34で保存ボタンにaccessibilityRole="button"を付与したことで、
+// `queryAllByRole('button')`は常に保存ボタンを含むようになった。カレンダーの日付セル
+// (日記のある日だけがタップ可能なボタンとして描画される)の個数だけを数えたいテストでは、
+// 保存ボタンを除外したこのヘルパーを使う。
+function queryCalendarDayButtons() {
+  return screen
+    .queryAllByRole('button')
+    .filter((button) => button.props.accessibilityLabel !== '保存');
+}
+
 // AsyncStorageに実際に永続化された値(暗号化済み文字列)を、テストで検証しやすいよう
 // 復号してJSONとしてパースするヘルパー。`getOrCreateEncryptionKey`は
 // SecureStoreモックに永続化された鍵をそのまま返すため、画面側が使った鍵と同じ鍵が得られる。
@@ -541,7 +551,7 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText('保存'));
 
       expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-      expect(screen.queryAllByRole('button')).toHaveLength(0);
+      expect(queryCalendarDayButtons()).toHaveLength(0);
     });
 
     it('does not save an entry consisting only of whitespace', async () => {
@@ -552,7 +562,7 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText('保存'));
 
       expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-      expect(screen.queryAllByRole('button')).toHaveLength(0);
+      expect(queryCalendarDayButtons()).toHaveLength(0);
     });
 
     it('clears the text input after saving', async () => {
@@ -717,6 +727,27 @@ describe('HomeScreen', () => {
       fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '何か書く');
 
       expect(saveButton?.props.accessibilityState?.disabled).toBe(false);
+    });
+
+    // Issue #34: スクリーンリーダー利用者にも入力欄・保存ボタンの役割が伝わるよう、
+    // accessibilityLabel/accessibilityRole/accessibilityStateを検証する
+    it('sets accessibilityLabel="日記本文" on the composer TextInput, and accessibilityRole="button"/accessibilityLabel="保存" on the save button so screen readers can identify each control', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      // placeholderはフォーカス後に読み上げられない環境があるため、accessibilityLabelで
+      // 入力欄を直接特定できることを確認する
+      const input = screen.getByLabelText('日記本文');
+      expect(input.props.placeholder).toBe(INPUT_PLACEHOLDER);
+
+      // accessibilityRole/accessibilityLabelにより、保存ボタンがロール・名前の両方で
+      // 一意に特定できる(disabled中でもroleは'button'のまま変わらない)
+      const saveButton = screen.getByRole('button', { name: '保存' });
+      expect(saveButton.props.accessibilityLabel).toBe('保存');
+      expect(saveButton.props.accessibilityState?.disabled).toBe(true);
+
+      fireEvent.changeText(input, '何か書く');
+      expect(saveButton.props.accessibilityState?.disabled).toBe(false);
     });
 
     it('renders the save button at reduced opacity (0.5) while the input is empty, and at full opacity (1) once text is entered, so the disabled state is also visible (正常系/境界値, Issue #42)', async () => {
@@ -932,7 +963,7 @@ describe('HomeScreen', () => {
 
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(STORAGE_KEY));
       // 壊れたデータは読み捨てられ、空の状態から始まるためカレンダーに操作可能なセルは無い
-      expect(screen.queryAllByRole('button')).toHaveLength(0);
+      expect(queryCalendarDayButtons()).toHaveLength(0);
     });
 
     it('shows the empty state when stored data has the encrypted-payload marker but fails to decrypt (corrupted ciphertext)', async () => {
@@ -944,7 +975,7 @@ describe('HomeScreen', () => {
 
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(STORAGE_KEY));
       // 復号に失敗したデータは読み捨てられ、空の状態から始まるためカレンダーに操作可能なセルは無い
-      expect(screen.queryAllByRole('button')).toHaveLength(0);
+      expect(queryCalendarDayButtons()).toHaveLength(0);
     });
 
     it('rolls back entries and draft and shows an error message when AsyncStorage.setItem fails', async () => {
@@ -1931,7 +1962,7 @@ describe('HomeScreen', () => {
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       // タイトルが空文字列になるため、そのセルはタップ可能な要素として描画されない
-      expect(screen.queryAllByRole('button')).toHaveLength(0);
+      expect(queryCalendarDayButtons()).toHaveLength(0);
     });
 
     it('shows nothing in a day cell that has no diary entries', async () => {
@@ -1946,7 +1977,7 @@ describe('HomeScreen', () => {
       await screen.findByText('日記あり');
 
       // 日記が無い日のセルはタップ可能な要素(accessibilityRole="button")として描画されない
-      expect(screen.queryAllByRole('button')).toHaveLength(1);
+      expect(queryCalendarDayButtons()).toHaveLength(1);
 
       const emptyDayCell = screen.getByText(String(dayWithoutEntry));
       fireEvent.press(emptyDayCell);
@@ -2685,6 +2716,35 @@ describe('HomeScreen', () => {
       expect(screen.getByDisplayValue('編集前の日記')).toBeTruthy();
     });
 
+    // Issue #34: 編集モーダル側の入力欄・保存ボタンにもcomposerと同じアクセシビリティ属性が
+    // 付いていることを検証する
+    it('sets accessibilityLabel="日記本文" on the edit TextInput, and accessibilityRole="button"/accessibilityLabel="保存" with a matching accessibilityState on the edit save button', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('編集前の日記');
+      fireEvent.press(screen.getByText('編集前の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+      fireEvent.press(screen.getByText('編集'));
+      await screen.findByText('日記を編集');
+
+      // composer用と編集モーダル用のTextInputが両方マウントされているため、
+      // 表示中の値で編集モーダル側を特定する
+      const editInputs = screen.getAllByLabelText('日記本文');
+      const editInput = editInputs.find((input) => input.props.value === '編集前の日記');
+      expect(editInput).toBeTruthy();
+
+      const editSaveButton = getEditSaveButton().parent?.parent?.parent;
+      expect(editSaveButton?.props.accessibilityRole).toBe('button');
+      expect(editSaveButton?.props.accessibilityLabel).toBe('保存');
+      expect(editSaveButton?.props.accessibilityState?.disabled).toBe(false);
+    });
+
     it('closes the edit modal without saving when its close button is pressed', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
@@ -3247,7 +3307,7 @@ describe('HomeScreen', () => {
       render(<HomeScreen />);
       await screen.findByText('その日最後の日記');
       // 削除前は、タップ可能な(タイトル付きの)カレンダーセルが1つ存在する
-      expect(screen.queryAllByRole('button')).toHaveLength(1);
+      expect(queryCalendarDayButtons()).toHaveLength(1);
 
       fireEvent.press(screen.getByText('その日最後の日記'));
       await screen.findByText(CLOSE_BUTTON_TEXT);
@@ -3262,7 +3322,7 @@ describe('HomeScreen', () => {
       // モーダルを閉じると、カレンダー上にもタップ可能なセル(タイトル付き)が無くなっている
       fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
       await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
-      expect(screen.queryAllByRole('button')).toHaveLength(0);
+      expect(queryCalendarDayButtons()).toHaveLength(0);
     });
   });
 
