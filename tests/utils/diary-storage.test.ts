@@ -411,6 +411,37 @@ describe('getAllDiaryEntries', () => {
       await getAllDiaryEntries();
 
       expect(AsyncStorage.multiSet).not.toHaveBeenCalled();
+      // レガシーキーが元々存在しない以上、削除(removeItem)という不要な書き込みも
+      // 発生しないはず(migrateLegacyEntriesIfNeededの早期returnを直接検証する)
+      expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createdAtが同一の場合の並び順(tie-break)', () => {
+    beforeEach(async () => {
+      await AsyncStorage.clear();
+      secureStoreMock.__reset();
+      jest.clearAllMocks();
+    });
+
+    // getAllDiaryEntriesの実装(diary-storage.ts)は、createdAtが完全に一致する場合に
+    // idの降順で安定した順序を返す仕様になっている。この分岐は他のテストでは一度も
+    // 通っていなかったため、明示的に検証する
+    it('falls back to sorting by id descending when multiple entries share the exact same createdAt (境界値: 同時刻保存)', async () => {
+      const sameCreatedAt = '2026-01-01T00:00:00.000Z';
+      const entries: DiaryEntry[] = [
+        { id: 'a', text: '1件目', createdAt: sameCreatedAt },
+        { id: 'c', text: '3件目', createdAt: sameCreatedAt },
+        { id: 'b', text: '2件目', createdAt: sameCreatedAt },
+      ];
+      // わざとid順ではない順番で書き込み、返り値の並び順が挿入順に依存していないことも確認する
+      for (const entry of entries) {
+        await seedDiaryEntry(entry);
+      }
+
+      const result = await getAllDiaryEntries();
+
+      expect(result.map((entry) => entry.id)).toEqual(['c', 'b', 'a']);
     });
   });
 });
