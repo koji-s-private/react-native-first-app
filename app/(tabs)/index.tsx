@@ -232,6 +232,10 @@ export default function HomeScreen() {
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [editError, setEditError] = useState<string | null>(null);
+  // 編集開始時点の本文(handleStartEditでeditDraftにセットした値と同じ)。handleCancelEdit実行時に
+  // editDraftと比較し、未編集(または編集後に元の内容へ戻した)場合は確認なしで閉じ、
+  // 変更がある場合のみ破棄確認ダイアログを挟むために保持する
+  const editOriginalTextRef = useRef('');
   // handleSaveEdit(編集内容の保存)の実行中かどうか。isSavingと同様に、保存ボタンの連打(または
   // タップと同時に発生する複数のonPressイベント)によって、同じ内容の更新処理が重複して
   // 実行されてしまうことを防ぐため、実行中は早期returnし、保存ボタンもdisabledにする
@@ -474,6 +478,8 @@ export default function HomeScreen() {
     setEditingEntryId(entry.id);
     setEditDraft(entry.text);
     setEditError(null);
+    // 破棄確認の要否判定(handleCancelEdit)のため、編集開始時点の本文を控えておく
+    editOriginalTextRef.current = entry.text;
   }, []);
 
   // 編集用TextInputのonChangeText。draft用のhandleChangeDraftと同様の理由で
@@ -482,11 +488,28 @@ export default function HomeScreen() {
     setEditDraft(truncateToBodyMaxLength(text));
   }, []);
 
-  const handleCancelEdit = useCallback(() => {
+  // 編集モーダルを実際に閉じる処理本体(handleCancelEditから、確認不要な場合は直接、
+  // 確認が必要な場合はAlert.alertの「破棄」選択時に呼ばれる)
+  const closeEditModal = useCallback(() => {
     setEditingEntryId(null);
     setEditDraft('');
     setEditError(null);
   }, []);
+
+  // 編集モーダルを閉じる(背景タップ・「閉じる」ボタン・Android戻る操作の共通ハンドラ)。
+  // 編集開始時点の内容から変更されている場合のみ、誤って入力内容を失わないよう確認ダイアログを挟む
+  // (削除操作のhandleDeletePressと同じパターン)
+  const handleCancelEdit = useCallback(() => {
+    if (editDraft.trim() === editOriginalTextRef.current.trim()) {
+      closeEditModal();
+      return;
+    }
+
+    Alert.alert('変更を破棄しますか?', '編集中の内容は保存されません。', [
+      { text: 'キャンセル', style: 'cancel' },
+      { text: '破棄', style: 'destructive', onPress: closeEditModal },
+    ]);
+  }, [editDraft, closeEditModal]);
 
   const handleSaveEdit = useCallback(async () => {
     // 既に更新処理が進行中であれば、連打による重複更新を防ぐため何もしない

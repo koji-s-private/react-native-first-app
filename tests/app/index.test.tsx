@@ -3033,8 +3033,8 @@ describe('HomeScreen', () => {
       expect(screen.getAllByText('編集キャンセル対象').length).toBeGreaterThanOrEqual(1);
     });
 
-    describe('背景タップでモーダルを閉じる(Issue #173)', () => {
-      it('closes the edit modal (editingEntryId becomes null) and discards the unsaved draft (editDraft is cleared) when the semi-transparent background overlay is tapped (正常系)', async () => {
+    describe('背景タップでモーダルを閉じる(Issue #173)、破棄確認ダイアログ導入後の回帰(Issue #204)', () => {
+      it('shows the discard confirmation dialog (Alert.alert) instead of closing immediately when the semi-transparent background overlay is tapped after the draft has been changed, and only closes (editingEntryId becomes null / editDraft is cleared) once "破棄" is chosen (正常系)', async () => {
         const now = new Date();
         const { dayWithEntry } = pickTestDays(now);
         await AsyncStorage.setItem(
@@ -3048,6 +3048,7 @@ describe('HomeScreen', () => {
           ]),
         );
         jest.clearAllMocks();
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
         render(<HomeScreen />);
         await screen.findByText('編集モーダル背景タップ対象の日記');
@@ -3057,8 +3058,8 @@ describe('HomeScreen', () => {
         fireEvent.press(screen.getByText('編集'));
         await screen.findByText('日記を編集');
 
-        // 保存前に本文を書き換えておき、オーバーレイタップ後に破棄(editDraftのクリア)されることを
-        // AsyncStorageへの書き込みが起きないこと・元の本文が残ることの両面から確認する
+        // 保存前に本文を書き換えておき、オーバーレイタップ後に即座には閉じず、破棄確認ダイアログが
+        // 出ることを確認する(Issue #204で仕様変更。以前は確認なしで即座に閉じていた)
         const editInput = screen.getByDisplayValue('編集モーダル背景タップ対象の日記');
         fireEvent.changeText(editInput, '保存されないはずの編集内容');
 
@@ -3067,7 +3068,22 @@ describe('HomeScreen', () => {
 
         fireEvent.press(overlay);
 
-        // editingEntryIdがnullに戻り、モーダルの見出しが表示されなくなる
+        // ダイアログが出た段階ではまだモーダルは開いたままで、破棄もされていない
+        expect(Alert.alert).toHaveBeenCalledTimes(1);
+        expect(screen.getByText('日記を編集')).toBeTruthy();
+        expect(editModal.props.visible).toBe(true);
+        expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+
+        // ダイアログの「破棄」を選ぶと、editingEntryIdがnullに戻り見出しが表示されなくなる
+        const [, , buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+        const discardButton = (buttons as { text: string; onPress?: () => void }[]).find(
+          (b) => b.text === '破棄',
+        );
+        expect(discardButton).toBeDefined();
+        await act(async () => {
+          discardButton?.onPress?.();
+        });
+
         await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
         expect(editModal.props.visible).toBe(false);
         // editDraftの変更内容は保存されず破棄される(handleCancelEditと同じ効果)
@@ -3113,6 +3129,185 @@ describe('HomeScreen', () => {
 
         // ガードが効いている間も、編集モーダル自体は開いたままである
         expect(editModal.props.visible).toBe(true);
+      });
+    });
+
+    describe('編集モーダルを閉じる際の未保存変更の破棄確認ダイアログ(Issue #204)', () => {
+      async function pressAlertButton(label: string) {
+        const alertMock = Alert.alert as jest.Mock;
+        const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
+        const buttons = lastCall[2] as { text: string; onPress?: () => void }[];
+        const button = buttons.find((b) => b.text === label);
+        expect(button).toBeDefined();
+        await act(async () => {
+          button?.onPress?.();
+        });
+      }
+
+      async function openEditModalFor(text: string) {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([{ id: '1', text, createdAt: isoAt(now, dayWithEntry) }]),
+        );
+        jest.clearAllMocks();
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+        render(<HomeScreen />);
+        await screen.findByText(text);
+        fireEvent.press(screen.getByText(text));
+        await screen.findByText(CLOSE_BUTTON_TEXT);
+        fireEvent.press(screen.getByText('編集'));
+        await screen.findByText('日記を編集');
+      }
+
+      it('closes the edit modal immediately without any confirmation dialog when the overlay is tapped and the draft has not been changed (正常系)', async () => {
+        await openEditModalFor('未変更・背景タップ対象の日記');
+
+        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
+        const overlay = getModalOverlayPressable(editModal);
+        fireEvent.press(overlay);
+
+        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
+        expect(Alert.alert).not.toHaveBeenCalled();
+        expect(editModal.props.visible).toBe(false);
+      });
+
+      it('closes the edit modal immediately without any confirmation dialog when the close button is pressed and the draft has not been changed (正常系)', async () => {
+        await openEditModalFor('未変更・閉じるボタン対象の日記');
+
+        const closeButtons = screen.getAllByText(CLOSE_BUTTON_TEXT);
+        fireEvent.press(closeButtons[closeButtons.length - 1]);
+
+        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
+        expect(Alert.alert).not.toHaveBeenCalled();
+      });
+
+      it('closes the edit modal immediately without any confirmation dialog via onRequestClose (Android hardware back / gesture) when the draft has not been changed (正常系)', async () => {
+        await openEditModalFor('未変更・戻る操作対象の日記');
+
+        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
+        expect(typeof editModal.props.onRequestClose).toBe('function');
+
+        act(() => {
+          editModal.props.onRequestClose();
+        });
+
+        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
+        expect(Alert.alert).not.toHaveBeenCalled();
+      });
+
+      it('shows the discard confirmation dialog and keeps the edit modal open when the overlay is tapped after changing the draft (正常系)', async () => {
+        await openEditModalFor('変更あり・背景タップ対象の日記');
+
+        const editInput = screen.getByDisplayValue('変更あり・背景タップ対象の日記');
+        fireEvent.changeText(editInput, '変更後の内容(背景タップ)');
+
+        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
+        const overlay = getModalOverlayPressable(editModal);
+        fireEvent.press(overlay);
+
+        expect(Alert.alert).toHaveBeenCalledTimes(1);
+        const [title, message, buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+        expect(title).toBe('変更を破棄しますか?');
+        expect(message).toBe('編集中の内容は保存されません。');
+        expect(buttons).toHaveLength(2);
+        expect(buttons[0]).toMatchObject({ text: 'キャンセル', style: 'cancel' });
+        expect(buttons[1]).toMatchObject({ text: '破棄', style: 'destructive' });
+
+        // ダイアログが出た段階ではまだモーダルは開いたまま
+        expect(screen.getByText('日記を編集')).toBeTruthy();
+        expect(editModal.props.visible).toBe(true);
+      });
+
+      it('shows the discard confirmation dialog and keeps the edit modal open when the close button is pressed after changing the draft (正常系)', async () => {
+        await openEditModalFor('変更あり・閉じるボタン対象の日記');
+
+        const editInput = screen.getByDisplayValue('変更あり・閉じるボタン対象の日記');
+        fireEvent.changeText(editInput, '変更後の内容(閉じるボタン)');
+
+        const closeButtons = screen.getAllByText(CLOSE_BUTTON_TEXT);
+        fireEvent.press(closeButtons[closeButtons.length - 1]);
+
+        expect(Alert.alert).toHaveBeenCalledTimes(1);
+        expect(screen.getByText('日記を編集')).toBeTruthy();
+      });
+
+      it('shows the discard confirmation dialog via onRequestClose (Android hardware back / gesture) after changing the draft, and keeps the modal open (正常系)', async () => {
+        await openEditModalFor('変更あり・戻る操作対象の日記');
+
+        const editInput = screen.getByDisplayValue('変更あり・戻る操作対象の日記');
+        fireEvent.changeText(editInput, '変更後の内容(戻る操作)');
+
+        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
+        act(() => {
+          editModal.props.onRequestClose();
+        });
+
+        expect(Alert.alert).toHaveBeenCalledTimes(1);
+        expect(screen.getByText('日記を編集')).toBeTruthy();
+        expect(editModal.props.visible).toBe(true);
+      });
+
+      it('keeps the edit modal open and preserves the unsaved draft when "キャンセル" is chosen in the discard confirmation dialog (正常系)', async () => {
+        await openEditModalFor('キャンセル選択対象の日記');
+
+        const editInput = screen.getByDisplayValue('キャンセル選択対象の日記');
+        fireEvent.changeText(editInput, 'キャンセルで保持される内容');
+
+        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
+        const overlay = getModalOverlayPressable(editModal);
+        fireEvent.press(overlay);
+        await pressAlertButton('キャンセル');
+
+        // モーダルは開いたまま、入力内容(editDraft)も保持されている
+        expect(editModal.props.visible).toBe(true);
+        expect(screen.getByDisplayValue('キャンセルで保持される内容')).toBeTruthy();
+        expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+      });
+
+      it('closes the edit modal and discards the unsaved draft (editDraft is reset) when "破棄" is chosen in the discard confirmation dialog (正常系)', async () => {
+        await openEditModalFor('破棄選択対象の日記');
+
+        const editInput = screen.getByDisplayValue('破棄選択対象の日記');
+        fireEvent.changeText(editInput, '破棄されるはずの内容');
+
+        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
+        const overlay = getModalOverlayPressable(editModal);
+        fireEvent.press(overlay);
+        await pressAlertButton('破棄');
+
+        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
+        expect(editModal.props.visible).toBe(false);
+        expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+        // 元の本文は変更されずに残っている
+        expect(screen.getAllByText('破棄選択対象の日記').length).toBeGreaterThanOrEqual(1);
+        expect(screen.queryByText('破棄されるはずの内容')).toBeNull();
+
+        // editDraftがリセットされていることを、日付一覧モーダルはまだ開いたままなので
+        // 再度「編集」を押すだけで確認できる(前回破棄した内容が残っていれば、TextInputの
+        // 表示値が'破棄されるはずの内容'のままになってしまうはず)
+        fireEvent.press(screen.getByText('編集'));
+        await screen.findByText('日記を編集');
+        expect(screen.getByDisplayValue('破棄選択対象の日記')).toBeTruthy();
+        expect(screen.queryByDisplayValue('破棄されるはずの内容')).toBeNull();
+      });
+
+      it('treats the draft as "unchanged" (closes without confirmation) when it differs from the original only by leading/trailing whitespace that disappears after trimming (境界値)', async () => {
+        await openEditModalFor('前後空白トリム境界値対象の日記');
+
+        const editInput = screen.getByDisplayValue('前後空白トリム境界値対象の日記');
+        // 前後に空白を付与するが、trimすれば元の内容と一致する
+        fireEvent.changeText(editInput, '  前後空白トリム境界値対象の日記  ');
+
+        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
+        const overlay = getModalOverlayPressable(editModal);
+        fireEvent.press(overlay);
+
+        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
+        expect(Alert.alert).not.toHaveBeenCalled();
+        expect(editModal.props.visible).toBe(false);
       });
     });
 
