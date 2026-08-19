@@ -647,6 +647,11 @@ export default function HomeScreen() {
     setSelectedDate(toDateKey(new Date(entry.createdAt)));
   }, []);
 
+  // 検索欄の「クリア」ボタン押下時、検索キーワードを空にしてカレンダー表示へ戻す
+  const handleClearSearch = useCallback(() => {
+    setSearchQuery('');
+  }, []);
+
   // 外枠の実測高さ(wrapperHeight)からヘッダー+曜日行のおおよその高さと6週分の行マージンを差し引き、
   // 残りを6週で均等に割ることで、外枠いっぱいに日付グリッドが広がる日付セルの高さを算出する。
   // (カレンダー本体側の実測値を使って反復的に補正する方式も試したが、react-native-calendarsの
@@ -881,7 +886,12 @@ export default function HomeScreen() {
             独立した検索専用の入力欄で、キーワードが入力されている間だけ下に検索結果一覧を表示する */}
           <View style={styles.searchContainer}>
             <TextInput
-              style={[styles.searchInput, { color: textColor, borderColor: iconColor }]}
+              style={[
+                styles.searchInput,
+                // クリアボタンと文字が重ならないよう、入力中のみ右側の余白を広げる
+                searchQuery ? styles.searchInputWithClear : null,
+                { color: textColor, borderColor: iconColor },
+              ]}
               placeholder="日記を検索"
               placeholderTextColor={iconColor}
               value={searchQuery}
@@ -893,6 +903,21 @@ export default function HomeScreen() {
               // maxLength(UTF-16コードユニット単位)でBODY_MAX_LENGTHを上限として指定する
               maxLength={BODY_MAX_LENGTH}
             />
+            {searchQuery ? (
+              // TextInputのclearButtonModeはiOS専用のためクロスプラットフォームで挙動を揃えられず、
+              // 入力欄に重ねて配置するカスタムボタンでクリア操作を実現する
+              <Pressable
+                style={styles.searchClearButton}
+                onPress={handleClearSearch}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="検索キーワードをクリア"
+              >
+                <ThemedText style={[styles.searchClearButtonText, { color: iconColor }]}>
+                  ✕
+                </ThemedText>
+              </Pressable>
+            ) : null}
           </View>
 
           {trimmedSearchQuery ? (
@@ -1235,6 +1260,9 @@ const styles = StyleSheet.create({
   },
   searchContainer: {
     gap: 8,
+    // クリアボタンを入力欄の右側に重ねて配置するための基準
+    position: 'relative',
+    justifyContent: 'center',
   },
   searchInput: {
     borderWidth: 1,
@@ -1242,6 +1270,21 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     fontSize: 16,
+  },
+  searchInputWithClear: {
+    paddingRight: 36,
+  },
+  searchClearButton: {
+    position: 'absolute',
+    right: 8,
+    height: 24,
+    width: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchClearButtonText: {
+    fontSize: 16,
+    lineHeight: 16,
   },
   searchResultsList: {
     flex: 1,

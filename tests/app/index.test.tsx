@@ -4443,5 +4443,50 @@ describe('HomeScreen', () => {
       // ネイティブのmaxLength propがBODY_MAX_LENGTH(1000)に設定されていることを直接確認する
       expect(searchInput.props.maxLength).toBe(1000);
     });
+
+    describe('検索欄のクリアボタン(Issue #205)', () => {
+      it('does not show the clear button while the search input is empty', async () => {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        expect(screen.queryByLabelText('検索キーワードをクリア')).toBeNull();
+      });
+
+      it('shows the clear button once a keyword is entered', async () => {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
+
+        expect(screen.getByLabelText('検索キーワードをクリア')).toBeTruthy();
+      });
+
+      it('clears the search query and restores the normal calendar view when the clear button is pressed', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '今日は公園を散歩した', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await screen.findByText('今日は公園を散歩した');
+
+        const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
+        fireEvent.changeText(searchInput, '公園');
+        expect(await screen.findByText(/公園/)).toBeTruthy();
+
+        fireEvent.press(screen.getByLabelText('検索キーワードをクリア'));
+
+        expect(searchInput.props.value).toBe('');
+        // クリア後は検索結果一覧ではなく通常のカレンダー表示(セル)に戻り、
+        // クリアボタン自体も再び非表示になる
+        await waitFor(() => expect(screen.queryByLabelText('検索キーワードをクリア')).toBeNull());
+        expect(screen.getByText('今日は公園を散歩した')).toBeTruthy();
+      });
+    });
   });
 });
