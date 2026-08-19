@@ -9,7 +9,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint && eslint tests",
+    "lint": "expo lint app components contexts utils hooks constants scripts tests",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "jest"

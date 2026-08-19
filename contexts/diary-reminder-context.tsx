@@ -160,7 +160,6 @@ export function DiaryReminderProvider({ children }: PropsWithChildren) {
     return () => {
       subscription.remove();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persist]);
 
   const setEnabled = useCallback(
