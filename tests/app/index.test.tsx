@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { randomUUID } from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
+import * as Clipboard from 'expo-clipboard';
 import * as SecureStore from 'expo-secure-store';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
@@ -101,6 +102,12 @@ jest.mock('expo-haptics', () => ({
   NotificationFeedbackType: { Success: 'success' },
 }));
 
+// jest-expoのオートモックだと`setStringAsync`が実際のPromiseを返さず呼び出し引数の検証や
+// reject時の異常系テストが行えないため、expo-hapticsと同様に明示的なモックへ差し替える。
+jest.mock('expo-clipboard', () => ({
+  setStringAsync: jest.fn(() => Promise.resolve(true)),
+}));
+
 jest.mock('expo-secure-store', () => {
   let store: Record<string, string> = {};
   return {
@@ -161,6 +168,7 @@ jest.mock('react-native/Libraries/Components/Keyboard/KeyboardAvoidingView', () 
 
 const mockRandomUUID = randomUUID as jest.Mock;
 const mockNotificationAsync = Haptics.notificationAsync as jest.Mock;
+const mockSetStringAsync = Clipboard.setStringAsync as jest.Mock;
 const secureStoreMock = SecureStore as unknown as { __reset: () => void };
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { __triggerRefocus: triggerRefocus } = require('expo-router') as {
@@ -3776,6 +3784,134 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
       await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
       expect(queryCalendarDayButtons()).toHaveLength(0);
+    });
+  });
+
+  describe('日記エントリのコピー(Issue #150)', () => {
+    it('copies the entry text to the clipboard via Clipboard.setStringAsync when the copy button is pressed (正常系)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: 'コピー対象の日記本文', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+      mockSetStringAsync.mockResolvedValueOnce(true);
+
+      render(<HomeScreen />);
+      await screen.findByText('コピー対象の日記本文');
+      fireEvent.press(screen.getByText('コピー対象の日記本文'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      fireEvent.press(screen.getByText('コピー'));
+
+      await waitFor(() => expect(mockSetStringAsync).toHaveBeenCalledTimes(1));
+      expect(mockSetStringAsync).toHaveBeenCalledWith('コピー対象の日記本文');
+    });
+
+    it('shows a success toast ("コピーしました") inside the entry-list modal after a successful copy (正常系)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: 'トースト確認用の日記', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+      mockSetStringAsync.mockResolvedValueOnce(true);
+
+      render(<HomeScreen />);
+      await screen.findByText('トースト確認用の日記');
+      fireEvent.press(screen.getByText('トースト確認用の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      expect(screen.queryByText('コピーしました')).toBeNull();
+
+      fireEvent.press(screen.getByText('コピー'));
+
+      const toastMessage = await screen.findByText('コピーしました');
+      expect(toastMessage).toBeTruthy();
+      expect(screen.getByTestId('save-toast')).toBeTruthy();
+    });
+
+    it('resets the copy toast when the entry-list modal is closed, so it does not briefly flash the next time it is opened (境界値)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: 'モーダル再オープン確認用', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+      mockSetStringAsync.mockResolvedValueOnce(true);
+
+      render(<HomeScreen />);
+      await screen.findByText('モーダル再オープン確認用');
+      fireEvent.press(screen.getByText('モーダル再オープン確認用'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      fireEvent.press(screen.getByText('コピー'));
+      expect(await screen.findByText('コピーしました')).toBeTruthy();
+
+      // トーストが自動で消える前にモーダルを閉じても、次回開いた際に前回のトーストが残らない
+      fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
+      await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
+
+      fireEvent.press(screen.getByText('モーダル再オープン確認用'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+      expect(screen.queryByText('コピーしました')).toBeNull();
+    });
+
+    it('shows an error alert and does not show the success toast when Clipboard.setStringAsync fails (異常系)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: 'コピー失敗確認用の日記', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      mockSetStringAsync.mockRejectedValueOnce(new Error('clipboard write failed'));
+
+      render(<HomeScreen />);
+      await screen.findByText('コピー失敗確認用の日記');
+      fireEvent.press(screen.getByText('コピー失敗確認用の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      await act(async () => {
+        fireEvent.press(screen.getByText('コピー'));
+      });
+
+      await waitFor(() =>
+        expect(Alert.alert).toHaveBeenCalledWith('コピーに失敗しました', 'もう一度お試しください。'),
+      );
+      expect(screen.queryByText('コピーしました')).toBeNull();
+    });
+
+    it('sets accessibilityRole="button" and accessibilityLabel="日記本文をコピー" on the copy button so screen readers can identify it (アクセシビリティ)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: 'アクセシビリティ確認用の日記', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('アクセシビリティ確認用の日記');
+      fireEvent.press(screen.getByText('アクセシビリティ確認用の日記'));
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+
+      const copyButton = screen.getByRole('button', { name: '日記本文をコピー' });
+      expect(copyButton.props.accessibilityLabel).toBe('日記本文をコピー');
     });
   });
 
