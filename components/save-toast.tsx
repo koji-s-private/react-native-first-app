@@ -10,12 +10,15 @@ const AUTO_HIDE_DELAY_MS = 2500;
 export type SaveToastProps = {
   message: string;
   onHide: () => void;
+  testID?: string;
 };
 
 // 保存成功時などに一時的なフィードバックを表示する軽量なトースト(スナックバー)。
 // 表示から一定時間で自動的に非表示にし、`accessibilityLiveRegion="polite"`によって
 // スクリーンリーダー利用者にも状態変化(保存が完了したこと)が伝わるようにする。
-export function SaveToast({ message, onHide }: SaveToastProps) {
+// `testID`は既定値"save-toast"だが、同一画面内でこのコンポーネントを複数箇所(保存用・
+// コピー用など)で使う場合に理論上同時マウントされ得るため、呼び出し側で個別に指定できる。
+export function SaveToast({ message, onHide, testID = 'save-toast' }: SaveToastProps) {
   useEffect(() => {
     const timer = setTimeout(onHide, AUTO_HIDE_DELAY_MS);
     return () => clearTimeout(timer);
@@ -38,7 +41,7 @@ export function SaveToast({ message, onHide }: SaveToastProps) {
       style={styles.container}
       accessibilityRole="alert"
       accessibilityLiveRegion="polite"
-      testID="save-toast"
+      testID={testID}
     >
       <ThemedText style={styles.text} lightColor="#fff" darkColor="#fff">
         {message}

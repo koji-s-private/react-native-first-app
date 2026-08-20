@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Clipboard from 'expo-clipboard';
 import { randomUUID } from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from 'expo-router';
@@ -52,6 +53,9 @@ const BODY_MAX_LENGTH = 1000;
 
 // 保存成功時にトーストへ表示するメッセージ
 const SAVE_SUCCESS_MESSAGE = '保存しました';
+
+// コピー成功時にトーストへ表示するメッセージ
+const COPY_SUCCESS_MESSAGE = 'コピーしました';
 
 // 日付セルの高さのデフォルト最小値(外枠の実測高さがまだ取れていない初回レンダー用のフォールバック)
 const DEFAULT_DAY_CELL_HEIGHT = 48;
@@ -221,6 +225,9 @@ export default function HomeScreen() {
   const [saveToastMessage, setSaveToastMessage] = useState<string | null>(null);
   // 一覧表示用にタップされた日付('YYYY-MM-DD')。nullの間はモーダルを閉じている
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  // コピー成功時に日付一覧モーダル内で一時的に表示するトーストのメッセージ。nullの間は非表示。
+  // 保存成功時のsaveToastMessageとは表示位置(モーダル内)が異なるため別のstateとして持つ
+  const [copyToastMessage, setCopyToastMessage] = useState<string | null>(null);
   // 日記本文のキーワード検索用の入力値。既存の「今日の出来事を書く」入力欄(composer)や
   // 編集用のeditDraftとは独立した、検索専用のstate
   const [searchQuery, setSearchQuery] = useState('');
@@ -566,6 +573,8 @@ export default function HomeScreen() {
     setEditingEntryId(null);
     setEditDraft('');
     setEditError(null);
+    // 次回モーダルを開いた際に前回のトーストが一瞬表示されてしまわないようリセットする
+    setCopyToastMessage(null);
   }, []);
 
   const handleDeleteEntry = useCallback(
@@ -595,6 +604,21 @@ export default function HomeScreen() {
   // 自動非表示タイマーが張り直され続けてトーストが仕様通り2.5秒で消えなくなってしまう)
   const handleHideSaveToast = useCallback(() => {
     setSaveToastMessage(null);
+  }, []);
+
+  // 日付一覧モーダル内のコピー用トーストを非表示にする(handleHideSaveToastと同じ理由でuseCallbackで安定化する)
+  const handleHideCopyToast = useCallback(() => {
+    setCopyToastMessage(null);
+  }, []);
+
+  // コピーボタン押下時、エントリ本文をクリップボードへコピーし、成功したらトーストで知らせる
+  const handleCopyEntry = useCallback(async (entry: DiaryEntry) => {
+    try {
+      await Clipboard.setStringAsync(entry.text);
+      setCopyToastMessage(COPY_SUCCESS_MESSAGE);
+    } catch {
+      Alert.alert('コピーに失敗しました', 'もう一度お試しください。');
+    }
   }, []);
 
   // 削除ボタン押下時、誤操作防止のため確認ダイアログを挟んでから削除を実行する
@@ -1029,6 +1053,13 @@ export default function HomeScreen() {
                   </ThemedText>
                 </Pressable>
               </View>
+              {copyToastMessage ? (
+                <SaveToast
+                  message={copyToastMessage}
+                  onHide={handleHideCopyToast}
+                  testID="copy-toast"
+                />
+              ) : null}
               <FlatList
                 data={selectedDateEntries}
                 keyExtractor={(item) => item.id}
@@ -1041,6 +1072,16 @@ export default function HomeScreen() {
                         {formatEntryDateTime(item.createdAt)}
                       </ThemedText>
                       <View style={styles.entryActions}>
+                        <Pressable
+                          onPress={() => handleCopyEntry(item)}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel="日記本文をコピー"
+                        >
+                          <ThemedText style={[styles.entryActionText, { color: tintColor }]}>
+                            コピー
+                          </ThemedText>
+                        </Pressable>
                         <Pressable onPress={() => handleStartEdit(item)} hitSlop={8}>
                           <ThemedText style={[styles.entryActionText, { color: tintColor }]}>
                             編集
