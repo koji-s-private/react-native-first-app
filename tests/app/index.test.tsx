@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import * as Clipboard from 'expo-clipboard';
 import { randomUUID } from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
-import * as Clipboard from 'expo-clipboard';
 import * as SecureStore from 'expo-secure-store';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
@@ -3834,7 +3834,7 @@ describe('HomeScreen', () => {
 
       const toastMessage = await screen.findByText('コピーしました');
       expect(toastMessage).toBeTruthy();
-      expect(screen.getByTestId('save-toast')).toBeTruthy();
+      expect(screen.getByTestId('copy-toast')).toBeTruthy();
     });
 
     it('resets the copy toast when the entry-list modal is closed, so it does not briefly flash the next time it is opened (境界値)', async () => {
@@ -3889,7 +3889,10 @@ describe('HomeScreen', () => {
       });
 
       await waitFor(() =>
-        expect(Alert.alert).toHaveBeenCalledWith('コピーに失敗しました', 'もう一度お試しください。'),
+        expect(Alert.alert).toHaveBeenCalledWith(
+          'コピーに失敗しました',
+          'もう一度お試しください。',
+        ),
       );
       expect(screen.queryByText('コピーしました')).toBeNull();
     });

@@ -1054,7 +1054,11 @@ export default function HomeScreen() {
                 </Pressable>
               </View>
               {copyToastMessage ? (
-                <SaveToast message={copyToastMessage} onHide={handleHideCopyToast} />
+                <SaveToast
+                  message={copyToastMessage}
+                  onHide={handleHideCopyToast}
+                  testID="copy-toast"
+                />
               ) : null}
               <FlatList
                 data={selectedDateEntries}
