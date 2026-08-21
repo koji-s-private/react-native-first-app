@@ -545,6 +545,29 @@ describe('HomeScreen', () => {
       expect(flatLists[0].props.keyboardDismissMode).toBe('on-drag');
     });
 
+    it('sets keyboardShouldPersistTaps="handled" on the search results FlatList once a keyword is entered, so a search result can be selected with a single tap even while the keyboard is shown (正常系)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '今日は公園を散歩した', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await screen.findByText('今日は公園を散歩した');
+
+      fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
+      await screen.findByText(/公園/);
+
+      // 日付一覧モーダルは未オープンのため、検索結果一覧用のFlatListのみが該当する
+      const flatLists = queryAllFlatLists();
+      expect(flatLists).toHaveLength(1);
+      expect(flatLists[0].props.keyboardShouldPersistTaps).toBe('handled');
+    });
+
     it('sets keyboardDismissMode="on-drag" on both FlatLists simultaneously when the entry-list modal is left open while a search keyword is also entered (境界値: 両方が同時にマウントされているケース)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
