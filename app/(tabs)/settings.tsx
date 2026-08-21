@@ -29,7 +29,7 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: 'system', label: '端末に合わせる' },
 ];
 
-// アプリ内で配色(ライト/ダーク/端末に合わせる)を選択する操作導線(Issue #91)。
+// アプリ内で配色(ライト/ダーク/端末に合わせる)を選択する操作導線。
 // OSの設定に関わらずアプリ内だけで見た目を固定したい、というニーズに対応する。
 function AppearanceSection() {
   const { preference, setPreference } = useThemePreference();
@@ -122,7 +122,7 @@ function TimeStepper({
 // 分は1分刻みで細かく調整できてもあまり意味がないため、5分刻みで調整できるようにする
 const REMINDER_MINUTE_STEP = 5;
 
-// 日記を書き忘れないよう、毎日決まった時刻に端末通知でリマインドする機能の設定導線(Issue #92)。
+// 日記を書き忘れないよう、毎日決まった時刻に端末通知でリマインドする機能の設定導線。
 // 外部のPush通知サービスは使わず、expo-notificationsによる端末内のローカル通知スケジューリングのみで
 // 完結させている。通知が許可されていない場合は、その旨をこの画面内で案内する(フォールバック表示)。
 function DiaryReminderSection() {
@@ -301,7 +301,7 @@ function downloadOnWeb(fileName: string, content: string): void {
 
 // 保存済みの日記データ(復号済み)をJSON形式のファイルに書き出し、OS標準の共有シート経由で
 // 保存・共有できるようにする操作導線。端末紛失・機種変更・アプリ再インストール・ストレージ
-// クリア時にAsyncStorageのデータが失われる問題への対策(Issue #51)。
+// クリア時にAsyncStorageのデータが失われる問題への対策。
 function ExportDiaryDataButton() {
   const [isExporting, setIsExporting] = useState(false);
 
@@ -382,7 +382,7 @@ async function readPickedFileContent(asset: DocumentPicker.DocumentPickerAsset):
   return new File(asset.uri).text();
 }
 
-// ExportDiaryDataButtonで書き出したJSONファイルを選択し、日記データとして取り込む操作導線(Issue #154)。
+// ExportDiaryDataButtonで書き出したJSONファイルを選択し、日記データとして取り込む操作導線。
 // 端末紛失・機種変更時のバックアップ復元や、他の端末でエクスポートしたデータの持ち込みに対応する。
 //
 // マージ方針: 既存データは削除せず、インポートしたエントリを追加する。idが重複する場合は
@@ -475,7 +475,7 @@ function ImportDiaryDataButton() {
 export default function SettingsScreen() {
   return (
     // ステータスバー/ノッチ領域とコンテンツが重ならないよう、TabScreenContainerで
-    // セーフエリア上端インセットぶんの余白を自動的に加算する(Issue #125)
+    // セーフエリア上端インセットぶんの余白を自動的に加算する
     <TabScreenContainer style={styles.container}>
       <AppearanceSection />
       <DiaryReminderSection />
