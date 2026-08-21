@@ -17,7 +17,7 @@ import {
 } from '@/utils/app-lock-authentication';
 
 /**
- * アプリロック(#155)のON/OFF設定をAsyncStorageに保存する際のキー。
+ * アプリロックのON/OFF設定をAsyncStorageに保存する際のキー。
  * `contexts/app-lock-context.tsx`(読み書き)からのみ参照する想定。
  */
 export const APP_LOCK_ENABLED_STORAGE_KEY = 'app-lock-enabled';
