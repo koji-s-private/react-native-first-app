@@ -39,7 +39,13 @@
         }
       ],
       "expo-secure-store",
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "日記アプリのロック解除にFace IDを使用します。"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -1,9 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
+import { AppState } from 'react-native';
 
-import RootLayout from '@/app/_layout';
+import RootLayout, { APP_LOCK_LOADING_OVERLAY_TEST_ID } from '@/app/_layout';
+import { APP_LOCK_ENABLED_STORAGE_KEY } from '@/contexts/app-lock-context';
 import { ONBOARDING_SLIDES } from '@/constants/onboarding-slides';
 import { ONBOARDING_COMPLETED_STORAGE_KEY } from '@/utils/onboarding-storage';
 
@@ -31,6 +33,32 @@ jest.mock('expo-router', () => {
   Stack.Screen = StackScreen;
   return { Stack };
 });
+
+// 「アプリロック」画面(#155)が使う`utils/app-lock-authentication.ts`
+// (expo-local-authenticationの薄いラッパー)を、実際のネイティブ生体認証APIを呼ばずに検証できるよう
+// モック化する(個別の挙動はtests/utils/app-lock-authentication.test.ts等で検証済み。ここでは結線確認のみ)。
+jest.mock('@/utils/app-lock-authentication', () => ({
+  isAppLockSupportedAsync: jest.fn(() => Promise.resolve(true)),
+  authenticateForAppLockAsync: jest.fn(() => Promise.resolve(true)),
+}));
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const mockedAppLockAuthentication = require('@/utils/app-lock-authentication') as {
+  isAppLockSupportedAsync: jest.Mock;
+  authenticateForAppLockAsync: jest.Mock;
+};
+
+// `AppState.addEventListener`から'change'イベント用に登録されたリスナー関数を取り出し、
+// テスト側から直接呼び出すことでバックグラウンド遷移をシミュレートする
+// (tests/contexts/app-lock-context.test.tsxと同様)。
+function getAppStateChangeListener(): (nextAppState: string) => void {
+  const addEventListenerMock = AppState.addEventListener as jest.Mock;
+  const call = addEventListenerMock.mock.calls.find(([eventName]) => eventName === 'change');
+  if (!call) {
+    throw new Error('AppState.addEventListener("change", ...) が呼び出されていません');
+  }
+  return call[1];
+}
 
 const SKIP_BUTTON_TEXT = 'スキップ';
 const START_BUTTON_TEXT = 'はじめる';
@@ -129,5 +157,141 @@ describe('RootLayout のオンボーディング表示制御(Issue #104)', () =>
     // 保存(AsyncStorage.setItem)が失敗しても、目の前の画面遷移(オーバーレイを閉じる)は
     // 妨げられない。次回起動時に再度表示されるだけで、アプリがクラッシュしないことを確認する。
     await waitFor(() => expect(screen.queryByText(ONBOARDING_SLIDES[0].title)).toBeNull());
+  });
+});
+
+describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => {
+  const LOCK_SCREEN_TITLE = 'ロック中';
+  const AUTHENTICATE_BUTTON_TEXT = '認証する';
+
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    jest.clearAllMocks();
+    mockedAppLockAuthentication.isAppLockSupportedAsync.mockResolvedValue(true);
+    mockedAppLockAuthentication.authenticateForAppLockAsync.mockResolvedValue(true);
+    // オンボーディングのオーバーレイが重なって邪魔にならないよう、完了済み扱いにしておく
+    await AsyncStorage.setItem(ONBOARDING_COMPLETED_STORAGE_KEY, 'true');
+  });
+
+  it('does not show the lock screen when the app-lock setting is OFF (既定値)', async () => {
+    render(<RootLayout />);
+
+    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+    expect(screen.queryByText(LOCK_SCREEN_TITLE)).toBeNull();
+  });
+
+  it('does not show the lock screen immediately after moving to the background while OFF (境界値: OFF時はbackground遷移してもロックしない)', async () => {
+    render(<RootLayout />);
+    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+    const handleAppStateChange = getAppStateChangeListener();
+
+    act(() => {
+      handleAppStateChange('background');
+    });
+
+    expect(screen.queryByText(LOCK_SCREEN_TITLE)).toBeNull();
+  });
+
+  it('shows the lock screen and automatically triggers authentication when returning from the background while ON (正常系: ON時のbackground遷移でロック画面表示・自動認証)', async () => {
+    await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
+    // 認証が自動で成功してロック画面が閉じてしまわないよう、手動での検証区間だけ保留にする
+    let resolveAuthenticate: (success: boolean) => void = () => {};
+    mockedAppLockAuthentication.authenticateForAppLockAsync.mockReturnValue(
+      new Promise((resolve) => {
+        resolveAuthenticate = resolve;
+      }),
+    );
+    render(<RootLayout />);
+    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+    const handleAppStateChange = getAppStateChangeListener();
+
+    act(() => {
+      handleAppStateChange('background');
+    });
+
+    expect(screen.getByText(LOCK_SCREEN_TITLE)).toBeTruthy();
+    // ロック画面が表示された直後、ユーザー操作を待たず自動で認証プロンプトが起動する
+    await waitFor(() =>
+      expect(mockedAppLockAuthentication.authenticateForAppLockAsync).toHaveBeenCalledTimes(1),
+    );
+
+    await act(async () => {
+      resolveAuthenticate(true);
+      await Promise.resolve();
+    });
+  });
+
+  it('hides the lock screen once authentication succeeds via the manual retry button (正常系: 手動再試行での認証成功)', async () => {
+    await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
+    mockedAppLockAuthentication.authenticateForAppLockAsync.mockResolvedValue(false);
+    render(<RootLayout />);
+    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+    const handleAppStateChange = getAppStateChangeListener();
+    act(() => {
+      handleAppStateChange('background');
+    });
+    await waitFor(() =>
+      expect(mockedAppLockAuthentication.authenticateForAppLockAsync).toHaveBeenCalledTimes(1),
+    );
+    expect(screen.getByText(LOCK_SCREEN_TITLE)).toBeTruthy();
+    mockedAppLockAuthentication.authenticateForAppLockAsync.mockResolvedValue(true);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(AUTHENTICATE_BUTTON_TEXT));
+    });
+
+    await waitFor(() => expect(screen.queryByText(LOCK_SCREEN_TITLE)).toBeNull());
+  });
+
+  it('keeps the lock screen visible when authentication fails (異常系: 認証失敗時はロック画面を維持)', async () => {
+    await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
+    mockedAppLockAuthentication.authenticateForAppLockAsync.mockResolvedValue(false);
+    render(<RootLayout />);
+    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+    const handleAppStateChange = getAppStateChangeListener();
+
+    act(() => {
+      handleAppStateChange('background');
+    });
+
+    await waitFor(() =>
+      expect(mockedAppLockAuthentication.authenticateForAppLockAsync).toHaveBeenCalledTimes(1),
+    );
+    expect(screen.getByText(LOCK_SCREEN_TITLE)).toBeTruthy();
+  });
+
+  it('shows a blocking overlay (not the lock screen) and does not trigger authentication while the ON setting is still loading from AsyncStorage, then switches to the lock screen once loaded (正常系: 起動直後のレースコンディション対策)', async () => {
+    await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
+    // ロック画面表示後に自動認証が即成功して再び閉じてしまわないよう、手動での検証区間だけ保留にする
+    // (他のテストと同じ方針)
+    mockedAppLockAuthentication.authenticateForAppLockAsync.mockReturnValue(new Promise(() => {}));
+    // このテストでは「AsyncStorageの読み込みが完了する前」の瞬間を検証したいため、
+    // アプリロック設定の読み込みだけを意図的に保留させる(オンボーディング側は即座に解決させる)
+    let resolveAppLockSetting: (value: string | null) => void = () => {};
+    jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key: string) => {
+      if (key === APP_LOCK_ENABLED_STORAGE_KEY) {
+        return new Promise((resolve) => {
+          resolveAppLockSetting = resolve;
+        });
+      }
+      return Promise.resolve('true');
+    });
+
+    render(<RootLayout />);
+
+    // 読み込み完了前は、既定値(未ロック)をそのまま信用してカレンダー等のコンテンツを見せず、
+    // ロック画面でもなく遮蔽用オーバーレイを表示する。認証プロンプトもまだ起動しない
+    expect(screen.getByTestId(APP_LOCK_LOADING_OVERLAY_TEST_ID)).toBeTruthy();
+    expect(screen.queryByText(LOCK_SCREEN_TITLE)).toBeNull();
+    expect(mockedAppLockAuthentication.authenticateForAppLockAsync).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveAppLockSetting('true');
+      await Promise.resolve();
+    });
+
+    // 読み込みが完了すると遮蔽用オーバーレイは消え、保存されていたON設定どおりロック画面へ切り替わる
+    expect(screen.queryByTestId(APP_LOCK_LOADING_OVERLAY_TEST_ID)).toBeNull();
+    await waitFor(() => expect(screen.getByText(LOCK_SCREEN_TITLE)).toBeTruthy());
   });
 });

@@ -19,11 +19,13 @@ tests/
   contexts/
     theme-preference-context.test.tsx   contexts/theme-preference-context.tsx（配色設定）のテスト
     diary-reminder-context.test.tsx   contexts/diary-reminder-context.tsx（日記リマインダー通知の設定・永続化）のテスト
+    app-lock-context.test.tsx   contexts/app-lock-context.tsx（アプリロックのON/OFF設定・永続化・background遷移時の再ロック）のテスト
   utils/
     diary-encryption.test.ts   utils/diary-encryption.ts（日記データの暗号化・復号）のテスト
     diary-storage.test.ts      utils/diary-storage.ts（日記データの全件削除）のテスト
     diary-reminder-notifications.test.ts   utils/diary-reminder-notifications.ts（expo-notificationsラッパー。許可リクエスト・日次スケジュール登録/キャンセル）のテスト
     onboarding-storage.test.ts   utils/onboarding-storage.ts（オンボーディング表示済みフラグの読み書き）のテスト
+    app-lock-authentication.test.ts   utils/app-lock-authentication.ts（expo-local-authenticationラッパー。対応端末判定・生体認証/パスコード認証)のテスト
 ```
 
 （上記は代表的なファイルの抜粋です。実際の一覧は最新のディレクトリ構成を参照してください。）
@@ -64,6 +66,14 @@ npm test
 - `contexts/diary-reminder-context.tsx` のテストでは、コンテキスト自体の状態管理・永続化ロジックを検証したいため、`expo-notifications`ではなく一段上の`utils/diary-reminder-notifications.ts`ごとモック化しています。
 
 具体的な実装は [tests/utils/diary-reminder-notifications.test.ts](utils/diary-reminder-notifications.test.ts) と [tests/contexts/diary-reminder-context.test.tsx](contexts/diary-reminder-context.test.tsx) を参照してください。
+
+### expo-local-authentication のモックについて
+
+`utils/app-lock-authentication.ts` は `expo-local-authentication` の対応端末判定(`hasHardwareAsync`/`isEnrolledAsync`/`getEnrolledLevelAsync`)・生体認証実行(`authenticateAsync`)APIをそのまま呼び出します。`jest-expo` が自動生成するモックはWeb版のスタブ実装(常に固定値を返し、`authenticateAsync`は未実装のため呼び出すとエラーになる)をそのまま使ってしまうため、`expo-notifications`と同様に`jest.mock('expo-local-authentication', () => ({ ... }))`で各関数を`jest.fn()`に差し替える必要があります。
+
+- `contexts/app-lock-context.tsx` のテストでは、コンテキスト自体の状態管理・永続化ロジックを検証したいため、`expo-local-authentication`ではなく一段上の`utils/app-lock-authentication.ts`ごとモック化しています。
+
+具体的な実装は [tests/utils/app-lock-authentication.test.ts](utils/app-lock-authentication.test.ts) と [tests/contexts/app-lock-context.test.tsx](contexts/app-lock-context.test.tsx) を参照してください。
 
 ## 関連ドキュメント
 
