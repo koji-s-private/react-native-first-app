@@ -36,6 +36,9 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# designerサブエージェントがPlaywrightで撮影する変更前後の比較スクリーンショット（ローカル生成物）
+.designer-screenshots/
+
 # Python(.github/scripts/select_next_issue.py実行時に生成される)
 __pycache__/
 *.pyc

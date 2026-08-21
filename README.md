@@ -165,6 +165,7 @@
 | [@testing-library/react-native](https://callstack.github.io/react-native-testing-library/) | コンポーネントのレンダリング・操作を伴うテストの記述 | `tests/` ディレクトリ |
 | [react-test-renderer](https://reactjs.org/docs/test-renderer.html) | Reactコンポーネントをテスト用にレンダリングする | `@testing-library/react-native` の内部依存 |
 | [@types/jest](https://www.npmjs.com/package/@types/jest) / [@types/react](https://www.npmjs.com/package/@types/react) | TypeScriptの型定義 | 開発時の型チェック |
+| [Playwright](https://playwright.dev/) | ブラウザ自動操作ライブラリ | designerサブエージェント（[.claude/agents/designer.md](.claude/agents/designer.md)）が、UI関連PRの変更前(main)・変更後(PRブランチ)の画面（`npx expo export --platform web`によるWeb書き出し）をスクリーンショット撮影し比較するために使用。通常のCI（[.github/workflows/ci.yml](.github/workflows/ci.yml)）では使用しない |
 
 ## データ構造
 
