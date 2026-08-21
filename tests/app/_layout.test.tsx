@@ -4,7 +4,7 @@ import type { PropsWithChildren } from 'react';
 import React from 'react';
 import { AppState } from 'react-native';
 
-import RootLayout from '@/app/_layout';
+import RootLayout, { APP_LOCK_LOADING_OVERLAY_TEST_ID } from '@/app/_layout';
 import { APP_LOCK_ENABLED_STORAGE_KEY } from '@/contexts/app-lock-context';
 import { ONBOARDING_SLIDES } from '@/constants/onboarding-slides';
 import { ONBOARDING_COMPLETED_STORAGE_KEY } from '@/utils/onboarding-storage';
@@ -258,5 +258,40 @@ describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => 
       expect(mockedAppLockAuthentication.authenticateForAppLockAsync).toHaveBeenCalledTimes(1),
     );
     expect(screen.getByText(LOCK_SCREEN_TITLE)).toBeTruthy();
+  });
+
+  it('shows a blocking overlay (not the lock screen) and does not trigger authentication while the ON setting is still loading from AsyncStorage, then switches to the lock screen once loaded (正常系: 起動直後のレースコンディション対策)', async () => {
+    await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
+    // ロック画面表示後に自動認証が即成功して再び閉じてしまわないよう、手動での検証区間だけ保留にする
+    // (他のテストと同じ方針)
+    mockedAppLockAuthentication.authenticateForAppLockAsync.mockReturnValue(new Promise(() => {}));
+    // このテストでは「AsyncStorageの読み込みが完了する前」の瞬間を検証したいため、
+    // アプリロック設定の読み込みだけを意図的に保留させる(オンボーディング側は即座に解決させる)
+    let resolveAppLockSetting: (value: string | null) => void = () => {};
+    jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key: string) => {
+      if (key === APP_LOCK_ENABLED_STORAGE_KEY) {
+        return new Promise((resolve) => {
+          resolveAppLockSetting = resolve;
+        });
+      }
+      return Promise.resolve('true');
+    });
+
+    render(<RootLayout />);
+
+    // 読み込み完了前は、既定値(未ロック)をそのまま信用してカレンダー等のコンテンツを見せず、
+    // ロック画面でもなく遮蔽用オーバーレイを表示する。認証プロンプトもまだ起動しない
+    expect(screen.getByTestId(APP_LOCK_LOADING_OVERLAY_TEST_ID)).toBeTruthy();
+    expect(screen.queryByText(LOCK_SCREEN_TITLE)).toBeNull();
+    expect(mockedAppLockAuthentication.authenticateForAppLockAsync).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveAppLockSetting('true');
+      await Promise.resolve();
+    });
+
+    // 読み込みが完了すると遮蔽用オーバーレイは消え、保存されていたON設定どおりロック画面へ切り替わる
+    expect(screen.queryByTestId(APP_LOCK_LOADING_OVERLAY_TEST_ID)).toBeNull();
+    await waitFor(() => expect(screen.getByText(LOCK_SCREEN_TITLE)).toBeTruthy());
   });
 });

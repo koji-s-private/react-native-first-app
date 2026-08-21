@@ -29,6 +29,12 @@ type AppLockContextValue = {
   isSupported: boolean;
   /** 現在ロック画面を表示すべきでないか。enabledがfalseの間は常にtrue */
   isUnlocked: boolean;
+  /**
+   * AsyncStorageからのロック設定(enabled)の読み込みが完了したか。falseの間はenabled/isUnlockedが
+   * まだ暫定値であり、ONだったことを見落として日記データを描画してしまわないよう、呼び出し側
+   * (app/_layout.tsx)はこの間コンテンツ全体を覆い隠す必要がある
+   */
+  isReady: boolean;
   /** アプリロックのON/OFFを切り替え、AsyncStorageへ永続化する */
   setEnabled: (enabled: boolean) => Promise<void>;
   /** 生体認証(またはOS標準パスコード)を実行し、成功していればロックを解除する */
@@ -44,6 +50,11 @@ export function AppLockProvider({ children }: PropsWithChildren) {
   // 終わるまではtrue(未ロック)で開始する(components/onboarding.tsxの表示要否判定と同じ方針)。
   // ONだった場合のみ、読み込み完了後にロック画面へ切り替わる
   const [isUnlocked, setIsUnlocked] = useState(true);
+  // ロック設定の読み込みが完了するまではisUnlocked=trueが暫定値(実際にONかどうか未確定)であり、
+  // これをそのまま「未ロック」として扱うと、ONを復元する前提のケースでその間だけ日記データが
+  // 描画されてしまう(#155)。読み込み完了を明示的なstateとして持ち、完了するまでは
+  // app/_layout.tsx側でコンテンツ全体を覆い隠す
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -62,6 +73,11 @@ export function AppLockProvider({ children }: PropsWithChildren) {
         // 読み込みに失敗した場合はOFF相当として扱い、ロック画面で日記データへのアクセスを
         // 妨げないことを優先する(致命的な不具合にはならない)
         setIsUnlocked(true);
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsReady(true);
+        }
       });
 
     isAppLockSupportedAsync()
@@ -135,8 +151,8 @@ export function AppLockProvider({ children }: PropsWithChildren) {
   }, []);
 
   const value = useMemo<AppLockContextValue>(
-    () => ({ enabled, isSupported, isUnlocked, setEnabled, authenticate }),
-    [enabled, isSupported, isUnlocked, setEnabled, authenticate],
+    () => ({ enabled, isSupported, isUnlocked, isReady, setEnabled, authenticate }),
+    [enabled, isSupported, isUnlocked, isReady, setEnabled, authenticate],
   );
 
   return <AppLockContext.Provider value={value}>{children}</AppLockContext.Provider>;
@@ -145,7 +161,8 @@ export function AppLockProvider({ children }: PropsWithChildren) {
 /**
  * アプリロックの設定・状態を取得・変更するフック。
  * `AppLockProvider`配下でない場合(単体テストなど)は、常にロック画面を表示しない
- * 読み取り専用相当のフォールバック値を返す。
+ * 読み取り専用相当のフォールバック値を返す。読み込み待ちの概念自体が存在しないため
+ * isReadyは常にtrue。
  */
 export function useAppLock(): AppLockContextValue {
   const context = useContext(AppLockContext);
@@ -158,6 +175,7 @@ export function useAppLock(): AppLockContextValue {
     enabled: false,
     isSupported: false,
     isUnlocked: true,
+    isReady: true,
     setEnabled: async () => {},
     authenticate: async () => true,
   };

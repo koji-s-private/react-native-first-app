@@ -68,6 +68,38 @@ describe('AppLockProvider / useAppLock', () => {
     await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
   });
 
+  it('starts with isReady=false and flips to true once the AsyncStorage read settles (初期値: 読み込み完了フラグ)', async () => {
+    const { result } = renderHook(() => useAppLock(), { wrapper });
+
+    // AsyncStorageの読み込みが完了するまでは、enabled/isUnlockedがまだ暫定値であることを
+    // 示すフラグ。falseのままコンテンツ側が読み込み完了を誤って前提にしないことを検証する
+    expect(result.current.isReady).toBe(false);
+
+    await waitFor(() => expect(result.current.isReady).toBe(true));
+  });
+
+  it('keeps isReady=false immediately after a previously saved ON setting is restored, and enabled/isUnlocked settle correctly once isReady becomes true (正常系: 起動時のisReadyとisUnlockedの整合性・レースコンディション対策)', async () => {
+    await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
+
+    const { result } = renderHook(() => useAppLock(), { wrapper });
+
+    // 読み込み未完了の間にisUnlocked(暫定値true)だけを見て「未ロック」と誤判定しないよう、
+    // 呼び出し側はisReadyも合わせて確認する必要があることを示す
+    expect(result.current.isReady).toBe(false);
+
+    await waitFor(() => expect(result.current.isReady).toBe(true));
+    expect(result.current.enabled).toBe(true);
+    expect(result.current.isUnlocked).toBe(false);
+  });
+
+  it('sets isReady=true even when AsyncStorage.getItem rejects (異常系: 読み込み失敗時もisReadyは完了扱いになる)', async () => {
+    jest.spyOn(AsyncStorage, 'getItem').mockRejectedValueOnce(new Error('storage read error'));
+
+    const { result } = renderHook(() => useAppLock(), { wrapper });
+
+    await waitFor(() => expect(result.current.isReady).toBe(true));
+  });
+
   it('loads isSupported=true from the OS on mount when the device has biometrics/passcode enrolled (正常系: 対応端末)', async () => {
     mockedAuthenticationUtil.isAppLockSupportedAsync.mockResolvedValue(true);
 
@@ -364,6 +396,8 @@ describe('AppLockProvider / useAppLock', () => {
       expect(result.current.enabled).toBe(false);
       expect(result.current.isSupported).toBe(false);
       expect(result.current.isUnlocked).toBe(true);
+      // Provider外では読み込み待ちの概念自体が存在しないため、常に完了扱いとする
+      expect(result.current.isReady).toBe(true);
     });
 
     it('does not throw and does not touch AsyncStorage when setEnabled is called outside of the Provider (境界値: Provider外でのsetEnabledはno-op)', async () => {
