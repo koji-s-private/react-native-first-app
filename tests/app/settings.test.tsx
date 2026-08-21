@@ -1107,6 +1107,44 @@ describe('日記データをインポートボタン(Issue #154: データ管理
     );
   });
 
+  // reviewerからの指摘(PR #222): 暗号鍵が未生成の状態(=まさにバックアップ復元時に起きる状況)で
+  // 複数件を並列(Promise.all)保存すると、各保存処理が同時に鍵の生成・書き込みを行い、
+  // 最後に勝った鍵以外で暗号化されたエントリが復号不能になり消失していた。逐次保存への
+  // 修正(for...of)によりこれが起きないことを回帰テストとして固定する。
+  it('saves every imported entry so that all of them are decryptable afterwards, even from a fresh (not-yet-generated) encryption key state (回帰: 暗号鍵レースコンディションによるデータ消失防止)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    // secureStoreMock.__reset()により暗号鍵が未生成の状態から始まる(beforeEachで実施済み)
+    const importedEntries = Array.from({ length: 10 }, (_, i) => ({
+      id: `entry-${i}`,
+      text: `取り込む日記 ${i}`,
+      createdAt: `2026-02-${String(i + 1).padStart(2, '0')}T00:00:00.000Z`,
+    }));
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [pickedAsset],
+    });
+    mockedFileSystem.__mockText.mockResolvedValueOnce(JSON.stringify(importedEntries));
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+    });
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalledTimes(1));
+    await pressAlertButtonByLabel('取り込む');
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenLastCalledWith(
+        'インポートが完了しました',
+        `${importedEntries.length}件の日記データを取り込みました。`,
+      ),
+    );
+
+    const allEntries = await getAllDiaryEntries();
+    expect(allEntries.map((entry) => entry.id).sort()).toEqual(
+      importedEntries.map((entry) => entry.id).sort(),
+    );
+  });
+
   // Issue #167で他の操作導線(削除/エクスポート)に導入された、処理中の連続タップ防止のための
   // 視覚的フィードバックをインポートボタンにも合わせる。
   it('dims the button and disables it while picking a file, then restores both once finished (処理中の視覚的フィードバック)', async () => {

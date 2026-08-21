@@ -394,7 +394,11 @@ function ImportDiaryDataButton() {
 
   const importEntries = useCallback(async (entries: DiaryEntry[]) => {
     try {
-      await Promise.all(entries.map((entry) => saveDiaryEntry(entry)));
+      // 暗号鍵未生成の状態で並列保存すると、各呼び出しが別々の鍵を生成し合って
+      // 書き込みを取り合い、データが消失し得るため、あえて逐次保存にしている
+      for (const entry of entries) {
+        await saveDiaryEntry(entry);
+      }
       Alert.alert('インポートが完了しました', `${entries.length}件の日記データを取り込みました。`);
     } catch {
       Alert.alert('インポートに失敗しました', 'もう一度お試しください。');
