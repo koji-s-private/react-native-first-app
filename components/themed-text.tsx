@@ -16,11 +16,13 @@ export function ThemedText({
   ...rest
 }: ThemedTextProps) {
   const color = useThemeColor({ light: lightColor, dark: darkColor }, 'text');
+  // リンクの色はテーマごとにコントラスト比を確保した専用色(Colors.light/dark.link)を使う
+  const linkColor = useThemeColor({ light: lightColor, dark: darkColor }, 'link');
 
   return (
     <Text
       style={[
-        { color },
+        { color: type === 'link' ? linkColor : color },
         type === 'default' ? styles.default : undefined,
         type === 'title' ? styles.title : undefined,
         type === 'defaultSemiBold' ? styles.defaultSemiBold : undefined,
@@ -55,6 +57,5 @@ const styles = StyleSheet.create({
   link: {
     lineHeight: 30,
     fontSize: 16,
-    color: '#0a7ea4',
   },
 });

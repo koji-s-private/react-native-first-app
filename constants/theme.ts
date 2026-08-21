@@ -18,6 +18,8 @@ export const Colors = {
     tabIconSelected: tintColorLight,
     // エラー/警告/削除など注意喚起の意味を持つ赤系の色。白背景(#fff)に対して十分なコントラストを確保する
     error: '#d32f2f',
+    // 白背景(#fff)に対してコントラスト比が十分高いため、tintColorLightをそのまま使う
+    link: tintColorLight,
   },
   dark: {
     text: '#ECEDEE',
@@ -29,6 +31,9 @@ export const Colors = {
     // ダークモードの背景(#151718)に対して、ライトモードと同じ#d32f2fでは彩度・明度が
     // やや暗く沈みコントラストが不足するため、明るめの赤(#ff6b6b)を使いWCAG的な視認性を確保する
     error: '#ff6b6b',
+    // 背景(#151718)に対するコントラスト比は約9.5:1でWCAG AA(4.5:1)を満たす。
+    // 本文テキスト色(#ECEDEE)と区別できるよう、リンクらしい明るめの青系を採用する
+    link: '#5AC8FA',
   },
 };
 

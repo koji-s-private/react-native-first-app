@@ -21,3 +21,22 @@ describe('Colors.error (Issue #58: エラーメッセージ色のテーマ定数
     expect(Colors.dark.error).toBe('#ff6b6b');
   });
 });
+
+describe('Colors.link (Issue #153: ダークモードでリンク色のコントラストが不足する問題の修正)', () => {
+  it('defines a valid hex color for light mode', () => {
+    expect(Colors.light.link).toMatch(HEX_COLOR_PATTERN);
+  });
+
+  it('defines a valid hex color for dark mode', () => {
+    expect(Colors.dark.link).toMatch(HEX_COLOR_PATTERN);
+  });
+
+  it('uses a different value from light mode, so dark mode keeps sufficient contrast against its darker background', () => {
+    expect(Colors.dark.link).not.toBe(Colors.light.link);
+  });
+
+  it('matches the specific values chosen for Issue #153', () => {
+    expect(Colors.light.link).toBe('#0a7ea4');
+    expect(Colors.dark.link).toBe('#5AC8FA');
+  });
+});
