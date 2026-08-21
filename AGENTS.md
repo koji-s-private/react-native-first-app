@@ -91,7 +91,8 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
   - `coder`: 実装・ブランチ作成・PR作成([.claude/agents/coder.md](.claude/agents/coder.md))
   - `qa-engineer`: テスト作成・実行([.claude/agents/qa-engineer.md](.claude/agents/qa-engineer.md))
   - `reviewer`: 静的解析・セキュリティ観点でのレビュー、コード変更は行わない。判定結果は実際のGitHub PRレビューとして投稿する。ただしcoderと同一GitHub App identity(`claude[bot]`)であるため、GitHubの仕様上自分自身のPRには`--approve`/`--request-changes`を実行できず(`Can not approve your own pull request`)、`gh pr review --comment`で判定(LGTM相当/要修正)を明記する運用にしている([.claude/agents/reviewer.md](.claude/agents/reviewer.md))
-- 3者の作業が完了し、テストが通ってからPRを作成する
+  - `designer`: 「使いやすさ・継続して利用したいと思えるか」というUI/UX観点でのレビュー、コード変更は行わない。`app/` / `components/`配下を変更するPRのみが対象で、Playwrightで変更前(main)・変更後(PRブランチ)の画面(`npx expo export --platform web`によるWeb書き出し)のスクリーンショットを撮影・比較する。判定結果はreviewerと同じ理由・同じ方式(`gh pr review --comment`、`--approve`/`--request-changes`は使わない)で投稿する([.claude/agents/designer.md](.claude/agents/designer.md))
+- 3者(UI関連PRの場合はdesignerを含め4者)の作業が完了し、テストが通ってからPRを作成する
 - ワークフロー本体は [.github/workflows/ai-team.yml](.github/workflows/ai-team.yml) を参照
 
 ## Issue選定と実装着手(1日1回・優先度ベース)
@@ -126,17 +127,23 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
   coderとreviewerが同一GitHub App identity(`claude[bot]`)で動作する以上、reviewerはPRの作者である
   自分自身を正式にAPPROVEできず(GitHub側の制約)、ネイティブなAPPROVE状態を作成すること自体ができないため、
   「reviewerの実際のAPPROVEを条件に自動マージする」という設計は成立しない
-- reviewerは`gh pr review --comment`でLGTM相当/要修正の判定を投稿する。判定がどちらであってもPMはマージせず、
-  Projectsのステータスを `Under Review` のままにして人間の判断を待つ(`Done` にしない)
-- 完了条件(PR作成後、reviewerのレビューが完了しUnder Reviewで人間の判断待ちの状態になっていること。
-  マージはこの完了条件に含まれない)に到達しないままセッションが終了する場合、
+- reviewer(UI関連PRの場合はdesignerも)は`gh pr review --comment`でLGTM相当/要修正の判定を投稿する。
+  判定がどちらであってもPMはマージせず、Projectsのステータスを `Under Review` のままにして
+  人間の判断を待つ(`Done` にしない)
+- **designerはreviewerと同格のゲート**: `app/` / `components/`配下を変更するUI関連PRに限り、
+  reviewerのLGTM相当に加えてdesignerのLGTM相当も揃って初めて完了条件を満たしたとみなす
+  (UI関連ファイルの変更を含まないPRではdesignerは呼び出されず、reviewerのLGTM相当のみが
+  従来通り条件になる)
+- 完了条件(PR作成後、reviewer(該当する場合はdesignerも)のレビューが完了しUnder Reviewで
+  人間の判断待ちの状態になっていること。マージはこの完了条件に含まれない)に到達しないまま
+  セッションが終了する場合、
   理由を問わず終了前に該当Issueへ状況説明コメントを残すルールを設けている(ai-team.yml 参照)
 - リポジトリは2026-07-30にprivateへ変更した。Actions実行時間は組織のFree枠(月2,000分)を消費する形になったが、
   Actions予算を `$0 / Stop usage: Yes` に設定済みのため、枠を使い切っても課金はされず自動的に実行が止まるだけ。
   Claude Code の利用(CLAUDE_CODE_OAUTH_TOKEN)は引き続きPro契約の枠内で追加課金なし
 
 ## スコープ外の発見事項の扱い
-- coder / qa-engineer の報告、および reviewerが実際に投稿したPRレビュー本文中の「スコープ外の発見事項」に、
+- coder / qa-engineer の報告、および reviewer・designer(呼び出した場合)が実際に投稿したPRレビュー本文中の「スコープ外の発見事項」に、
   今回のIssueと無関係な問題(バグ、技術的負債、改善点)が含まれていた場合、PMがそれを拾う
 - PMはそれを新しいIssueとして作成し、`found-in-review` ラベルを付けてProjectに追加する(Statusは `Todo`)
 - 優先度ラベルは `next` を基本とする(緊急性が本当に高い場合のみ `now`)。`now` を付けた場合、
