@@ -9,7 +9,7 @@ import {
 
 /**
  * 日記データをAsyncStorageに保存する際に、かつて使われていた単一キー(全件を1つの配列として
- * 保存する方式)。Issue #83以降は`DIARY_ENTRY_KEY_PREFIX`によるエントリ単位のキーに移行したため、
+ * 保存する方式)。
  * このキー自体は「移行(マイグレーション)元」としてのみ参照する。
  * 既存テストや過去バージョンで保存されたデータとの後方互換のため、exportは維持する。
  */
@@ -17,7 +17,7 @@ export const DIARY_ENTRIES_STORAGE_KEY = 'diary-entries';
 
 /**
  * 日記エントリ1件分をAsyncStorageに個別に保存する際のキーのプレフィックス。
- * `<prefix><id>`の形で、エントリごとに独立したキーを持つ(Issue #83)。
+ * `<prefix><id>`の形で、エントリごとに独立したキーを持つ。
  * 1件の保存/削除がO(1)になり、エントリ数が増えても他のエントリの読み書きが発生しない。
  */
 export const DIARY_ENTRY_KEY_PREFIX = 'diary-entry:';
@@ -42,8 +42,9 @@ export type DiaryEntry = {
  * `id`, `text`, `createdAt`のいずれもstring型であることを確認する
  * (AsyncStorageから読み込んだJSONは実行時に型が保証されないため、`JSON.parse`結果を
  * そのまま`as DiaryEntry`で扱わずここで検証する)。
+ * `utils/diary-import.ts`のインポート時スキーマ検証でも同じロジックを再利用するためexportする。
  */
-function isDiaryEntry(value: unknown): value is DiaryEntry {
+export function isDiaryEntry(value: unknown): value is DiaryEntry {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
@@ -205,7 +206,7 @@ export async function getAllDiaryEntries(): Promise<DiaryEntry[]> {
 
 /**
  * 日記エントリ1件を暗号化して該当の個別キーに保存する(新規追加・編集どちらでも使う)。
- * 1回のAsyncStorage書き込みで完結し、他のエントリの読み書きは発生させない(Issue #83)。
+ * 1回のAsyncStorage書き込みで完結し、他のエントリの読み書きは発生させない。
  */
 export async function saveDiaryEntry(entry: DiaryEntry): Promise<void> {
   const key = await getOrCreateEncryptionKey();

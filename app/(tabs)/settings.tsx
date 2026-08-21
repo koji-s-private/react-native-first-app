@@ -1,3 +1,4 @@
+import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import { Link } from 'expo-router';
 import * as Sharing from 'expo-sharing';
@@ -13,7 +14,13 @@ import { useDiaryReminder } from '@/contexts/diary-reminder-context';
 import { useThemePreference, type ThemePreference } from '@/contexts/theme-preference-context';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { buildDiaryExportFileName, serializeDiaryEntriesForExport } from '@/utils/diary-export';
-import { clearAllDiaryEntries, getAllDiaryEntries } from '@/utils/diary-storage';
+import { parseDiaryEntriesForImport } from '@/utils/diary-import';
+import {
+  clearAllDiaryEntries,
+  getAllDiaryEntries,
+  saveDiaryEntry,
+  type DiaryEntry,
+} from '@/utils/diary-storage';
 
 // 「外観」セクションで選べる配色設定の選択肢。表示順もこの配列の並び順に従う
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
@@ -22,7 +29,7 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: 'system', label: '端末に合わせる' },
 ];
 
-// アプリ内で配色(ライト/ダーク/端末に合わせる)を選択する操作導線(Issue #91)。
+// アプリ内で配色(ライト/ダーク/端末に合わせる)を選択する操作導線。
 // OSの設定に関わらずアプリ内だけで見た目を固定したい、というニーズに対応する。
 function AppearanceSection() {
   const { preference, setPreference } = useThemePreference();
@@ -115,7 +122,7 @@ function TimeStepper({
 // 分は1分刻みで細かく調整できてもあまり意味がないため、5分刻みで調整できるようにする
 const REMINDER_MINUTE_STEP = 5;
 
-// 日記を書き忘れないよう、毎日決まった時刻に端末通知でリマインドする機能の設定導線(Issue #92)。
+// 日記を書き忘れないよう、毎日決まった時刻に端末通知でリマインドする機能の設定導線。
 // 外部のPush通知サービスは使わず、expo-notificationsによる端末内のローカル通知スケジューリングのみで
 // 完結させている。通知が許可されていない場合は、その旨をこの画面内で案内する(フォールバック表示)。
 function DiaryReminderSection() {
@@ -294,7 +301,7 @@ function downloadOnWeb(fileName: string, content: string): void {
 
 // 保存済みの日記データ(復号済み)をJSON形式のファイルに書き出し、OS標準の共有シート経由で
 // 保存・共有できるようにする操作導線。端末紛失・機種変更・アプリ再インストール・ストレージ
-// クリア時にAsyncStorageのデータが失われる問題への対策(Issue #51)。
+// クリア時にAsyncStorageのデータが失われる問題への対策。
 function ExportDiaryDataButton() {
   const [isExporting, setIsExporting] = useState(false);
 
@@ -361,10 +368,114 @@ function ExportDiaryDataButton() {
   );
 }
 
+// ネイティブ(iOS/Android)は選択されたファイルのURIをexpo-file-systemの`File`で読み込むが、
+// Webはexpo-file-systemのファイルシステムAPIに対応していないため、
+// DocumentPickerAssetがブラウザ標準の`File`オブジェクトとして返す`asset.file`から直接読み込む
+// (`downloadOnWeb`と同様、Web版だけ別経路になる)。
+async function readPickedFileContent(asset: DocumentPicker.DocumentPickerAsset): Promise<string> {
+  if (Platform.OS === 'web') {
+    if (!asset.file) {
+      throw new Error('選択したファイルを読み込めませんでした');
+    }
+    return asset.file.text();
+  }
+  return new File(asset.uri).text();
+}
+
+// ExportDiaryDataButtonで書き出したJSONファイルを選択し、日記データとして取り込む操作導線。
+// 端末紛失・機種変更時のバックアップ復元や、他の端末でエクスポートしたデータの持ち込みに対応する。
+//
+// マージ方針: 既存データは削除せず、インポートしたエントリを追加する。idが重複する場合は
+// インポートするファイル側の内容で上書きする(バックアップ復元時、最新のエクスポート内容を
+// 反映したいというユースケースを優先し、全置換は行わない)。`saveDiaryEntry`がエントリのidを
+// キーに個別保存するため、この上書き挙動は特別な実装をせずとも自然に実現できる。
+function ImportDiaryDataButton() {
+  const [isImporting, setIsImporting] = useState(false);
+
+  const importEntries = useCallback(async (entries: DiaryEntry[]) => {
+    try {
+      // 暗号鍵未生成の状態で並列保存すると、各呼び出しが別々の鍵を生成し合って
+      // 書き込みを取り合い、データが消失し得るため、あえて逐次保存にしている
+      for (const entry of entries) {
+        await saveDiaryEntry(entry);
+      }
+      Alert.alert('インポートが完了しました', `${entries.length}件の日記データを取り込みました。`);
+    } catch {
+      Alert.alert('インポートに失敗しました', 'もう一度お試しください。');
+    } finally {
+      setIsImporting(false);
+    }
+  }, []);
+
+  const confirmImport = useCallback(
+    (entries: DiaryEntry[]) => {
+      // 誤操作による意図しない上書きを防ぐため、取り込み前に件数を示して確認する
+      Alert.alert(
+        '日記データをインポートしますか?',
+        `${entries.length}件の日記データを取り込みます。同じ日記が既にある場合は、ファイルの内容で上書きされます。`,
+        [
+          { text: 'キャンセル', style: 'cancel', onPress: () => setIsImporting(false) },
+          { text: '取り込む', onPress: () => importEntries(entries) },
+        ],
+      );
+    },
+    [importEntries],
+  );
+
+  const handlePress = useCallback(async () => {
+    setIsImporting(true);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: 'application/json' });
+      if (result.canceled || result.assets.length === 0) {
+        setIsImporting(false);
+        return;
+      }
+
+      const content = await readPickedFileContent(result.assets[0]);
+      const { validEntries, invalidCount } = parseDiaryEntriesForImport(content);
+
+      if (invalidCount > 0) {
+        // サイレントにスキップするとデータ欠落に誰も気づけないため、開発者向けにログを残す
+        // (getAllDiaryEntriesの壊れたエントリ対応と同じ方針)
+        console.warn(`ImportDiaryDataButton: ${invalidCount}件の不正なエントリをスキップしました`);
+      }
+
+      if (validEntries.length === 0) {
+        Alert.alert(
+          'インポートできる日記データがありません',
+          '選択したファイルに有効な日記データが含まれていませんでした。',
+        );
+        setIsImporting(false);
+        return;
+      }
+
+      confirmImport(validEntries);
+    } catch {
+      Alert.alert(
+        'インポートに失敗しました',
+        '選択したファイルを読み込めませんでした。ファイルの形式を確認してもう一度お試しください。',
+      );
+      setIsImporting(false);
+    }
+  }, [confirmImport]);
+
+  return (
+    <Pressable
+      onPress={handlePress}
+      disabled={isImporting}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: isImporting }}
+      style={[styles.exportButton, { opacity: isImporting ? 0.5 : 1 }]}
+    >
+      <ThemedText type="link">日記データをインポート</ThemedText>
+    </Pressable>
+  );
+}
+
 export default function SettingsScreen() {
   return (
     // ステータスバー/ノッチ領域とコンテンツが重ならないよう、TabScreenContainerで
-    // セーフエリア上端インセットぶんの余白を自動的に加算する(Issue #125)
+    // セーフエリア上端インセットぶんの余白を自動的に加算する
     <TabScreenContainer style={styles.container}>
       <AppearanceSection />
       <DiaryReminderSection />
@@ -388,6 +499,9 @@ export default function SettingsScreen() {
         </ThemedText>
         <ThemedView style={styles.item}>
           <ExportDiaryDataButton />
+        </ThemedView>
+        <ThemedView style={styles.item}>
+          <ImportDiaryDataButton />
         </ThemedView>
         <ThemedView style={styles.item}>
           <DeleteAllDiaryDataButton />
