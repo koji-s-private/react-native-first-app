@@ -42,8 +42,9 @@ export type DiaryEntry = {
  * `id`, `text`, `createdAt`のいずれもstring型であることを確認する
  * (AsyncStorageから読み込んだJSONは実行時に型が保証されないため、`JSON.parse`結果を
  * そのまま`as DiaryEntry`で扱わずここで検証する)。
+ * `utils/diary-import.ts`のインポート時スキーマ検証でも同じロジックを再利用するためexportする。
  */
-function isDiaryEntry(value: unknown): value is DiaryEntry {
+export function isDiaryEntry(value: unknown): value is DiaryEntry {
   if (typeof value !== 'object' || value === null) {
     return false;
   }

@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
+import * as DocumentPicker from 'expo-document-picker';
 import * as SecureStore from 'expo-secure-store';
 import * as Sharing from 'expo-sharing';
 import type { PropsWithChildren } from 'react';
@@ -19,7 +20,11 @@ import {
   THEME_PREFERENCE_STORAGE_KEY,
   ThemePreferenceProvider,
 } from '@/contexts/theme-preference-context';
-import { DIARY_ENTRIES_STORAGE_KEY } from '@/utils/diary-storage';
+import {
+  buildDiaryEntryKey,
+  DIARY_ENTRIES_STORAGE_KEY,
+  getAllDiaryEntries,
+} from '@/utils/diary-storage';
 
 // 実機では`expo-router`の`ExpoRoot`が自動的に`SafeAreaProvider`で全体をラップするが、単体
 // レンダリングではそのラップが無く`useSafeAreaInsets`がエラーを投げるため(`tests/app/index.test.tsx`
@@ -54,16 +59,29 @@ jest.mock('@/utils/diary-reminder-notifications', () => ({
 jest.mock('expo-file-system', () => {
   const state: { cacheDirectoryUri: string | null } = { cacheDirectoryUri: 'file:///mock-cache/' };
   const write = jest.fn();
+  // インポート機能(Issue #154)が`new File(asset.uri).text()`で読み込む内容を差し替えるためのモック。
+  // 既定ではテストごとに明示的に`mockResolvedValueOnce`等で設定する想定
+  const text = jest.fn((_uri: string) => Promise.reject(new Error('text() is not mocked')));
 
   class MockFile {
     uri: string;
 
-    constructor(directory: { uri: string }, fileName: string) {
-      this.uri = `${directory.uri}${fileName}`;
+    // `ExportDiaryDataButton`は`new File(Paths.cache, fileName)`(2引数)で、
+    // `ImportDiaryDataButton`は`new File(asset.uri)`(URI文字列1つ)でそれぞれ呼び出すため、
+    // 両方の呼び出し方に対応できるようにする
+    constructor(directoryOrUri: { uri: string } | string, fileName?: string) {
+      this.uri =
+        typeof directoryOrUri === 'string'
+          ? directoryOrUri
+          : `${directoryOrUri.uri}${fileName ?? ''}`;
     }
 
     write(content: string) {
       return write(this.uri, content);
+    }
+
+    text() {
+      return text(this.uri);
     }
   }
 
@@ -80,8 +98,15 @@ jest.mock('expo-file-system', () => {
     File: MockFile,
     __mockState: state,
     __mockWrite: write,
+    __mockText: text,
   };
 });
+
+// `expo-document-picker`もJest環境ではネイティブのファイル選択UIを表示できないため、
+// テストごとに選択結果(選択されたファイル/キャンセル)を差し替えられるようモックする。
+jest.mock('expo-document-picker', () => ({
+  getDocumentAsync: jest.fn(),
+}));
 
 // `expo-sharing`もJest環境ではネイティブモジュールが存在せず、`isAvailableAsync`が常に`false`を
 // 返す(=共有不可)実際の挙動になってしまうため、共有可能なケースをテストできるよう明示的にモックする。
@@ -171,6 +196,7 @@ const secureStoreMock = SecureStore as unknown as { __reset: () => void };
 const mockedFileSystem = require('expo-file-system') as {
   __mockState: { cacheDirectoryUri: string | null };
   __mockWrite: jest.Mock;
+  __mockText: jest.Mock;
 };
 
 describe('SettingsScreen', () => {
@@ -771,6 +797,391 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
         ),
       );
       expect(createdAnchor.click).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('日記データをインポートボタン(Issue #154: データ管理セクション)', () => {
+  const IMPORT_BUTTON_LABEL = '日記データをインポート';
+  const CONFIRM_DIALOG_TITLE = '日記データをインポートしますか?';
+  const IMPORT_FAILURE_ALERT = [
+    'インポートに失敗しました',
+    '選択したファイルを読み込めませんでした。ファイルの形式を確認してもう一度お試しください。',
+  ] as const;
+
+  const pickedAsset = {
+    uri: 'file:///picked/diary-export.json',
+    name: 'diary-export.json',
+    mimeType: 'application/json',
+    lastModified: 0,
+  };
+
+  const originalPlatformOS = Platform.OS;
+
+  // Alert.alertをモック化した上で、直近の呼び出しに渡されたボタン定義から指定ラベルのonPressを
+  // 直接呼び出すことで「ユーザーがそのボタンをタップした」ことを模倣する
+  // (削除ボタンのテストにある`pressAlertButton`と同じ方式)。
+  async function pressAlertButtonByLabel(label: string) {
+    const alertMock = Alert.alert as jest.Mock;
+    const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
+    const buttons = lastCall[2] as { text: string; onPress?: () => void }[];
+    const button = buttons.find((b) => b.text === label);
+    expect(button).toBeDefined();
+    await act(async () => {
+      button?.onPress?.();
+    });
+  }
+
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    secureStoreMock.__reset();
+    jest.clearAllMocks();
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockReset();
+    Platform.OS = originalPlatformOS;
+  });
+
+  afterEach(() => {
+    Platform.OS = originalPlatformOS;
+  });
+
+  it('renders the import button inside the "データ管理" section (操作導線の存在確認)', () => {
+    render(<SettingsScreen />);
+
+    expect(screen.getByText('データ管理')).toBeTruthy();
+    expect(screen.getByText(IMPORT_BUTTON_LABEL)).toBeTruthy();
+  });
+
+  it('does nothing when the user cancels the document picker (キャンセル時は何もしない)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+      canceled: true,
+      assets: null,
+    });
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+    });
+
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('shows a confirmation dialog with the entry count before saving anything (確認ダイアログの表示)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [pickedAsset],
+    });
+    mockedFileSystem.__mockText.mockResolvedValueOnce(
+      JSON.stringify([{ id: '1', text: '取り込む日記', createdAt: '2026-02-01T00:00:00.000Z' }]),
+    );
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+    });
+
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalledTimes(1));
+    const [title, message, buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+    expect(title).toBe(CONFIRM_DIALOG_TITLE);
+    expect(message).toContain('1件');
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0]).toMatchObject({ text: 'キャンセル', style: 'cancel' });
+    expect(buttons[1]).toMatchObject({ text: '取り込む' });
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('saves nothing when the confirmation dialog is cancelled (キャンセル時は保存しない)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [pickedAsset],
+    });
+    mockedFileSystem.__mockText.mockResolvedValueOnce(
+      JSON.stringify([{ id: '1', text: '取り込む日記', createdAt: '2026-02-01T00:00:00.000Z' }]),
+    );
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+    });
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalledTimes(1));
+    await pressAlertButtonByLabel('キャンセル');
+
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('saves the imported entries and shows a completion alert once confirmed, adding to existing data without deleting it (正常系: 追記マージ)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const existingEntry = {
+      id: 'existing',
+      text: '既存の日記',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    await AsyncStorage.setItem(buildDiaryEntryKey('existing'), JSON.stringify(existingEntry));
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [pickedAsset],
+    });
+    const importedEntry = {
+      id: 'imported',
+      text: '取り込んだ日記',
+      createdAt: '2026-02-01T00:00:00.000Z',
+    };
+    mockedFileSystem.__mockText.mockResolvedValueOnce(JSON.stringify([importedEntry]));
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+    });
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalledTimes(1));
+    await pressAlertButtonByLabel('取り込む');
+
+    await waitFor(() =>
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+        buildDiaryEntryKey('imported'),
+        expect.any(String),
+      ),
+    );
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenLastCalledWith(
+        'インポートが完了しました',
+        '1件の日記データを取り込みました。',
+      ),
+    );
+
+    const allEntries = await getAllDiaryEntries();
+    expect(allEntries.map((entry) => entry.id).sort()).toEqual(['existing', 'imported']);
+  });
+
+  it('overwrites an existing entry with the imported content when ids collide (id重複時はインポート側の内容で上書き)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    await AsyncStorage.setItem(
+      buildDiaryEntryKey('1'),
+      JSON.stringify({ id: '1', text: '元のテキスト', createdAt: '2026-01-01T00:00:00.000Z' }),
+    );
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [pickedAsset],
+    });
+    const updatedEntry = {
+      id: '1',
+      text: '更新後のテキスト',
+      createdAt: '2026-01-05T00:00:00.000Z',
+    };
+    mockedFileSystem.__mockText.mockResolvedValueOnce(JSON.stringify([updatedEntry]));
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+    });
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalledTimes(1));
+    await pressAlertButtonByLabel('取り込む');
+
+    await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalled());
+    const allEntries = await getAllDiaryEntries();
+    expect(allEntries).toEqual([updatedEntry]);
+  });
+
+  it('shows an alert and does not open the confirmation dialog when the file has no valid entries (境界値: 有効なエントリが0件)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [pickedAsset],
+    });
+    mockedFileSystem.__mockText.mockResolvedValueOnce('[]');
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+    });
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'インポートできる日記データがありません',
+        '選択したファイルに有効な日記データが含まれていませんでした。',
+      ),
+    );
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('skips invalid elements in the array but still imports the valid ones, logging a warning (異常系: 一部エントリのスキーマ不整合)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [pickedAsset],
+    });
+    const validEntry = { id: '1', text: '有効な日記', createdAt: '2026-01-01T00:00:00.000Z' };
+    mockedFileSystem.__mockText.mockResolvedValueOnce(
+      JSON.stringify([validEntry, { id: '2', text: '壊れたデータ' }]),
+    );
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+    });
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalledTimes(1));
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    await pressAlertButtonByLabel('取り込む');
+
+    await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalled());
+    const allEntries = await getAllDiaryEntries();
+    expect(allEntries).toEqual([validEntry]);
+    warnSpy.mockRestore();
+  });
+
+  it('shows an error alert when the selected file is not valid JSON (異常系: パース失敗)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [pickedAsset],
+    });
+    mockedFileSystem.__mockText.mockResolvedValueOnce('not-valid-json{{{');
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+    });
+
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalledWith(...IMPORT_FAILURE_ALERT));
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('shows an error alert when the top-level JSON value is not an array (異常系: 配列でない)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [pickedAsset],
+    });
+    mockedFileSystem.__mockText.mockResolvedValueOnce(JSON.stringify({ not: 'an array' }));
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+    });
+
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalledWith(...IMPORT_FAILURE_ALERT));
+  });
+
+  it('shows a failure alert when reading the picked file rejects (異常系: ファイル読み込み失敗)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [pickedAsset],
+    });
+    mockedFileSystem.__mockText.mockRejectedValueOnce(new Error('read error'));
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+    });
+
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalledWith(...IMPORT_FAILURE_ALERT));
+  });
+
+  it('shows a failure alert when saving an imported entry fails (異常系: 保存失敗)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [pickedAsset],
+    });
+    mockedFileSystem.__mockText.mockResolvedValueOnce(
+      JSON.stringify([{ id: '1', text: '取り込む日記', createdAt: '2026-02-01T00:00:00.000Z' }]),
+    );
+    jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write error'));
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+    });
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalledTimes(1));
+    await pressAlertButtonByLabel('取り込む');
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenLastCalledWith(
+        'インポートに失敗しました',
+        'もう一度お試しください。',
+      ),
+    );
+  });
+
+  // Issue #167で他の操作導線(削除/エクスポート)に導入された、処理中の連続タップ防止のための
+  // 視覚的フィードバックをインポートボタンにも合わせる。
+  it('dims the button and disables it while picking a file, then restores both once finished (処理中の視覚的フィードバック)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    let resolvePick: (value: DocumentPicker.DocumentPickerResult) => void = () => {};
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockReturnValue(
+      new Promise<DocumentPicker.DocumentPickerResult>((resolve) => {
+        resolvePick = resolve;
+      }),
+    );
+    render(<SettingsScreen />);
+
+    fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+
+    const buttonWhileImporting = screen.getByRole('button', { name: IMPORT_BUTTON_LABEL });
+    expect(StyleSheet.flatten(buttonWhileImporting.props.style).opacity).toBe(0.5);
+    expect(buttonWhileImporting.props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: true }),
+    );
+
+    await act(async () => {
+      resolvePick({ canceled: true, assets: null });
+    });
+
+    await waitFor(() => {
+      const buttonAfterImporting = screen.getByRole('button', { name: IMPORT_BUTTON_LABEL });
+      expect(StyleSheet.flatten(buttonAfterImporting.props.style).opacity).toBe(1);
+    });
+    expect(
+      screen.getByRole('button', { name: IMPORT_BUTTON_LABEL }).props.accessibilityState,
+    ).toEqual(expect.objectContaining({ disabled: false }));
+  });
+
+  describe('Web版(Platform.OS === "web")', () => {
+    beforeEach(() => {
+      Platform.OS = 'web';
+    });
+
+    it('reads the file content from the browser File object instead of expo-file-system (正常系: Web版)', async () => {
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      const webFileText = jest
+        .fn()
+        .mockResolvedValue(
+          JSON.stringify([
+            { id: '1', text: '取り込む日記', createdAt: '2026-02-01T00:00:00.000Z' },
+          ]),
+        );
+      (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+        canceled: false,
+        assets: [{ ...pickedAsset, file: { text: webFileText } }],
+      });
+      render(<SettingsScreen />);
+
+      await act(async () => {
+        fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+      });
+
+      await waitFor(() => expect(webFileText).toHaveBeenCalledTimes(1));
+      expect(mockedFileSystem.__mockText).not.toHaveBeenCalled();
+      await waitFor(() => expect(Alert.alert).toHaveBeenCalledTimes(1));
+    });
+
+    it('shows a failure alert when the browser File object is missing from the picked asset (境界値: asset.fileが無い場合)', async () => {
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+        canceled: false,
+        assets: [pickedAsset],
+      });
+      render(<SettingsScreen />);
+
+      await act(async () => {
+        fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+      });
+
+      await waitFor(() => expect(Alert.alert).toHaveBeenCalledWith(...IMPORT_FAILURE_ALERT));
     });
   });
 });
