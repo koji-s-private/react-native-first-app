@@ -61,12 +61,22 @@ describe('ThemedText', () => {
     ['defaultSemiBold', { fontSize: 16, lineHeight: 24, fontWeight: '600' }],
     ['title', { fontSize: 32, fontWeight: 'bold', lineHeight: 32 }],
     ['subtitle', { fontSize: 20, fontWeight: 'bold' }],
-    ['link', { lineHeight: 30, fontSize: 16, color: '#0a7ea4' }],
+    ['link', { lineHeight: 30, fontSize: 16, color: Colors.light.link }],
   ] as const)('applies the expected style for type="%s"', (type, expectedStyle) => {
     render(<ThemedText type={type}>本文</ThemedText>);
 
     const flattened = StyleSheet.flatten(screen.getByText('本文').props.style);
     expect(flattened).toMatchObject(expectedStyle);
+  });
+
+  it('applies Colors.dark.link (not the light tint) as the link color in dark mode (Issue #153)', () => {
+    mockedUseColorScheme.mockReturnValue('dark');
+
+    render(<ThemedText type="link">リンク</ThemedText>);
+
+    const flattened = StyleSheet.flatten(screen.getByText('リンク').props.style);
+    expect(flattened.color).toBe(Colors.dark.link);
+    expect(flattened.color).not.toBe(Colors.light.link);
   });
 
   it('merges a caller-provided style on top of the type-based style without discarding it', () => {
