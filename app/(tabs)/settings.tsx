@@ -10,6 +10,7 @@ import { TabScreenContainer } from '@/components/tab-screen-container';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { SETTINGS_SECTIONS, type SettingsMenuItem } from '@/constants/settings-menu';
+import { useAppLock } from '@/contexts/app-lock-context';
 import { useDiaryReminder } from '@/contexts/diary-reminder-context';
 import { useThemePreference, type ThemePreference } from '@/contexts/theme-preference-context';
 import { useThemeColor } from '@/hooks/use-theme-color';
@@ -202,6 +203,50 @@ function DiaryReminderSection() {
       {permissionStatus === 'denied' && (
         <ThemedText style={[styles.reminderFallbackText, { color: errorColor }]}>
           通知が許可されていないため、リマインダーを利用できません。端末の設定からこのアプリの通知を許可してください。
+        </ThemedText>
+      )}
+    </ThemedView>
+  );
+}
+
+// アプリ起動時・バックグラウンドから復帰した際に生体認証(またはOS標準パスコード)でロックする
+// 機能(#155)の設定導線。端末を家族・同僚と共有・一時的に貸す際、端末のロック解除だけで
+// 日記本文を覗き見されてしまうことを防ぐ。既存ユーザーの体験を変えないよう既定値はOFF(オプトイン)。
+function AppLockSection() {
+  const { enabled, isSupported, setEnabled } = useAppLock();
+  // ON/OFF切り替え(AsyncStorageへの永続化を伴う非同期処理)が完了するまで、
+  // 誤って連続でタップされないようにするための状態
+  const [isTogglePending, setIsTogglePending] = useState(false);
+  // 破壊的操作ではないが、対応不可であることを示す強調色(テーマに応じてconstants/theme.tsから取得)
+  const errorColor = useThemeColor({}, 'error');
+
+  const handleToggle = useCallback(
+    (value: boolean) => {
+      setIsTogglePending(true);
+      setEnabled(value).finally(() => setIsTogglePending(false));
+    },
+    [setEnabled],
+  );
+
+  return (
+    <ThemedView style={styles.section}>
+      <ThemedText type="subtitle" style={styles.sectionTitle}>
+        アプリロック
+      </ThemedText>
+      <ThemedView style={styles.reminderToggleRow}>
+        <ThemedText style={styles.reminderToggleLabel}>
+          起動時・復帰時に生体認証またはパスコードでロックする
+        </ThemedText>
+        <Switch
+          value={enabled}
+          onValueChange={handleToggle}
+          disabled={isTogglePending || !isSupported}
+          accessibilityLabel="アプリロック"
+        />
+      </ThemedView>
+      {!isSupported && (
+        <ThemedText style={[styles.reminderFallbackText, { color: errorColor }]}>
+          この端末では生体認証・パスコードが設定されていないため、アプリロックを利用できません。
         </ThemedText>
       )}
     </ThemedView>
@@ -479,6 +524,7 @@ export default function SettingsScreen() {
     <TabScreenContainer style={styles.container}>
       <AppearanceSection />
       <DiaryReminderSection />
+      <AppLockSection />
 
       {SETTINGS_SECTIONS.map((section) => (
         <ThemedView key={section.key} style={styles.section}>

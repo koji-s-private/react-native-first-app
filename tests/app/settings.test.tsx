@@ -12,6 +12,7 @@ import SettingsScreen from '@/app/(tabs)/settings';
 import { TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID } from '@/components/tab-screen-container';
 import { SETTINGS_SECTIONS } from '@/constants/settings-menu';
 import { Colors } from '@/constants/theme';
+import { AppLockProvider } from '@/contexts/app-lock-context';
 import {
   DIARY_REMINDER_STORAGE_KEY,
   DiaryReminderProvider,
@@ -50,6 +51,14 @@ jest.mock('@/utils/diary-reminder-notifications', () => ({
   requestReminderPermissionAsync: jest.fn(() => Promise.resolve('undetermined')),
   scheduleDailyReminderAsync: jest.fn(() => Promise.resolve()),
   cancelDailyReminderAsync: jest.fn(() => Promise.resolve()),
+}));
+
+// 「アプリロック」セクションが使う`utils/app-lock-authentication.ts`
+// (expo-local-authenticationの薄いラッパー)を、実際のネイティブ生体認証APIを呼ばずに検証できるよう
+// モック化する(個別の挙動はtests/utils/app-lock-authentication.test.ts等で検証済み。ここでは結線確認のみ)。
+jest.mock('@/utils/app-lock-authentication', () => ({
+  isAppLockSupportedAsync: jest.fn(() => Promise.resolve(true)),
+  authenticateForAppLockAsync: jest.fn(() => Promise.resolve(true)),
 }));
 
 // `expo-file-system`(新API)はJest環境ではネイティブモジュールが存在せず、`Paths.cache`の参照時点で
@@ -185,6 +194,12 @@ const mockedDiaryReminderNotifications = require('@/utils/diary-reminder-notific
   requestReminderPermissionAsync: jest.Mock;
   scheduleDailyReminderAsync: jest.Mock;
   cancelDailyReminderAsync: jest.Mock;
+};
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const mockedAppLockAuthentication = require('@/utils/app-lock-authentication') as {
+  isAppLockSupportedAsync: jest.Mock;
+  authenticateForAppLockAsync: jest.Mock;
 };
 
 // テストごとに暗号鍵の永続化状態を分離するための参照(tests/app/index.test.tsxと同じ方式)
@@ -1696,5 +1711,130 @@ describe('リマインダーセクション(日記を書く習慣化のための
       const flattenedStyle = StyleSheet.flatten(screen.getByText(FALLBACK_TEXT).props.style);
       expect(flattenedStyle.color).not.toBe(Colors.light.error);
     });
+  });
+});
+
+describe('アプリロックセクション(生体認証によるアプリロック #155)', () => {
+  const APP_LOCK_SECTION_TITLE = 'アプリロック';
+  const APP_LOCK_TOGGLE_LABEL = 'アプリロック';
+  const UNSUPPORTED_TEXT =
+    'この端末では生体認証・パスコードが設定されていないため、アプリロックを利用できません。';
+
+  // `useAppLock()`は`Provider`配下でない場合`setEnabled`がno-opにフォールバックする仕様
+  // (tests/contexts/app-lock-context.test.tsx参照)のため、実機と同じ構成を再現するために
+  // 明示的に`AppLockProvider`でラップする。
+  function renderSettingsScreen() {
+    return render(
+      <AppLockProvider>
+        <SettingsScreen />
+      </AppLockProvider>,
+    );
+  }
+
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    jest.clearAllMocks();
+    mockedAppLockAuthentication.isAppLockSupportedAsync.mockResolvedValue(true);
+    mockedAppLockAuthentication.authenticateForAppLockAsync.mockResolvedValue(true);
+  });
+
+  it('renders the "アプリロック" section with the toggle, defaulting to OFF (操作導線の存在確認・初期値)', async () => {
+    renderSettingsScreen();
+
+    expect(screen.getByText(APP_LOCK_SECTION_TITLE)).toBeTruthy();
+    const toggle = screen.getByLabelText(APP_LOCK_TOGGLE_LABEL);
+    expect(toggle.props.value).toBe(false);
+    // 対応端末かどうかの判定が完了するまでは無効化されているため、明示的に待つ
+    await waitFor(() => expect(toggle.props.disabled).toBe(false));
+  });
+
+  it('persists ON via AsyncStorage when the toggle is pressed on a supported device (正常系: ON)', async () => {
+    renderSettingsScreen();
+    await waitFor(() =>
+      expect(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL).props.disabled).toBe(false),
+    );
+
+    await act(async () => {
+      fireEvent(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL), 'valueChange', true);
+    });
+
+    expect(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL).props.value).toBe(true);
+    await waitFor(() =>
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith('app-lock-enabled', 'true'),
+    );
+  });
+
+  it('persists OFF via AsyncStorage when the toggle is pressed while ON (正常系: ON→OFF)', async () => {
+    await AsyncStorage.setItem('app-lock-enabled', 'true');
+    renderSettingsScreen();
+    await waitFor(() =>
+      expect(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL).props.value).toBe(true),
+    );
+
+    await act(async () => {
+      fireEvent(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL), 'valueChange', false);
+    });
+
+    expect(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL).props.value).toBe(false);
+    await waitFor(() =>
+      expect(AsyncStorage.setItem).toHaveBeenLastCalledWith('app-lock-enabled', 'false'),
+    );
+  });
+
+  it('disables the toggle and shows the unsupported message when the device has no biometrics/passcode enrolled (異常系: 非対応端末)', async () => {
+    mockedAppLockAuthentication.isAppLockSupportedAsync.mockResolvedValue(false);
+    renderSettingsScreen();
+
+    await waitFor(() => expect(screen.getByText(UNSUPPORTED_TEXT)).toBeTruthy());
+    expect(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL).props.disabled).toBe(true);
+  });
+
+  it('does not show the unsupported message on a supported device (境界値: 対応端末では非表示)', async () => {
+    renderSettingsScreen();
+
+    await waitFor(() =>
+      expect(mockedAppLockAuthentication.isAppLockSupportedAsync).toHaveBeenCalled(),
+    );
+    expect(screen.queryByText(UNSUPPORTED_TEXT)).toBeNull();
+  });
+
+  it('disables the toggle while the ON/OFF switch is being persisted, to prevent duplicate taps (境界値: 連続タップ防止)', async () => {
+    let resolveSetItem: () => void = () => {};
+    // `mockReturnValue`(永続的な上書き)ではなく`mockReturnValueOnce`を使う。前者だと
+    // `jest.clearAllMocks()`(呼び出し履歴のクリアのみで実装はクリアされない)では戻らず、
+    // 後続テストにまで「setItemが永遠に解決しないPromise」が漏れてしまう
+    // (tests/contexts/diary-reminder-context.test.tsxの同種の注意書きを参照)。
+    jest.spyOn(AsyncStorage, 'setItem').mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSetItem = () => resolve(undefined);
+      }),
+    );
+    renderSettingsScreen();
+    await waitFor(() =>
+      expect(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL).props.disabled).toBe(false),
+    );
+
+    act(() => {
+      fireEvent(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL), 'valueChange', true);
+    });
+
+    expect(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL).props.disabled).toBe(true);
+
+    await act(async () => {
+      resolveSetItem();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL).props.disabled).toBe(false);
+  });
+
+  it('restores a previously saved ON setting from AsyncStorage on mount (正常系: 起動時の復元)', async () => {
+    await AsyncStorage.setItem('app-lock-enabled', 'true');
+
+    renderSettingsScreen();
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL).props.value).toBe(true),
+    );
   });
 });

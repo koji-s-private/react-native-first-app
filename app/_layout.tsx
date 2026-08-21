@@ -4,7 +4,9 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useState } from 'react';
 import 'react-native-reanimated';
 
+import { AppLockScreen } from '@/components/app-lock-screen';
 import { Onboarding } from '@/components/onboarding';
+import { AppLockProvider, useAppLock } from '@/contexts/app-lock-context';
 import { DiaryReminderProvider } from '@/contexts/diary-reminder-context';
 import { ThemePreferenceProvider, useThemePreference } from '@/contexts/theme-preference-context';
 import { hasCompletedOnboarding, markOnboardingCompleted } from '@/utils/onboarding-storage';
@@ -17,6 +19,9 @@ function RootLayoutContent() {
   // OSの設定だけでなく、アプリ内(設定画面)で選択されたテーマ設定(#91)も反映した
   // 解決済みのカラースキームを使う
   const { colorScheme } = useThemePreference();
+  // 起動時・バックグラウンド復帰時の生体認証ロック(#155)。enabledがfalse(既定値)の間は
+  // isUnlockedが常にtrueになるため、オプトインしていないユーザーの体験には影響しない
+  const { enabled: isAppLockEnabled, isUnlocked, authenticate } = useAppLock();
   // アプリ初回起動時のみオンボーディングを表示するためのフラグ。
   // AsyncStorageの確認が終わるまではfalseのままにしておき、
   // 2回目以降の起動で一瞬だけ誤って表示されてしまうのを防ぐ
@@ -52,17 +57,20 @@ function RootLayoutContent() {
           解決済みの`colorScheme`から明示的に決定する */}
       <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
       <Onboarding visible={showOnboarding} onFinish={handleFinishOnboarding} />
+      <AppLockScreen visible={isAppLockEnabled && !isUnlocked} onAuthenticate={authenticate} />
     </ThemeProvider>
   );
 }
 
 export default function RootLayout() {
-  // アプリ内で選択されたテーマ設定(#91)と、日記リマインダー通知の設定(#92)を
-  // 全体に配線するため、最上位でラップする
+  // アプリ内で選択されたテーマ設定(#91)、日記リマインダー通知の設定(#92)、
+  // アプリロックの設定(#155)を全体に配線するため、最上位でラップする
   return (
     <ThemePreferenceProvider>
       <DiaryReminderProvider>
-        <RootLayoutContent />
+        <AppLockProvider>
+          <RootLayoutContent />
+        </AppLockProvider>
       </DiaryReminderProvider>
     </ThemePreferenceProvider>
   );
