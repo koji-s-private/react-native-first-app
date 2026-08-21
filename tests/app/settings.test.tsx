@@ -42,7 +42,7 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
-// 「リマインダー」セクション(Issue #92)が使う`utils/diary-reminder-notifications.ts`
+// 「リマインダー」セクションが使う`utils/diary-reminder-notifications.ts`
 // (expo-notificationsの薄いラッパー)を、実際のネイティブ通知APIを呼ばずに検証できるようモック化する
 // (個別の挙動はtests/utils/diary-reminder-notifications.test.ts等で検証済み。ここでは結線確認のみ)。
 jest.mock('@/utils/diary-reminder-notifications', () => ({
@@ -59,7 +59,7 @@ jest.mock('@/utils/diary-reminder-notifications', () => ({
 jest.mock('expo-file-system', () => {
   const state: { cacheDirectoryUri: string | null } = { cacheDirectoryUri: 'file:///mock-cache/' };
   const write = jest.fn();
-  // インポート機能(Issue #154)が`new File(asset.uri).text()`で読み込む内容を差し替えるためのモック。
+  // インポート機能が`new File(asset.uri).text()`で読み込む内容を差し替えるためのモック。
   // 既定ではテストごとに明示的に`mockResolvedValueOnce`等で設定する想定
   const text = jest.fn((_uri: string) => Promise.reject(new Error('text() is not mocked')));
 
@@ -116,7 +116,7 @@ jest.mock('expo-sharing', () => ({
 }));
 
 // `getAllDiaryEntries`はレガシー(平文)データの移行時も含め、常に個別キーへの暗号化書き込みで
-// `getOrCreateEncryptionKey`(expo-crypto/expo-secure-store経由)を使うようになったため(Issue #83)、
+// `getOrCreateEncryptionKey`(expo-crypto/expo-secure-store経由)を使うようになったため、
 // `tests/app/index.test.tsx`と同じくNode標準の`crypto`モジュールで代替するモックが必要になる。
 jest.mock('expo-crypto', () => {
   // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
@@ -276,9 +276,9 @@ describe('SettingsScreen', () => {
     expect(screen.UNSAFE_getAllByType(Text).length).toBeGreaterThan(0);
   });
 
-  // Issue #125: セーフエリア対応は共通コンポーネント`TabScreenContainer`に委ねているため、
+  // セーフエリア対応は共通コンポーネント`TabScreenContainer`に委ねているため、
   // ここではその外側ラッパーに正しくインセットが伝播していることのみを検証する。
-  describe('セーフエリア対応(Issue #125: ステータスバー/ノッチ領域との重なり防止)', () => {
+  describe('セーフエリア対応(ステータスバー/ノッチ領域との重なり防止)', () => {
     it('does not add extra top padding via TabScreenContainer when the safe area top inset is zero', () => {
       render(<SettingsScreen />);
 
@@ -346,7 +346,7 @@ describe('SETTINGS_SECTIONS data integrity (境界値・異常系)', () => {
   });
 });
 
-describe('日記データを全件削除ボタン(Issue #103: データ管理セクション)', () => {
+describe('日記データを全件削除ボタン(データ管理セクション)', () => {
   const DELETE_BUTTON_LABEL = '日記データを全件削除';
   const CONFIRM_DIALOG_TITLE = '日記データを削除しますか?';
   const CONFIRM_DIALOG_MESSAGE =
@@ -446,9 +446,9 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
     );
   });
 
-  // Issue #167: 削除処理中(isDeleting === true)は誤って連続タップされないよう、ボタンを
+  // 削除処理中(isDeleting === true)は誤って連続タップされないよう、ボタンを
   // 半透明化(opacity: 0.5)しaccessibilityState.disabledをtrueにする。完了後は元に戻る。
-  it('dims the button (opacity 0.5) and sets accessibilityState.disabled to true while deleting, then restores both once finished (Issue #167: 処理中の視覚的フィードバック)', async () => {
+  it('dims the button (opacity 0.5) and sets accessibilityState.disabled to true while deleting, then restores both once finished (処理中の視覚的フィードバック)', async () => {
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     // AsyncStorage.removeItemが完了するまで解決しないPromiseにして、処理中の一瞬の状態を検証する
     let resolveRemoveItem: () => void = () => {};
@@ -486,9 +486,9 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
     ).toEqual(expect.objectContaining({ disabled: false }));
   });
 
-  // Issue #146: 削除ボタンの文字色が固定のライトモード用エラー色のままダークモードでも
+  // 削除ボタンの文字色が固定のライトモード用エラー色のままダークモードでも
   // 使われてしまっていた不具合の回帰テスト。
-  describe('ダークモード対応(Issue #146: 削除ボタンの文字色)', () => {
+  describe('ダークモード対応(削除ボタンの文字色)', () => {
     // 単体レンダリングでは実機の`RootLayout`によるラップが無いため、配色切り替えを検証するには
     // 外観セクションのテストと同様に明示的に`ThemePreferenceProvider`でラップする必要がある。
     function renderSettingsScreen() {
@@ -528,7 +528,7 @@ describe('日記データを全件削除ボタン(Issue #103: データ管理セ
   });
 });
 
-describe('日記データをエクスポートボタン(Issue #51: データ管理セクション)', () => {
+describe('日記データをエクスポートボタン(データ管理セクション)', () => {
   const EXPORT_BUTTON_LABEL = '日記データをエクスポート';
   // getAllDiaryEntriesはcreatedAtの降順(新しい順)で返すため、あらかじめその順序で定義しておく
   const sampleEntriesJson = JSON.stringify([
@@ -664,9 +664,9 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
     );
   });
 
-  // Issue #167: エクスポート処理中(isExporting === true)は誤って連続タップされないよう、ボタンを
+  // エクスポート処理中(isExporting === true)は誤って連続タップされないよう、ボタンを
   // 半透明化(opacity: 0.5)しaccessibilityState.disabledをtrueにする。完了後は元に戻る。
-  it('dims the button (opacity 0.5) and sets accessibilityState.disabled to true while exporting, then restores both once finished (Issue #167: 処理中の視覚的フィードバック)', async () => {
+  it('dims the button (opacity 0.5) and sets accessibilityState.disabled to true while exporting, then restores both once finished (処理中の視覚的フィードバック)', async () => {
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, sampleEntriesJson);
     // `file.write()`は同期メソッドのため書き込み自体は即座に終わる。代わりに書き込み後に呼ばれる
@@ -801,7 +801,7 @@ describe('日記データをエクスポートボタン(Issue #51: データ管�
   });
 });
 
-describe('日記データをインポートボタン(Issue #154: データ管理セクション)', () => {
+describe('日記データをインポートボタン(データ管理セクション)', () => {
   const IMPORT_BUTTON_LABEL = '日記データをインポート';
   const CONFIRM_DIALOG_TITLE = '日記データをインポートしますか?';
   const IMPORT_FAILURE_ALERT = [
@@ -1145,7 +1145,7 @@ describe('日記データをインポートボタン(Issue #154: データ管理
     );
   });
 
-  // Issue #167で他の操作導線(削除/エクスポート)に導入された、処理中の連続タップ防止のための
+  // 他の操作導線(削除/エクスポート)に導入された、処理中の連続タップ防止のための
   // 視覚的フィードバックをインポートボタンにも合わせる。
   it('dims the button and disables it while picking a file, then restores both once finished (処理中の視覚的フィードバック)', async () => {
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
@@ -1224,7 +1224,7 @@ describe('日記データをインポートボタン(Issue #154: データ管理
   });
 });
 
-describe('外観セクション(Issue #91: ライト/ダーク/端末に合わせるの切り替え)', () => {
+describe('外観セクション(ライト/ダーク/端末に合わせるの切り替え)', () => {
   const APPEARANCE_SECTION_TITLE = '外観';
   const LIGHT_LABEL = 'ライト';
   const DARK_LABEL = 'ダーク';
@@ -1372,7 +1372,7 @@ describe('外観セクション(Issue #91: ライト/ダーク/端末に合わ�
   });
 });
 
-describe('リマインダーセクション(Issue #92: 日記を書く習慣化のためのリマインダー通知)', () => {
+describe('リマインダーセクション(日記を書く習慣化のためのリマインダー通知)', () => {
   const REMINDER_SECTION_TITLE = 'リマインダー';
   const REMINDER_TOGGLE_LABEL = '日記リマインダー通知';
   const HOUR_DECREASE_LABEL = '時を減らす';
@@ -1655,10 +1655,10 @@ describe('リマインダーセクション(Issue #92: 日記を書く習慣化�
     expect(screen.getByText('30')).toBeTruthy();
   });
 
-  // Issue #146: 通知未許可時のフォールバック文言の文字色も、削除ボタンと同様に
+  // 通知未許可時のフォールバック文言の文字色も、削除ボタンと同様に
   // 固定のライトモード用エラー色ではなく、useThemeColor経由でライト/ダークそれぞれの
   // テーマに応じた色が適用されることを確認する回帰テスト。
-  describe('ダークモード対応(Issue #146: フォールバック文言の文字色)', () => {
+  describe('ダークモード対応(フォールバック文言の文字色)', () => {
     // このブロックだけは配色切り替えの検証も必要なため、`DiaryReminderProvider`に加えて
     // `ThemePreferenceProvider`でもラップする(実機では`app/_layout.tsx`の`RootLayout`が
     // 両方でラップしている)。
