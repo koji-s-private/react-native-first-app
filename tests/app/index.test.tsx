@@ -187,12 +187,22 @@ const KEYBOARD_AVOIDING_VIEW_TEST_ID = 'keyboard-avoiding-view';
 
 // Issue #34で保存ボタンにaccessibilityRole="button"を付与したことで、
 // `queryAllByRole('button')`は常に保存ボタンを含むようになった。カレンダーの日付セル
-// (日記のある日だけがタップ可能なボタンとして描画される)の個数だけを数えたいテストでは、
-// 保存ボタンを除外したこのヘルパーを使う。
+// の個数だけを数えたいテストでは、保存ボタンを除外したこのヘルパーを使う。
+// Issue #181により、日記の無い日でも未来日でなければセル自体はタップ可能(ボタン)になったため、
+// このヘルパーは「タップ可能なセル(日記の有無を問わない)」を返す点に注意する。
 function queryCalendarDayButtons() {
   return screen
     .queryAllByRole('button')
     .filter((button) => button.props.accessibilityLabel !== '保存');
+}
+
+// queryCalendarDayButtonsのうち、実際に日記が存在する日(accessibilityLabelが「日記あり」で
+// 終わるセル)だけに絞り込むヘルパー(Issue #181)。日記の無い日も新規作成用にタップ可能になった
+// ことで、旧来「タップ可能=日記あり」だった前提が崩れたテストで、この用途に置き換えて使う。
+function queryCalendarDayButtonsWithEntry() {
+  return queryCalendarDayButtons().filter((button) =>
+    (button.props.accessibilityLabel as string | undefined)?.endsWith('日記あり'),
+  );
 }
 
 // AsyncStorageに実際に永続化された値(暗号化済み文字列)を、テストで検証しやすいよう
@@ -584,7 +594,9 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText('保存'));
 
       expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-      expect(queryCalendarDayButtons()).toHaveLength(0);
+      // Issue #181以降、日記の無い日のセルも(未来日でなければ)タップ可能になったため、
+      // 「日記が実際に存在するセル」のみを数えるヘルパーで検証する
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(0);
     });
 
     it('does not save an entry consisting only of whitespace', async () => {
@@ -595,7 +607,7 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText('保存'));
 
       expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-      expect(queryCalendarDayButtons()).toHaveLength(0);
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(0);
     });
 
     it('clears the text input after saving', async () => {
@@ -1000,8 +1012,9 @@ describe('HomeScreen', () => {
       render(<HomeScreen />);
 
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(STORAGE_KEY));
-      // 壊れたデータは読み捨てられ、空の状態から始まるためカレンダーに操作可能なセルは無い
-      expect(queryCalendarDayButtons()).toHaveLength(0);
+      // 壊れたデータは読み捨てられ、空の状態から始まるため、日記が実際に存在するセルは無い
+      // (Issue #181以降、日記の無いセル自体はタップ可能になったため、日記の有無で絞り込むヘルパーを使う)
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(0);
     });
 
     it('shows the empty state when stored data has the encrypted-payload marker but fails to decrypt (corrupted ciphertext)', async () => {
@@ -1012,8 +1025,8 @@ describe('HomeScreen', () => {
       render(<HomeScreen />);
 
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(STORAGE_KEY));
-      // 復号に失敗したデータは読み捨てられ、空の状態から始まるためカレンダーに操作可能なセルは無い
-      expect(queryCalendarDayButtons()).toHaveLength(0);
+      // 復号に失敗したデータは読み捨てられ、空の状態から始まるため、日記が実際に存在するセルは無い
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(0);
     });
 
     it('rolls back entries and draft and shows an error message when AsyncStorage.setItem fails', async () => {
@@ -1993,7 +2006,7 @@ describe('HomeScreen', () => {
       expect(screen.queryByText('あ…')).toBeNull();
     });
 
-    it('renders no title (and disables the cell) for an entry whose text is an empty string after the first line is trimmed (defensive boundary for directly-corrupted/legacy storage data, since the composer itself never saves an empty/whitespace-only entry)', async () => {
+    it('renders no title for an entry whose text is an empty string after the first line is trimmed, but still opens the (empty) entry-list modal on tap since entriesByDate already has an entry for that day (defensive boundary for directly-corrupted/legacy storage data, since the composer itself never saves an empty/whitespace-only entry; Issue #181 regression check)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -2004,11 +2017,25 @@ describe('HomeScreen', () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      // タイトルが空文字列になるため、そのセルはタップ可能な要素として描画されない
-      expect(queryCalendarDayButtons()).toHaveLength(0);
+      // タイトルは空文字列だが、entriesByDateにはこの日のエントリが存在するため
+      // (Issue #181以降)セル自体はタップ可能な要素として描画される。ただし他の日記の無い日
+      // (未来日でない日)もすべてタップ可能になっているため、このセルには絞り込まず
+      // 「日記が実際に存在するセル」としてはカウントされないことのみを確認する
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(0);
+
+      const [entryListModalBefore] = screen.UNSAFE_getAllByType(Modal);
+      expect(entryListModalBefore.props.visible).toBe(false);
+
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
+
+      // handleDayPressはentriesByDateの有無で分岐するため、タイトル表示が空でも
+      // 新規作成モーダルではなく既存の日付一覧モーダルが開く
+      await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeTruthy());
+      const [entryListModalAfter] = screen.UNSAFE_getAllByType(Modal);
+      expect(entryListModalAfter.props.visible).toBe(true);
     });
 
-    it('shows nothing in a day cell that has no diary entries', async () => {
+    it('opens the new-entry creation modal (not the entry-list modal) when tapping a day cell that has no diary entries at all (Issue #181)', async () => {
       const now = new Date();
       const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -2019,12 +2046,19 @@ describe('HomeScreen', () => {
       render(<HomeScreen />);
       await screen.findByText('日記あり');
 
-      // 日記が無い日のセルはタップ可能な要素(accessibilityRole="button")として描画されない
-      expect(queryCalendarDayButtons()).toHaveLength(1);
+      // 日記が実際に存在するセルは1つだけ(dayWithEntry分)である
+      // (Issue #181以降、日記の無い日のセルも未来日でなければタップ可能になったため、
+      // 全体のボタン数ではなく「日記が実際に存在するセル」のみで絞り込んで確認する)
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
 
       const emptyDayCell = screen.getByText(String(dayWithoutEntry));
       fireEvent.press(emptyDayCell);
-      expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull();
+
+      // 日付一覧モーダルではなく新規作成モーダルが開く(どちらも「閉じる」ボタンを持つため、
+      // 表示中のテキストではなく各Modalのvisible propで判定する)
+      const modals = screen.UNSAFE_getAllByType(Modal);
+      expect(modals[0].props.visible).toBe(false);
+      expect(modals[2].props.visible).toBe(true);
     });
 
     // Issue #114: スクリーンリーダー(VoiceOver/TalkBack)利用者にも、日付セルの数字だけでなく
@@ -2047,9 +2081,10 @@ describe('HomeScreen', () => {
       expect(dayCell.props.accessibilityState?.disabled).toBe(false);
     });
 
-    it('sets an accessibilityLabel with the full date and "日記なし" on a day cell without a diary entry, and marks it as accessibility-disabled so screen readers announce it as non-interactive', async () => {
+    it('sets an accessibilityLabel with the full date, "日記なし" and "タップして新規作成" on a day cell without a diary entry that is today or in the past, and does not mark it as accessibility-disabled, since Issue #181 made such cells tappable to create a new entry', async () => {
       const now = new Date();
-      const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
+      const { dayWithEntry } = pickTestDays(now);
+      // 「今日」自体は常に未来日ではないため、日記の無い日として確実に使える
       await AsyncStorage.setItem(
         STORAGE_KEY,
         JSON.stringify([{ id: '1', text: '日記あり', createdAt: isoAt(now, dayWithEntry) }]),
@@ -2058,7 +2093,20 @@ describe('HomeScreen', () => {
       render(<HomeScreen />);
       await screen.findByText('日記あり');
 
-      const expectedLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${dayWithoutEntry}日、日記なし`;
+      const expectedLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日、日記なし、タップして新規作成`;
+      const dayCell = screen.getByLabelText(expectedLabel);
+      expect(dayCell.props.accessibilityRole).toBe('button');
+      expect(dayCell.props.accessibilityState?.disabled).toBe(false);
+    });
+
+    it('sets an accessibilityLabel with the full date and plain "日記なし" (without the "タップして新規作成" suffix) on a future day cell without a diary entry, and marks it as accessibility-disabled, since future dates cannot be used to create a new entry (Issue #181)', async () => {
+      const now = new Date();
+      const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const expectedLabel = `${tomorrow.getFullYear()}年${tomorrow.getMonth() + 1}月${tomorrow.getDate()}日、日記なし`;
       const dayCell = screen.getByLabelText(expectedLabel);
       expect(dayCell.props.accessibilityState?.disabled).toBe(true);
     });
@@ -2087,16 +2135,21 @@ describe('HomeScreen', () => {
       });
     });
 
-    it('does nothing (does not open the modal) when tapping a day without any diary entries', async () => {
+    it('does nothing (does not open any modal) when tapping a future day cell, even though it has no diary entries, since future dates are excluded from both the entry-list and the new-entry-creation flow (Issue #181, 異常系: 未来日)', async () => {
       const now = new Date();
-      const { dayWithoutEntry } = pickTestDays(now);
+      const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
 
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      fireEvent.press(screen.getByText(String(dayWithoutEntry)));
+      const label = `${tomorrow.getFullYear()}年${tomorrow.getMonth() + 1}月${tomorrow.getDate()}日、日記なし`;
+      const dayCell = screen.getByLabelText(label);
+
+      fireEvent.press(dayCell);
 
       expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull();
+      const modals = screen.UNSAFE_getAllByType(Modal);
+      expect(modals.every((modal) => modal.props.visible === false)).toBe(true);
     });
 
     it('opens a modal listing all diary entries for a tapped date, in chronological order', async () => {
@@ -2281,14 +2334,15 @@ describe('HomeScreen', () => {
       });
     });
 
-    it('sets statusBarTranslucent and navigationBarTranslucent on the entry-list modal, the edit modal, and the month picker modal, so they match the edge-to-edge display of the screen behind them (Issue #94)', async () => {
+    it('sets statusBarTranslucent and navigationBarTranslucent on the entry-list modal, the edit modal, the new-entry creation modal, and the month picker modal, so they match the edge-to-edge display of the screen behind them (Issue #94, Issue #181)', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      // 日付タップ時の一覧モーダル・編集モーダル・年月ピッカーモーダル(Issue #76)の3つが常にツリーに存在する
+      // 日付タップ時の一覧モーダル・編集モーダル・新規作成モーダル(Issue #181)・
+      // 年月ピッカーモーダル(Issue #76)の4つが常にツリーに存在する
       // (visibleプロパティで表示/非表示を切り替えているだけで、条件付きレンダリングではないため)
       const modals = screen.UNSAFE_getAllByType(Modal);
-      expect(modals).toHaveLength(3);
+      expect(modals).toHaveLength(4);
       for (const modal of modals) {
         expect(modal.props.statusBarTranslucent).toBe(true);
         expect(modal.props.navigationBarTranslucent).toBe(true);
@@ -2361,9 +2415,10 @@ describe('HomeScreen', () => {
       return screen.findByText(`${year}年${month}月 ▾`, { includeHiddenElements: true });
     }
 
-    // モーダルは[日付一覧, 編集, 年月ピッカー]の順でJSXに並んでいる(実装側app/(tabs)/index.tsx参照)
+    // モーダルは[日付一覧, 編集, 新規作成(Issue #181), 年月ピッカー]の順でJSXに並んでいる
+    // (実装側app/(tabs)/index.tsx参照)
     function getMonthPickerModal() {
-      return screen.UNSAFE_getAllByType(Modal)[2];
+      return screen.UNSAFE_getAllByType(Modal)[3];
     }
 
     async function openMonthPicker(now: Date) {
@@ -2646,7 +2701,7 @@ describe('HomeScreen', () => {
 
     it('does not show a badge on a day with no entries (entriesByDate has no key for it), even while another day in the same month has multiple entries (境界値: entriesByDateにキーが無い日付)', async () => {
       const now = new Date();
-      const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
+      const { dayWithEntry } = pickTestDays(now);
       const storedEntries = [
         { id: '1', text: '朝の日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
         { id: '2', text: '夜の日記', createdAt: isoAt(now, dayWithEntry, 21, 0) },
@@ -2663,9 +2718,10 @@ describe('HomeScreen', () => {
       expect(screen.getAllByText(/^\+\d+$/)).toHaveLength(1);
       expect(findEntryCountBadgeViews()).toHaveLength(1);
 
-      // 日記の無い日のセルは押せない(タップしても一覧モーダルが開かない)ことも合わせて確認する
-      fireEvent.press(screen.getByText(String(dayWithoutEntry)));
-      expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull();
+      // 上記の通りバッジは合計1個(dayWithEntry分)のみであるため、
+      // dayWithoutEntryのセルにはバッジが表示されていないことも合わせて確認できている。
+      // (タップした際に一覧モーダルが開かず新規作成モーダルが開くことはIssue #181の
+      // 別テストで検証する)
     });
 
     it('renders the badge with tintColor as its background and backgroundColor as its text color, following the same theme-color convention as the today badge (異常系/回帰防止: テーマ色の取り違え防止)', async () => {
@@ -3765,8 +3821,9 @@ describe('HomeScreen', () => {
 
       render(<HomeScreen />);
       await screen.findByText('その日最後の日記');
-      // 削除前は、タップ可能な(タイトル付きの)カレンダーセルが1つ存在する
-      expect(queryCalendarDayButtons()).toHaveLength(1);
+      // 削除前は、日記が実際に存在するカレンダーセルが1つ存在する
+      // (Issue #181以降、日記の無いセルもタップ可能になったため、日記の有無で絞り込むヘルパーを使う)
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
 
       fireEvent.press(screen.getByText('その日最後の日記'));
       await screen.findByText(CLOSE_BUTTON_TEXT);
@@ -3780,10 +3837,285 @@ describe('HomeScreen', () => {
       // 一覧モーダルはまだ開いたままだが、日記自体はもう表示されない(entriesByDateから消えた)
       expect(screen.queryByText('その日最後の日記')).toBeNull();
 
-      // モーダルを閉じると、カレンダー上にもタップ可能なセル(タイトル付き)が無くなっている
+      // モーダルを閉じると、カレンダー上にも日記が実際に存在するセル(タイトル付き)が無くなっている
       fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
       await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
-      expect(queryCalendarDayButtons()).toHaveLength(0);
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(0);
+    });
+  });
+
+  describe('日記の無い日をタップした新規作成モーダル(Issue #181)', () => {
+    // 対象日('YYYY年M月D日、日記なし、タップして新規作成')のアクセシビリティラベルからセルを特定する
+    function pastOrTodayCellLabel(date: Date): string {
+      return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日、日記なし、タップして新規作成`;
+    }
+
+    function openNewEntryModalFor(date: Date) {
+      fireEvent.press(screen.getByLabelText(pastOrTodayCellLabel(date)));
+    }
+
+    // 新規作成モーダルの保存ボタンは、composer(画面上部の入力欄)と同じ文言「保存」を使うため、
+    // `getByText('保存')`だと2件ヒットする(編集モーダルを一度も開いていなければ、その分は
+    // マウントされない)。JSXの描画順(composerが先、新規作成モーダルが後)に依存して2件目を取得する。
+    function getNewEntrySaveButton() {
+      const saveButtons = screen.getAllByText('保存');
+      expect(saveButtons).toHaveLength(2);
+      return saveButtons[1];
+    }
+
+    // 新規作成モーダルのTextInputは、composerと同じaccessibilityLabel「日記本文」を使うため、
+    // placeholderの違いで特定する
+    function getNewEntryInput() {
+      const inputs = screen.getAllByLabelText('日記本文');
+      const input = inputs.find(
+        (candidate) => candidate.props.placeholder === 'その日の出来事や気持ちを書いてみましょう',
+      );
+      expect(input).toBeTruthy();
+      return input!;
+    }
+
+    it('opens the new-entry modal (not the entry-list modal) with a heading and placeholder for the tapped date, when a day without any diary entries that is today or in the past is tapped (正常系)', async () => {
+      const now = new Date();
+      const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      openNewEntryModalFor(yesterday);
+
+      const heading = `${yesterday.getFullYear()}年${yesterday.getMonth() + 1}月${yesterday.getDate()}日の日記を書く`;
+      expect(await screen.findByText(heading)).toBeTruthy();
+      expect(getNewEntryInput().props.placeholder).toBe('その日の出来事や気持ちを書いてみましょう');
+
+      const modals = screen.UNSAFE_getAllByType(Modal);
+      // 日付一覧モーダル(index 0)は開いていない
+      expect(modals[0].props.visible).toBe(false);
+    });
+
+    it("saves a new entry anchored to local noon of the tapped date as createdAt (regardless of the current time-of-day), persists it encrypted, closes the modal, and reflects the title in that day's calendar cell (正常系, Issue #181)", async () => {
+      const now = new Date();
+      const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      jest.clearAllMocks();
+
+      openNewEntryModalFor(yesterday);
+      fireEvent.changeText(getNewEntryInput(), '過去日の新規日記');
+      fireEvent.press(getNewEntrySaveButton());
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+      const [, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
+      expect((value as string).startsWith(ENCRYPTED_PREFIX)).toBe(true);
+
+      const persisted = (await decryptPersistedEntry(value)) as DiaryEntry;
+      expect(persisted.text).toBe('過去日の新規日記');
+
+      // createdAtはタップした日付の「ローカル正午」になっており、現在時刻(now)には依存しない
+      const createdAt = new Date(persisted.createdAt);
+      expect(createdAt.getFullYear()).toBe(yesterday.getFullYear());
+      expect(createdAt.getMonth()).toBe(yesterday.getMonth());
+      expect(createdAt.getDate()).toBe(yesterday.getDate());
+      expect(createdAt.getHours()).toBe(12);
+      expect(createdAt.getMinutes()).toBe(0);
+      expect(createdAt.getSeconds()).toBe(0);
+
+      // 保存に成功するとモーダルが閉じる
+      await waitFor(() => {
+        const modals = screen.UNSAFE_getAllByType(Modal);
+        expect(modals[2].props.visible).toBe(false);
+      });
+
+      // entriesByDateはcreatedAtの日付(=タップした日付)をキーにするため、
+      // 対象日のカレンダーセルにタイトルとして反映される
+      expect(screen.getByText('過去日の新規日記')).toBeTruthy();
+    });
+
+    it('shows an error message and rolls back the optimistic calendar update when persisting the new entry fails, keeping the modal open with the input preserved (異常系)', async () => {
+      const now = new Date();
+      const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      jest.clearAllMocks();
+      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
+
+      openNewEntryModalFor(yesterday);
+      fireEvent.changeText(getNewEntryInput(), '保存失敗する新規日記');
+      fireEvent.press(getNewEntrySaveButton());
+
+      expect(await screen.findByText('保存に失敗しました。もう一度お試しください。')).toBeTruthy();
+
+      // ロールバックにより、カレンダーセルにはタイトルが反映されない
+      expect(screen.queryByText('保存失敗する新規日記')).toBeNull();
+
+      // モーダルは開いたままで、入力内容も保持されている
+      const modals = screen.UNSAFE_getAllByType(Modal);
+      expect(modals[2].props.visible).toBe(true);
+      expect(getNewEntryInput().props.value).toBe('保存失敗する新規日記');
+    });
+
+    it('disables the save button while the new-entry input is empty or whitespace-only, and does not call AsyncStorage.setItem, matching disabled={!newEntryDraft.trim()} (異常系/境界値)', async () => {
+      const now = new Date();
+      const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      jest.clearAllMocks();
+
+      openNewEntryModalFor(yesterday);
+      const saveButton = getNewEntrySaveButton().parent?.parent?.parent;
+      expect(saveButton?.props.accessibilityState?.disabled).toBe(true);
+      expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(0.5);
+
+      fireEvent.changeText(getNewEntryInput(), '   \n   ');
+      expect(saveButton?.props.accessibilityState?.disabled).toBe(true);
+      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+
+      fireEvent.changeText(getNewEntryInput(), '空でなくなった');
+      expect(saveButton?.props.accessibilityState?.disabled).toBe(false);
+      expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(1);
+    });
+
+    it('truncates input exceeding BODY_MAX_LENGTH via onChangeText (grapheme-based, no maxLength prop), and allows saving when the text is exactly at the limit (境界値)', async () => {
+      const now = new Date();
+      const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      jest.clearAllMocks();
+
+      openNewEntryModalFor(yesterday);
+      const input = getNewEntryInput();
+
+      // 上限を1文字超えるテキストは、grapheme単位でちょうど上限文字数まで切り詰められる
+      fireEvent.changeText(input, 'あ'.repeat(1001));
+      expect(input.props.value).toBe('あ'.repeat(1000));
+      expect(screen.getByText('1000/1000')).toBeTruthy();
+
+      // 上限ちょうどの文字数は切り詰められず、そのまま保存できる
+      fireEvent.press(getNewEntrySaveButton());
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+      const [, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
+      const persisted = (await decryptPersistedEntry(value)) as DiaryEntry;
+      expect(persisted.text).toBe('あ'.repeat(1000));
+    });
+
+    describe('新規作成モーダルを閉じる際の未保存入力の破棄確認ダイアログ', () => {
+      async function pressAlertButton(label: string) {
+        const alertMock = Alert.alert as jest.Mock;
+        const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
+        const buttons = lastCall[2] as { text: string; onPress?: () => void }[];
+        const button = buttons.find((b) => b.text === label);
+        expect(button).toBeDefined();
+        await act(async () => {
+          button?.onPress?.();
+        });
+      }
+
+      it('closes the modal immediately without any confirmation dialog via the close button when the input is still empty (正常系)', async () => {
+        const now = new Date();
+        const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        openNewEntryModalFor(yesterday);
+        const heading = `${yesterday.getFullYear()}年${yesterday.getMonth() + 1}月${yesterday.getDate()}日の日記を書く`;
+        await screen.findByText(heading);
+
+        const closeButtons = screen.getAllByText(CLOSE_BUTTON_TEXT);
+        fireEvent.press(closeButtons[closeButtons.length - 1]);
+
+        await waitFor(() => expect(screen.queryByText(heading)).toBeNull());
+        expect(Alert.alert).not.toHaveBeenCalled();
+      });
+
+      it('shows the discard confirmation dialog when the background overlay is tapped after typing, and keeps the modal open until "破棄" is chosen (正常系)', async () => {
+        const now = new Date();
+        const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        openNewEntryModalFor(yesterday);
+        fireEvent.changeText(getNewEntryInput(), '破棄されるはずの下書き');
+
+        const [, , newEntryModal] = screen.UNSAFE_getAllByType(Modal);
+        const overlay = getModalOverlayPressable(newEntryModal);
+        fireEvent.press(overlay);
+
+        // ダイアログが出た段階ではまだモーダルは開いたままで、破棄もされていない
+        expect(Alert.alert).toHaveBeenCalledTimes(1);
+        expect(newEntryModal.props.visible).toBe(true);
+        expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+
+        await pressAlertButton('破棄');
+
+        await waitFor(() => expect(newEntryModal.props.visible).toBe(false));
+        expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+      });
+
+      it('keeps the modal open and preserves the unsaved draft when "キャンセル" is chosen in the discard confirmation dialog (異常系)', async () => {
+        const now = new Date();
+        const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        openNewEntryModalFor(yesterday);
+        fireEvent.changeText(getNewEntryInput(), 'キャンセルで残るはずの下書き');
+
+        const [, , newEntryModal] = screen.UNSAFE_getAllByType(Modal);
+        const overlay = getModalOverlayPressable(newEntryModal);
+        fireEvent.press(overlay);
+
+        await pressAlertButton('キャンセル');
+
+        expect(newEntryModal.props.visible).toBe(true);
+        expect(getNewEntryInput().props.value).toBe('キャンセルで残るはずの下書き');
+      });
+    });
+
+    it('does not open the new-entry modal when tapping a day that already has diary entries; the existing entry-list modal opens instead (regression, Issue #181)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '既存の日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+      await screen.findByText('既存の日記');
+
+      fireEvent.press(screen.getByText('既存の日記'));
+
+      await screen.findByText(CLOSE_BUTTON_TEXT);
+      const modals = screen.UNSAFE_getAllByType(Modal);
+      expect(modals[0].props.visible).toBe(true);
+      expect(modals[2].props.visible).toBe(false);
+    });
+
+    it("keeps the top composer's save flow (createdAt = the current moment, not local noon of a tapped date) unaffected by the new per-date creation modal (regression, Issue #181)", async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      jest.clearAllMocks();
+
+      const beforeSave = Date.now();
+      fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '今日書いた日記');
+      fireEvent.press(screen.getByText('保存'));
+
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+      const afterSave = Date.now();
+      const [, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
+      const persisted = (await decryptPersistedEntry(value)) as DiaryEntry;
+
+      const createdAtMs = new Date(persisted.createdAt).getTime();
+      expect(createdAtMs).toBeGreaterThanOrEqual(beforeSave);
+      expect(createdAtMs).toBeLessThanOrEqual(afterSave);
     });
   });
 
