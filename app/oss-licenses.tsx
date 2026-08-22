@@ -12,7 +12,8 @@ type LicenseEntry = {
   repository?: string;
 };
 
-// data/licenses.json は `npm run generate-licenses` で package.json の依存関係から自動生成される静的ファイル。
+// data/licenses.json は `npm run generate-licenses` で package-lock.json から自動生成される静的ファイル
+// (直接依存だけでなくtransitive依存も含む)。
 // 依存関係を追加・更新した際は、このコマンドを再実行して最新の内容にしてから差分をコミットする。
 const licenseEntries = licenses as LicenseEntry[];
 
@@ -21,7 +22,7 @@ export default function OssLicensesScreen() {
     <ThemedView style={styles.container}>
       <FlatList
         data={licenseEntries}
-        keyExtractor={(item) => item.name}
+        keyExtractor={(item) => `${item.name}@${item.version}`}
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={
           <ThemedText style={styles.description}>

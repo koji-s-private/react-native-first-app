@@ -53,14 +53,17 @@ describe('OssLicensesScreen (実データ: data/licenses.json)', () => {
     expect(screen.getByText(DESCRIPTION_TEXT)).toBeTruthy();
   });
 
-  it('renders the first entries of the (alphabetically sorted) license list, including "expo" itself, with name/version/license and a repository link', () => {
+  it('renders the "expo" entry (name/version/license and a repository link) via the FlatList\'s own renderItem', () => {
     render(<OssLicensesScreen />);
 
-    // FlatListは既定でinitialNumToRender(10件程度)分しか初期描画しないため、
-    // 先頭付近(アルファベット順で早い)のエントリだけを対象に検証する。
-    // "expo"自体は実データ内で7番目のため、初期描画に含まれる。
+    // 件数が数百件規模になり、"expo"が既定のinitialNumToRender分の初期描画に
+    // 含まれるとは限らないため、react-nativeエントリの検証と同様にrenderItemを
+    // 直接呼び出して仮想化の影響を受けずに検証する。
+    const list = screen.UNSAFE_getByType(FlatList);
     const expoEntry = licenseEntries.find((entry) => entry.name === 'expo');
     expect(expoEntry).toBeDefined();
+
+    render(list.props.renderItem({ item: expoEntry, index: 0, separators: {} } as never));
 
     expect(screen.getByText('expo')).toBeTruthy();
     expect(screen.getByText(`v${expoEntry?.version} ・ ${expoEntry?.license}`)).toBeTruthy();

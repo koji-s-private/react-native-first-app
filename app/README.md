@@ -24,7 +24,7 @@ app/
 
 ## `oss-licenses.tsx` の役割
 
-アプリが利用しているOSSライブラリのライセンス一覧を表示する画面です。表示内容は [`data/licenses.json`](../data/licenses.json)（`npm run generate-licenses` で `package.json` の `dependencies` から自動生成される静的ファイル）を読み込んで一覧表示しているだけで、実行時に依存関係を解析しているわけではありません。依存関係を追加・更新したら、コミット前に `npm run generate-licenses` を再実行してください。現時点ではこの画面への導線（設定画面などからのリンク）は未実装です。
+アプリが利用しているOSSライブラリのライセンス一覧を表示する画面です。表示内容は [`data/licenses.json`](../data/licenses.json)（`npm run generate-licenses` で `package-lock.json` から自動生成される静的ファイル。直接依存だけでなくtransitive依存も含む）を読み込んで一覧表示しているだけで、実行時に依存関係を解析しているわけではありません。依存関係を追加・更新したら、コミット前に `npm run generate-licenses` を再実行してください。現時点ではこの画面への導線（設定画面などからのリンク）は未実装です。
 
 ## `(tabs)/` の役割
 
