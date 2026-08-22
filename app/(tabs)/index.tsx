@@ -231,13 +231,19 @@ function normalizeForSearch(text: string): NormalizedForSearch {
   const startMap: number[] = [];
   const endMap: number[] = [];
   let originalIndex = 0;
-  for (const char of Array.from(text)) {
+  for (const char of text) {
     const normalizedChar = hiraganaToKatakana(char.normalize('NFKC'));
     const charEnd = originalIndex + char.length;
+    // normalizedChar内の各文字(絵文字等のサロゲートペア文字を含みうる)について、
+    // normalized文字列に加算されるUTF-16コード単位数(c.length)分だけstartMap/endMapに
+    // pushする。1文字=1pushだと、サロゲートペア文字(c.length===2)で
+    // normalizedとstartMap/endMapの長さがズレ、以降のインデックス参照が崩れる
     for (const c of normalizedChar) {
       normalized += c;
-      startMap.push(originalIndex);
-      endMap.push(charEnd);
+      for (let i = 0; i < c.length; i++) {
+        startMap.push(originalIndex);
+        endMap.push(charEnd);
+      }
     }
     originalIndex = charEnd;
   }

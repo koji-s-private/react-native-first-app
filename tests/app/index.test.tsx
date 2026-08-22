@@ -5180,6 +5180,29 @@ describe('HomeScreen', () => {
         // 切り詰められた、元の文字列上の正しい範囲がそのまま抜粋されていることを厳密に検証する
         expect(excerpt).toBe(`…${'あ'.repeat(20)}１２３${'い'.repeat(20)}…`);
       });
+
+      it('excerpts the original text at the correct position even when the body contains surrogate-pair emoji before the match (regression)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        // マッチ箇所('123')より前にサロゲートペア絵文字(UTF-16で2コードユニット)を3つ配置し、
+        // 正規化後の文字列と元の文字列の対応付け(startMap/endMap)が絵文字によってズレないかを検証する
+        const longEntryText = '😀'.repeat(3) + 'あ'.repeat(30) + '123' + 'い'.repeat(30);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([{ id: '1', text: longEntryText, createdAt: isoAt(now, dayWithEntry) }]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '123');
+
+        const resultText = await screen.findByText(/123/);
+        const excerpt = resultText.props.children as string;
+        // 絵文字によるズレが無ければ、マッチ箇所の前後はちょうど20文字ずつになるはず
+        expect(excerpt).toBe(`…${'あ'.repeat(20)}123${'い'.repeat(20)}…`);
+      });
     });
   });
 });
