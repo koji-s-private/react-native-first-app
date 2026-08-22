@@ -861,6 +861,9 @@ export default function HomeScreen() {
       }
 
       const dayEntries = entriesByDate[date.dateString];
+      // その日にエントリが実在するか(タイトル文字列の有無ではなく、handleDayPressと同じ基準で判定する。
+      // 本文が空白のみのレガシーデータではタイトルが空文字列になり得るため、両者を区別する必要がある)
+      const hasEntries = Boolean(dayEntries?.length);
       // その日に書かれた日記のうち最初の1件のタイトルのみをセルに表示する
       const title = dayEntries?.length ? getEntryTitle(dayEntries[0].text) : null;
       // 同じ日に2件以上の日記がある場合、2件目以降の件数を「+N」バッジで表示する
@@ -870,11 +873,11 @@ export default function HomeScreen() {
       const isToday = state === 'today';
       // 日記が無い日でも、未来日でなければ新規作成モーダルを開けるようタップ可能にする。
       // 未来日はCalendarのmaxDateによりstateが'disabled'になるため、それ以外は押せる扱いにする
-      const isPressable = Boolean(title) || state !== 'disabled';
+      const isPressable = hasEntries || state !== 'disabled';
       // スクリーンリーダー(VoiceOver/TalkBack)利用者にも、セルの数字だけでなく
       // 「何年何月何日か」と「その日に日記があるか・新規作成できるか」が伝わるようラベルを組み立てる
       // (フォーマットはモーダル見出しと同じformatDateHeadingを再利用する)
-      const statusLabel = title
+      const statusLabel = hasEntries
         ? '日記あり'
         : isPressable
           ? '日記なし、タップして新規作成'

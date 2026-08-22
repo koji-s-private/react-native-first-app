@@ -2006,7 +2006,7 @@ describe('HomeScreen', () => {
       expect(screen.queryByText('あ…')).toBeNull();
     });
 
-    it('renders no title for an entry whose text is an empty string after the first line is trimmed, but still opens the (empty) entry-list modal on tap since entriesByDate already has an entry for that day (defensive boundary for directly-corrupted/legacy storage data, since the composer itself never saves an empty/whitespace-only entry; Issue #181 regression check)', async () => {
+    it('renders no title for an entry whose text is an empty string after the first line is trimmed, but still treats the day as having an entry (isPressable/statusLabel/accessibilityLabel and tap behavior are based on entriesByDate, not on the trimmed title) since entriesByDate already has an entry for that day (defensive boundary for directly-corrupted/legacy storage data, since the composer itself never saves an empty/whitespace-only entry; Issue #181 regression check)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -2017,11 +2017,10 @@ describe('HomeScreen', () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      // タイトルは空文字列だが、entriesByDateにはこの日のエントリが存在するため
-      // (Issue #181以降)セル自体はタップ可能な要素として描画される。ただし他の日記の無い日
-      // (未来日でない日)もすべてタップ可能になっているため、このセルには絞り込まず
-      // 「日記が実際に存在するセル」としてはカウントされないことのみを確認する
-      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(0);
+      // セルへの表示テキスト(タイトル)は空文字列だが、isPressable/statusLabelは
+      // タイトルの有無ではなくentriesByDateの有無(handleDayPressと同じ基準)で決まるため、
+      // このセルは「日記が実際に存在するセル」として1件カウントされる
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
 
       const [entryListModalBefore] = screen.UNSAFE_getAllByType(Modal);
       expect(entryListModalBefore.props.visible).toBe(false);
