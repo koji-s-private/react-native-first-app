@@ -952,6 +952,8 @@ export default function HomeScreen() {
               keyExtractor={(item) => item.id}
               // 一覧をスクロールした際にもキーボードを閉じられるようにする
               keyboardDismissMode="on-drag"
+              // キーボード表示中でも1回のタップで検索結果を選択できるようにする
+              keyboardShouldPersistTaps="handled"
               renderItem={({ item }) => (
                 <Pressable
                   style={[styles.searchResultItem, { borderBottomColor: iconColor }]}
