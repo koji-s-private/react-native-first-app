@@ -3433,7 +3433,11 @@ describe('HomeScreen', () => {
         await AsyncStorage.setItem(
           STORAGE_KEY,
           JSON.stringify([
-            { id: '1', text: '一覧閉じる・未オープン対象の日記', createdAt: isoAt(now, dayWithEntry) },
+            {
+              id: '1',
+              text: '一覧閉じる・未オープン対象の日記',
+              createdAt: isoAt(now, dayWithEntry),
+            },
           ]),
         );
         jest.clearAllMocks();
@@ -3453,7 +3457,7 @@ describe('HomeScreen', () => {
         expect(entryListModal.props.visible).toBe(false);
       });
 
-      it('closes both the entry-list modal and the edit modal immediately without any confirmation dialog when the entry-list modal\'s own close button is pressed while the edit modal is open but the draft has not been changed (正常系)', async () => {
+      it("closes both the entry-list modal and the edit modal immediately without any confirmation dialog when the entry-list modal's own close button is pressed while the edit modal is open but the draft has not been changed (正常系)", async () => {
         await openEditModalFor('一覧閉じる・未変更対象の日記');
 
         // 一覧モーダル自身の「閉じる」ボタン(編集モーダルの「閉じる」ボタンより先に描画される)を押す
@@ -3469,7 +3473,7 @@ describe('HomeScreen', () => {
         expect(editModal.props.visible).toBe(false);
       });
 
-      it('shows the discard confirmation dialog (Alert.alert) and keeps both the entry-list modal and the edit modal open when the entry-list modal\'s own close button is pressed after the draft has been changed (境界値/異常系)', async () => {
+      it("shows the discard confirmation dialog (Alert.alert) and keeps both the entry-list modal and the edit modal open when the entry-list modal's own close button is pressed after the draft has been changed (境界値/異常系)", async () => {
         await openEditModalFor('一覧閉じる・変更あり対象の日記');
 
         const editInput = screen.getByDisplayValue('一覧閉じる・変更あり対象の日記');
@@ -3507,9 +3511,7 @@ describe('HomeScreen', () => {
         const [entryListModal, editModal] = screen.UNSAFE_getAllByType(Modal);
         expect(entryListModal.props.visible).toBe(true);
         expect(editModal.props.visible).toBe(true);
-        expect(
-          screen.getByDisplayValue('キャンセルで保持される内容(一覧)'),
-        ).toBeTruthy();
+        expect(screen.getByDisplayValue('キャンセルで保持される内容(一覧)')).toBeTruthy();
         expect(AsyncStorage.setItem).not.toHaveBeenCalled();
       });
 
