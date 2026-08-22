@@ -3397,6 +3397,155 @@ describe('HomeScreen', () => {
       });
     });
 
+    describe('日付一覧モーダルを閉じる際の未保存の編集内容の破棄確認ダイアログ(Issue #211)', () => {
+      async function pressAlertButton(label: string) {
+        const alertMock = Alert.alert as jest.Mock;
+        const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
+        const buttons = lastCall[2] as { text: string; onPress?: () => void }[];
+        const button = buttons.find((b) => b.text === label);
+        expect(button).toBeDefined();
+        await act(async () => {
+          button?.onPress?.();
+        });
+      }
+
+      async function openEditModalFor(text: string) {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([{ id: '1', text, createdAt: isoAt(now, dayWithEntry) }]),
+        );
+        jest.clearAllMocks();
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+        render(<HomeScreen />);
+        await screen.findByText(text);
+        fireEvent.press(screen.getByText(text));
+        await screen.findByText(CLOSE_BUTTON_TEXT);
+        fireEvent.press(screen.getByText('編集'));
+        await screen.findByText('日記を編集');
+      }
+
+      it('closes the entry-list modal immediately without any confirmation dialog when the background overlay is tapped and the edit modal is not open (正常系)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '一覧閉じる・未オープン対象の日記', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+        render(<HomeScreen />);
+        await screen.findByText('一覧閉じる・未オープン対象の日記');
+        fireEvent.press(screen.getByText('一覧閉じる・未オープン対象の日記'));
+        await screen.findByText(CLOSE_BUTTON_TEXT);
+
+        const [entryListModal] = screen.UNSAFE_getAllByType(Modal);
+        const overlay = getModalOverlayPressable(entryListModal);
+        fireEvent.press(overlay);
+
+        await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
+        expect(Alert.alert).not.toHaveBeenCalled();
+        expect(entryListModal.props.visible).toBe(false);
+      });
+
+      it('closes both the entry-list modal and the edit modal immediately without any confirmation dialog when the entry-list modal\'s own close button is pressed while the edit modal is open but the draft has not been changed (正常系)', async () => {
+        await openEditModalFor('一覧閉じる・未変更対象の日記');
+
+        // 一覧モーダル自身の「閉じる」ボタン(編集モーダルの「閉じる」ボタンより先に描画される)を押す
+        const closeButtons = screen.getAllByText(CLOSE_BUTTON_TEXT);
+        fireEvent.press(closeButtons[0]);
+
+        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
+        expect(Alert.alert).not.toHaveBeenCalled();
+        expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull();
+
+        const [entryListModal, editModal] = screen.UNSAFE_getAllByType(Modal);
+        expect(entryListModal.props.visible).toBe(false);
+        expect(editModal.props.visible).toBe(false);
+      });
+
+      it('shows the discard confirmation dialog (Alert.alert) and keeps both the entry-list modal and the edit modal open when the entry-list modal\'s own close button is pressed after the draft has been changed (境界値/異常系)', async () => {
+        await openEditModalFor('一覧閉じる・変更あり対象の日記');
+
+        const editInput = screen.getByDisplayValue('一覧閉じる・変更あり対象の日記');
+        fireEvent.changeText(editInput, '変更後の内容(一覧閉じる)');
+
+        const closeButtons = screen.getAllByText(CLOSE_BUTTON_TEXT);
+        fireEvent.press(closeButtons[0]);
+
+        expect(Alert.alert).toHaveBeenCalledTimes(1);
+        const [title, message, buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+        expect(title).toBe('変更を破棄しますか?');
+        expect(message).toBe('編集中の内容は保存されません。');
+        expect(buttons).toHaveLength(2);
+        expect(buttons[0]).toMatchObject({ text: 'キャンセル', style: 'cancel' });
+        expect(buttons[1]).toMatchObject({ text: '破棄', style: 'destructive' });
+
+        // ダイアログが出た段階では日付一覧・編集モーダルともまだ開いたまま
+        const [entryListModal, editModal] = screen.UNSAFE_getAllByType(Modal);
+        expect(entryListModal.props.visible).toBe(true);
+        expect(editModal.props.visible).toBe(true);
+        expect(screen.getByText('日記を編集')).toBeTruthy();
+      });
+
+      it('keeps both modals open and preserves the unsaved draft/selectedDate/editingEntryId when "キャンセル" is chosen in the discard confirmation dialog triggered from the entry-list modal (境界値/異常系)', async () => {
+        await openEditModalFor('一覧閉じるキャンセル対象の日記');
+
+        const editInput = screen.getByDisplayValue('一覧閉じるキャンセル対象の日記');
+        fireEvent.changeText(editInput, 'キャンセルで保持される内容(一覧)');
+
+        const closeButtons = screen.getAllByText(CLOSE_BUTTON_TEXT);
+        fireEvent.press(closeButtons[0]);
+        await pressAlertButton('キャンセル');
+
+        // 日付一覧・編集モーダルともに開いたまま、editDraftも保持されている
+        const [entryListModal, editModal] = screen.UNSAFE_getAllByType(Modal);
+        expect(entryListModal.props.visible).toBe(true);
+        expect(editModal.props.visible).toBe(true);
+        expect(
+          screen.getByDisplayValue('キャンセルで保持される内容(一覧)'),
+        ).toBeTruthy();
+        expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+      });
+
+      it('closes both the entry-list modal and the edit modal, discarding the unsaved draft (selectedDate/editingEntryId/editDraft are all reset), when "破棄" is chosen in the discard confirmation dialog triggered from the entry-list modal (正常系)', async () => {
+        await openEditModalFor('一覧閉じる破棄対象の日記');
+
+        const editInput = screen.getByDisplayValue('一覧閉じる破棄対象の日記');
+        fireEvent.changeText(editInput, '破棄される内容(一覧)');
+
+        const closeButtons = screen.getAllByText(CLOSE_BUTTON_TEXT);
+        fireEvent.press(closeButtons[0]);
+        await pressAlertButton('破棄');
+
+        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
+        expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull();
+        const [entryListModal, editModal] = screen.UNSAFE_getAllByType(Modal);
+        expect(entryListModal.props.visible).toBe(false);
+        expect(editModal.props.visible).toBe(false);
+        expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+
+        // 元の本文は変更されずに残っている(破棄されたのはeditDraftのみ)
+        expect(screen.getAllByText('一覧閉じる破棄対象の日記').length).toBeGreaterThanOrEqual(1);
+        expect(screen.queryByText('破棄される内容(一覧)')).toBeNull();
+
+        // editDraftがリセットされていることを、再度日付セルを押して確認する
+        // (前回破棄した内容が残っていれば、再度「編集」を押した際のTextInputの表示値が
+        // '破棄される内容(一覧)'のままになってしまうはず)
+        fireEvent.press(screen.getByText('一覧閉じる破棄対象の日記'));
+        await screen.findByText(CLOSE_BUTTON_TEXT);
+        fireEvent.press(screen.getByText('編集'));
+        await screen.findByText('日記を編集');
+        expect(screen.getByDisplayValue('一覧閉じる破棄対象の日記')).toBeTruthy();
+        expect(screen.queryByDisplayValue('破棄される内容(一覧)')).toBeNull();
+      });
+    });
+
     it('updates the entry text (keeping createdAt unchanged), refreshes the list, and persists it encrypted when the edit is saved (正常系)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
