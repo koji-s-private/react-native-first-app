@@ -3,12 +3,17 @@
 /**
  * OSSライセンス一覧生成スクリプト
  *
- * package.json の "dependencies"(本番で実際にアプリに同梱されるライブラリ)を対象に、
- * それぞれの node_modules/<package>/package.json からライブラリ名・バージョン・ライセンス種別・
- * リポジトリURLを収集し、静的なJSONファイル(data/licenses.json)として書き出す。
+ * package-lock.json(lockfileVersion 3)の "packages" フィールドを対象に、実際に
+ * インストールされる全パッケージ(直接依存だけでなく、依存の依存であるtransitive依存も含む)
+ * のうち、devDependencies経由でのみ必要なもの(`dev: true`。本番ビルドには同梱されない)を
+ * 除いたものを収集し、それぞれの <パッケージパス>/package.json からライブラリ名・バージョン・
+ * ライセンス種別・リポジトリURLを抽出して、静的なJSONファイル(data/licenses.json)として書き出す。
  *
- * license-checker等の外部ツールに頼らず、npm自体が持つ情報(node_modules配下のpackage.json)だけを
- * 読み取るシンプルな実装にすることで、依存関係の追加やツールのバージョン変動に左右されにくくしている。
+ * 当初(Issue #101 / PR #115)はpackage.jsonの直接依存のみを対象にしていたが、実際にバンドルへ
+ * 含まれるtransitive依存が抜け落ちておりストア審査対応として不完全だった(Issue #117)。
+ * license-checker-rseidelsohn等の外部ツールでの自動収集も試みたが、このリポジトリのnode_modules
+ * 構成では正しく動作しなかったため、npm自体が生成するpackage-lock.jsonの情報だけを読み取る
+ * シンプルな実装で代替している。依存関係の追加やツールのバージョン変動に左右されにくい利点もある。
  *
  * 実行方法: npm run generate-licenses
  */
@@ -17,7 +22,7 @@ const fs = require('fs');
 const path = require('path');
 
 const rootDir = path.join(__dirname, '..');
-const rootPackageJsonPath = path.join(rootDir, 'package.json');
+const packageLockPath = path.join(rootDir, 'package-lock.json');
 const outputPath = path.join(rootDir, 'data', 'licenses.json');
 
 /** package.jsonの"repository"フィールド(文字列 or オブジェクト)からURLを取り出す */
@@ -42,22 +47,49 @@ function extractLicense(pkg) {
   return 'UNKNOWN';
 }
 
+/**
+ * package-lock.jsonの"packages"のキー(例: "node_modules/foo/node_modules/@scope/bar")から
+ * パッケージ名を推測する。ネストしたnode_modules配下でも、最後の"node_modules/"以降が
+ * そのパッケージ自身のパスになる。
+ */
+function inferPackageNameFromKey(key) {
+  const segments = key.split('node_modules/');
+  return segments[segments.length - 1];
+}
+
 function main() {
-  const rootPackageJson = JSON.parse(fs.readFileSync(rootPackageJsonPath, 'utf-8'));
-  const dependencyNames = Object.keys(rootPackageJson.dependencies || {}).sort((a, b) =>
-    a.localeCompare(b),
-  );
+  const packageLock = JSON.parse(fs.readFileSync(packageLockPath, 'utf-8'));
+  const packageEntries = Object.entries(packageLock.packages || {});
 
-  const licenses = dependencyNames.map((name) => {
-    const packageJsonPath = path.join(rootDir, 'node_modules', name, 'package.json');
+  // ルート自身("")と、devDependencies経由でのみ必要なパッケージ(本番ビルドに含まれない)を除外する
+  const productionEntries = packageEntries.filter(([key, entry]) => key !== '' && !entry.dev);
+
+  // ネストしたnode_modulesによる重複(同一name+versionの組み合わせ)を除いた上で収集する
+  const licenseByKey = new Map();
+
+  for (const [key] of productionEntries) {
+    const packageJsonPath = path.join(rootDir, key, 'package.json');
+    if (!fs.existsSync(packageJsonPath)) continue;
+
     const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+    const name = pkg.name || inferPackageNameFromKey(key);
+    const version = pkg.version;
+    const dedupeKey = `${name}@${version}`;
 
-    return {
+    if (licenseByKey.has(dedupeKey)) continue;
+
+    licenseByKey.set(dedupeKey, {
       name,
-      version: pkg.version || rootPackageJson.dependencies[name],
+      version,
       license: extractLicense(pkg),
       repository: extractRepositoryUrl(pkg.repository),
-    };
+    });
+  }
+
+  const licenses = Array.from(licenseByKey.values()).sort((a, b) => {
+    const nameOrder = a.name.localeCompare(b.name);
+    if (nameOrder !== 0) return nameOrder;
+    return a.version.localeCompare(b.version);
   });
 
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });

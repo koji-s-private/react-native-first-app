@@ -29,7 +29,7 @@ npm run reset-project
 
 ## `generate-licenses.js` の用途
 
-`package.json` の `dependencies`（本番でアプリに同梱されるライブラリ）を対象に、`node_modules` 配下の各パッケージの `package.json` からライブラリ名・バージョン・ライセンス種別・リポジトリURLを収集し、[`data/licenses.json`](../data/licenses.json) を生成します。アプリ内の [OSSライセンス画面](../app/oss-licenses.tsx) はこの静的ファイルを読み込んで表示するだけなので、依存関係を追加・更新した場合は以下のコマンドを再実行し、差分をコミットしてください。
+`package-lock.json` の `packages` フィールドを対象に、実際にインストールされる全パッケージ（直接依存だけでなく、依存の依存であるtransitive依存も含む）のうち、devDependencies経由でのみ必要なもの（本番ビルドに同梱されないもの）を除いたものについて、各パッケージの `package.json` からライブラリ名・バージョン・ライセンス種別・リポジトリURLを収集し、[`data/licenses.json`](../data/licenses.json) を生成します。アプリ内の [OSSライセンス画面](../app/oss-licenses.tsx) はこの静的ファイルを読み込んで表示するだけなので、依存関係を追加・更新した場合は以下のコマンドを再実行し、差分をコミットしてください。
 
 ```bash
 npm run generate-licenses
