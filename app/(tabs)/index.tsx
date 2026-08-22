@@ -115,6 +115,15 @@ function toDateKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+// 'YYYY-MM-DD'形式の日付キーから、その日の正午(端末のローカルタイム)を表すISO文字列を作る。
+// 過去日を選んで新規作成する際のcreatedAtに使う。0時付近の時刻だと、この後toDateKey()で
+// 日付キーへ逆算する際にタイムゾーンやサマータイムの影響で日付がずれるおそれがあるため、
+// 日付境界から離れた正午を採用している
+function buildCreatedAtForDateKey(dateKey: string): string {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(year, month - 1, day, 12, 0, 0, 0).toISOString();
+}
+
 // 文字列を「見た目上の1文字」(書記素クラスタ)単位の配列に分割する。
 // 絵文字の家族構成(ZWJで結合された複数コードポイント)やサロゲートペアで表現される
 // 文字を、単純なstring.slice()やArray.from()のコードポイント単位分割で行うと
@@ -247,6 +256,14 @@ export default function HomeScreen() {
   // タップと同時に発生する複数のonPressイベント)によって、同じ内容の更新処理が重複して
   // 実行されてしまうことを防ぐため、実行中は早期returnし、保存ボタンもdisabledにする
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  // 新規作成モーダル(日記の無い日をタップした際に、その日付向けに新規作成する導線)の対象日付
+  // ('YYYY-MM-DD')。nullの間はモーダルを閉じている
+  const [newEntryDate, setNewEntryDate] = useState<string | null>(null);
+  const [newEntryDraft, setNewEntryDraft] = useState('');
+  const [newEntryError, setNewEntryError] = useState<string | null>(null);
+  // handleSaveNewEntryの実行中かどうか。isSaving/isSavingEditと同様、連打による重複保存を防ぐため、
+  // 実行中は早期returnし、保存ボタンもdisabledにする
+  const [isSavingNewEntry, setIsSavingNewEntry] = useState(false);
   // handleSave内の保存処理(pending中)開始後に、ユーザーがdraft用TextInputへ入力操作を
   // 行ったかどうかを表すref。「pending開始時にセットした空文字列のまま」なのか
   // 「pending中に入力した末、自分で全部消して空文字列に戻した」のかを、値の内容(空文字列か
@@ -567,6 +584,82 @@ export default function HomeScreen() {
     }
   }, [editDraft, editingEntryId, entries, enqueueDiaryWrite, isSavingEdit]);
 
+  // 新規作成用TextInputのonChangeText。draft/edit用と同様の理由でtruncateToBodyMaxLength
+  // (grapheme単位の切り詰め)を使う
+  const handleChangeNewEntryDraft = useCallback((text: string) => {
+    setNewEntryDraft(truncateToBodyMaxLength(text));
+  }, []);
+
+  // 新規作成モーダルを実際に閉じる処理本体(handleCancelNewEntryから、確認不要な場合は直接、
+  // 確認が必要な場合はAlert.alertの「破棄」選択時に呼ばれる)
+  const closeNewEntryModal = useCallback(() => {
+    setNewEntryDate(null);
+    setNewEntryDraft('');
+    setNewEntryError(null);
+  }, []);
+
+  // 新規作成モーダルを閉じる(背景タップ・「閉じる」ボタン・Android戻る操作の共通ハンドラ)。
+  // 入力途中の内容がある場合のみ、誤って入力内容を失わないよう確認ダイアログを挟む
+  // (handleCancelEditと同じパターン)
+  const handleCancelNewEntry = useCallback(() => {
+    if (!newEntryDraft.trim()) {
+      closeNewEntryModal();
+      return;
+    }
+
+    Alert.alert('変更を破棄しますか?', '入力中の内容は保存されません。', [
+      { text: 'キャンセル', style: 'cancel' },
+      { text: '破棄', style: 'destructive', onPress: closeNewEntryModal },
+    ]);
+  }, [newEntryDraft, closeNewEntryModal]);
+
+  // 日記の無い日をタップして開いたモーダルからの新規保存。ホーム画面上部の「今日」入力欄用の
+  // handleSaveとは異なり、createdAtをその瞬間の日時ではなく選択された日付基準
+  // (buildCreatedAtForDateKey)にする
+  const handleSaveNewEntry = useCallback(async () => {
+    // 既に保存処理が進行中であれば、連打による重複保存を防ぐため何もしない
+    if (isSavingNewEntry || !newEntryDate) {
+      return;
+    }
+
+    const trimmed = newEntryDraft.trim();
+    // 万が一上限を超えたテキストが渡ってきても保存しない(onChangeText側のgrapheme単位の
+    // 切り詰めが主な防御線)。上限チェック自体もsplitIntoGraphemesでgrapheme単位で行い、
+    // UTF-16コードユニット単位のlengthとのズレを防ぐ
+    if (!trimmed || splitIntoGraphemes(trimmed).length > BODY_MAX_LENGTH) {
+      return;
+    }
+
+    setIsSavingNewEntry(true);
+
+    const newEntry: DiaryEntry = {
+      id: randomUUID(),
+      text: trimmed,
+      createdAt: buildCreatedAtForDateKey(newEntryDate),
+    };
+    const previousEntries = entries;
+    // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
+    setEntries([newEntry, ...entries]);
+    setNewEntryError(null);
+
+    try {
+      // 他の保存/編集/削除処理と競合しないよう、書き込みはキュー経由で直列化する
+      // (このエントリ専用のキーへの書き込みのみで完結する)
+      await enqueueDiaryWrite({ type: 'save', entry: newEntry });
+      // 既に楽観的更新でReact stateは正しい内容になっているため、永続化された内容での
+      // setEntriesによる再同期は不要。永続化に成功した場合のみモーダルを閉じる
+      setNewEntryDate(null);
+      setNewEntryDraft('');
+    } catch {
+      // 永続化に失敗した場合は保存前の状態に戻し、モーダルは開いたままエラーを伝える
+      setEntries(previousEntries);
+      setNewEntryError('保存に失敗しました。もう一度お試しください。');
+    } finally {
+      // 成功・失敗いずれの場合も、次の保存を行えるよう必ず実行中フラグを戻す
+      setIsSavingNewEntry(false);
+    }
+  }, [entries, enqueueDiaryWrite, isSavingNewEntry, newEntryDate, newEntryDraft]);
+
   // 日付一覧モーダルを閉じる(開いていた編集モーダルがあれば合わせて閉じる)
   const handleCloseDateModal = useCallback(() => {
     setSelectedDate(null);
@@ -746,10 +839,17 @@ export default function HomeScreen() {
 
   const handleDayPress = useCallback(
     (date: DateData) => {
-      // 日記が無い日は何も表示しない(タップしても反応しない)
       if (entriesByDate[date.dateString]?.length) {
         setSelectedDate(date.dateString);
+        return;
       }
+      // 日記の無い日は、未来日でなければその日付向けの新規作成モーダルを開く。
+      // 未来日はCalendarのmaxDateで既にセル自体が押せなくなっている(renderDay参照)が、
+      // 念のためここでも二重にチェックする
+      if (date.dateString > toDateKey(new Date())) {
+        return;
+      }
+      setNewEntryDate(date.dateString);
     },
     [entriesByDate],
   );
@@ -768,21 +868,28 @@ export default function HomeScreen() {
       const extraEntryCount = dayEntries && dayEntries.length > 1 ? dayEntries.length - 1 : 0;
       const isDisabled = state === 'disabled' || state === 'inactive';
       const isToday = state === 'today';
+      // 日記が無い日でも、未来日でなければ新規作成モーダルを開けるようタップ可能にする。
+      // 未来日はCalendarのmaxDateによりstateが'disabled'になるため、それ以外は押せる扱いにする
+      const isPressable = Boolean(title) || state !== 'disabled';
       // スクリーンリーダー(VoiceOver/TalkBack)利用者にも、セルの数字だけでなく
-      // 「何年何月何日か」と「その日に日記があるかどうか」が伝わるようラベルを組み立てる
+      // 「何年何月何日か」と「その日に日記があるか・新規作成できるか」が伝わるようラベルを組み立てる
       // (フォーマットはモーダル見出しと同じformatDateHeadingを再利用する)
-      const accessibilityLabel = `${formatDateHeading(date.dateString)}、${title ? '日記あり' : '日記なし'}`;
+      const statusLabel = title
+        ? '日記あり'
+        : isPressable
+          ? '日記なし、タップして新規作成'
+          : '日記なし';
+      const accessibilityLabel = `${formatDateHeading(date.dateString)}、${statusLabel}`;
 
       return (
         <Pressable
           style={[styles.dayCell, { height: dayCellHeight }]}
           onPress={() => onPress?.(date)}
-          disabled={!title}
-          accessibilityRole={title ? 'button' : undefined}
+          disabled={!isPressable}
+          accessibilityRole={isPressable ? 'button' : undefined}
           accessibilityLabel={accessibilityLabel}
-          // 日記が無い日はタップしても反応しないため、スクリーンリーダーにも
-          // 操作不可であることを明示的に伝える
-          accessibilityState={{ disabled: !title }}
+          // タップしても反応しない日はスクリーンリーダーにも操作不可であることを明示的に伝える
+          accessibilityState={{ disabled: !isPressable }}
         >
           {extraEntryCount > 0 ? (
             <View style={[styles.entryCountBadge, { backgroundColor: tintColor }]}>
@@ -832,6 +939,10 @@ export default function HomeScreen() {
   // 文字数カウンター表示用に、grapheme単位で数え直す(絵文字などでUTF-16の.lengthとずれるため)
   const draftGraphemeCount = useMemo(() => splitIntoGraphemes(draft).length, [draft]);
   const editDraftGraphemeCount = useMemo(() => splitIntoGraphemes(editDraft).length, [editDraft]);
+  const newEntryDraftGraphemeCount = useMemo(
+    () => splitIntoGraphemes(newEntryDraft).length,
+    [newEntryDraft],
+  );
 
   return (
     <KeyboardAvoidingView
@@ -1017,6 +1128,8 @@ export default function HomeScreen() {
                   // 表示月の変化はonMonthChangeでstate側に反映する
                   initialDate={calendarInitialDate}
                   onMonthChange={handleMonthChange}
+                  // 未来日を新規作成の対象外にするため、今日より後の日付をタップ不可(state: 'disabled')にする
+                  maxDate={toDateKey(new Date())}
                   // 月によって行数(4〜6週)が変わって高さがガタつかないよう、常に6週分の高さで揃える
                   showSixWeeks
                 />
@@ -1179,6 +1292,88 @@ export default function HomeScreen() {
                 {editError ? (
                   <ThemedText style={[styles.errorText, { color: errorColor }]}>
                     {editError}
+                  </ThemedText>
+                ) : null}
+              </ThemedView>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        <Modal
+          visible={newEntryDate !== null}
+          animationType="slide"
+          transparent
+          onRequestClose={handleCancelNewEntry}
+          statusBarTranslucent
+          navigationBarTranslucent
+        >
+          {/* Modalは親のKeyboardAvoidingViewとは別のネイティブサーフェスに描画され効果を受けないため、
+              TextInput(本文入力欄)を含むこのモーダル内にも別途KeyboardAvoidingViewを配置する */}
+          <KeyboardAvoidingView
+            style={styles.flex}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          >
+            {/* 背景の半透明オーバーレイをタップした場合はモーダルを閉じる(他のモーダルと同じパターン) */}
+            <Pressable style={styles.modalOverlay} onPress={handleCancelNewEntry}>
+              <ThemedView
+                style={[styles.modalContent, { borderColor: iconColor }]}
+                // オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
+                // modalContent内でのタッチ開始をこのViewがレスポンダーとして引き受け、伝播を止める
+                onStartShouldSetResponder={() => true}
+              >
+                <View style={styles.modalHeader}>
+                  <ThemedText type="subtitle">
+                    {newEntryDate ? formatDateHeading(newEntryDate) : ''}の日記を書く
+                  </ThemedText>
+                  <Pressable onPress={handleCancelNewEntry}>
+                    <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
+                      閉じる
+                    </ThemedText>
+                  </Pressable>
+                </View>
+                <TextInput
+                  style={[styles.input, { color: textColor, borderColor: tintColor }]}
+                  placeholder="その日の出来事や気持ちを書いてみましょう"
+                  placeholderTextColor={iconColor}
+                  value={newEntryDraft}
+                  onChangeText={handleChangeNewEntryDraft}
+                  multiline
+                  // draft用TextInputと同様、スクリーンリーダー向けに明示的なラベルを付ける
+                  accessibilityLabel="日記本文"
+                  // draft用TextInputと同様の理由でmaxLength propはあえて指定しない
+                />
+                <View style={styles.composerFooter}>
+                  <ThemedText
+                    style={[
+                      styles.charCount,
+                      newEntryDraftGraphemeCount >= BODY_MAX_LENGTH
+                        ? { color: errorColor }
+                        : { color: iconColor },
+                    ]}
+                  >
+                    {newEntryDraftGraphemeCount}/{BODY_MAX_LENGTH}
+                  </ThemedText>
+                  <Pressable
+                    style={[
+                      styles.saveButton,
+                      { backgroundColor: tintColor },
+                      // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
+                      { opacity: !newEntryDraft.trim() || isSavingNewEntry ? 0.5 : 1 },
+                    ]}
+                    onPress={handleSaveNewEntry}
+                    disabled={!newEntryDraft.trim() || isSavingNewEntry}
+                    accessibilityRole="button"
+                    accessibilityLabel="保存"
+                    accessibilityState={{ disabled: !newEntryDraft.trim() || isSavingNewEntry }}
+                  >
+                    <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
+                      保存
+                    </ThemedText>
+                  </Pressable>
+                </View>
+                {newEntryError ? (
+                  <ThemedText style={[styles.errorText, { color: errorColor }]}>
+                    {newEntryError}
                   </ThemedText>
                 ) : null}
               </ThemedView>
