@@ -188,6 +188,68 @@ function formatEntryDateTime(isoString: string): string {
 // 検索結果の抜粋で、マッチ箇所の前後何文字を表示するか
 const SEARCH_EXCERPT_CONTEXT_LENGTH = 20;
 
+// ひらがな(U+3041〜U+3096)とカタカナ(U+30A1〜U+30F6)のコードポイントの差。
+// ひらがなをカタカナへ寄せることで、ひらがな/カタカナの表記ゆれを吸収する
+// (半角カタカナはNFKC正規化で全角カタカナに統一されるため、カタカナ側に寄せたほうが変換が少なく済む)
+const HIRAGANA_TO_KATAKANA_CODE_POINT_OFFSET = 0x60;
+
+// 文字列中のひらがなをすべてカタカナへ変換する。ひらがな以外の文字はそのまま返す
+function hiraganaToKatakana(text: string): string {
+  let result = '';
+  for (const char of text) {
+    const codePoint = char.codePointAt(0);
+    if (codePoint !== undefined && codePoint >= 0x3041 && codePoint <= 0x3096) {
+      result += String.fromCodePoint(codePoint + HIRAGANA_TO_KATAKANA_CODE_POINT_OFFSET);
+    } else {
+      result += char;
+    }
+  }
+  return result;
+}
+
+// 検索比較用に正規化した文字列と、その各文字が元の文字列上のどの範囲([start, end))に
+// 対応するかを示すマップ
+type NormalizedForSearch = {
+  normalized: string;
+  startMap: number[];
+  endMap: number[];
+};
+
+// 検索クエリ・日記本文の比較前に行う正規化。
+// 1. Unicodeの正規化形式NFKCにより、全角英数字→半角、半角カタカナ→全角カタカナ等の
+//    全角/半角の表記ゆれを吸収する。
+// 2. ひらがなをカタカナへ変換し、ひらがな/カタカナの表記ゆれを吸収する。
+// 大文字/小文字は呼び出し元でtoLowerCase()するため、ここでは扱わない。
+// 抜粋表示(getSearchExcerpt)で「正規化後の文字列上でのマッチ位置」を「元の文字列上の位置」に
+// 復元できるよう、1文字ずつ正規化しながら元の文字列上の範囲(startMap/endMap)を記録する。
+// NFKCは文字によって1文字→複数文字に展開されることがあるため、その場合は展開後の各文字を
+// 同じ元の文字の範囲に対応付ける。逆に「ｶ」+「ﾞ」→「ガ」のような複数文字が正規化によって
+// 1文字に減るケースは、1文字ずつ独立に正規化する本実装では結合されず素通りする
+// (稀なエッジケースであり表記ゆれ対応の主眼ではないため、この程度の割り切りとする)
+function normalizeForSearch(text: string): NormalizedForSearch {
+  let normalized = '';
+  const startMap: number[] = [];
+  const endMap: number[] = [];
+  let originalIndex = 0;
+  for (const char of text) {
+    const normalizedChar = hiraganaToKatakana(char.normalize('NFKC'));
+    const charEnd = originalIndex + char.length;
+    // normalizedChar内の各文字(絵文字等のサロゲートペア文字を含みうる)について、
+    // normalized文字列に加算されるUTF-16コード単位数(c.length)分だけstartMap/endMapに
+    // pushする。1文字=1pushだと、サロゲートペア文字(c.length===2)で
+    // normalizedとstartMap/endMapの長さがズレ、以降のインデックス参照が崩れる
+    for (const c of normalizedChar) {
+      normalized += c;
+      for (let i = 0; i < c.length; i++) {
+        startMap.push(originalIndex);
+        endMap.push(charEnd);
+      }
+    }
+    originalIndex = charEnd;
+  }
+  return { normalized, startMap, endMap };
+}
+
 // 検索キーワードにマッチした日記本文から、マッチ箇所を中心とした抜粋を作る。
 // 改行を挟むと一覧上で見づらくなるため空白に置き換え、前後を切り詰めた場合は省略記号を付ける。
 // (タイトル表示用のgetEntryTitle/splitIntoGraphemesとは異なり、抜粋位置の計算は
@@ -195,21 +257,27 @@ const SEARCH_EXCERPT_CONTEXT_LENGTH = 20;
 // 機能上の実害は無いため、既存のタイトル省略ロジックほど厳密なgrapheme単位分割はしていない)
 function getSearchExcerpt(text: string, query: string): string {
   const normalizedText = text.replace(/\n+/g, ' ');
-  const lowerText = normalizedText.toLowerCase();
-  const lowerQuery = query.toLowerCase();
+  const {
+    normalized: lowerText,
+    startMap,
+    endMap,
+  } = normalizeForSearch(normalizedText.toLowerCase());
+  const lowerQuery = normalizeForSearch(query.toLowerCase()).normalized;
   const matchIndex = lowerText.indexOf(lowerQuery);
 
   // 通常は呼び出し元でマッチ済みのエントリのみ渡されるため到達しないはずだが、
   // 念のためフォールバックとして先頭部分を返す
-  if (matchIndex === -1) {
+  if (matchIndex === -1 || lowerQuery.length === 0) {
     return getEntryTitle(normalizedText);
   }
 
-  const start = Math.max(0, matchIndex - SEARCH_EXCERPT_CONTEXT_LENGTH);
-  const end = Math.min(
-    normalizedText.length,
-    matchIndex + lowerQuery.length + SEARCH_EXCERPT_CONTEXT_LENGTH,
-  );
+  // 正規化後の文字列上でのマッチ位置(matchIndex)を、startMap/endMap経由で
+  // 元の文字列(normalizedText)上のマッチ範囲に変換する
+  const matchStart = startMap[matchIndex] ?? 0;
+  const matchEnd = endMap[matchIndex + lowerQuery.length - 1] ?? normalizedText.length;
+
+  const start = Math.max(0, matchStart - SEARCH_EXCERPT_CONTEXT_LENGTH);
+  const end = Math.min(normalizedText.length, matchEnd + SEARCH_EXCERPT_CONTEXT_LENGTH);
   const excerpt = normalizedText.slice(start, end);
   const prefix = start > 0 ? '…' : '';
   const suffix = end < normalizedText.length ? '…' : '';
@@ -745,7 +813,8 @@ export default function HomeScreen() {
   // 検索キーワードの前後の空白を除いたもの。空文字列の間は「検索していない」状態として扱う
   const trimmedSearchQuery = searchQuery.trim();
 
-  // 検索キーワードに本文が部分一致する(大文字小文字を区別しない)エントリの一覧。
+  // 検索キーワードに本文が部分一致する(大文字小文字、全角/半角、ひらがな/カタカナの
+  // 表記ゆれを区別しない)エントリの一覧。
   // 全文検索エンジンのような大掛かりな仕組みは使わず、既存のentries stateに対する
   // クライアントサイドの単純なフィルタリングで実現する。
   // 新しく書かれたものほど見つけやすいよう、日時の降順(新しい順)に並べ替える
@@ -753,9 +822,11 @@ export default function HomeScreen() {
     if (!trimmedSearchQuery) {
       return [];
     }
-    const lowerQuery = trimmedSearchQuery.toLowerCase();
+    const normalizedQuery = normalizeForSearch(trimmedSearchQuery.toLowerCase()).normalized;
     return entries
-      .filter((entry) => entry.text.toLowerCase().includes(lowerQuery))
+      .filter((entry) =>
+        normalizeForSearch(entry.text.toLowerCase()).normalized.includes(normalizedQuery),
+      )
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [entries, trimmedSearchQuery]);
 

@@ -5016,5 +5016,193 @@ describe('HomeScreen', () => {
         expect(clearButton.props.accessibilityRole).toBe('button');
       });
     });
+
+    describe('全角/半角・ひらがな/カタカナの表記ゆれ吸収(Issue #192)', () => {
+      it('matches a full-width digit query ("１２３") against an entry body containing half-width digits ("123")', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '今日は123円のパンを買った', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await screen.findByText('今日は123円のパンを買った');
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '１２３');
+
+        expect(await screen.findByText(/123/)).toBeTruthy();
+      });
+
+      it('matches a half-width digit query ("123") against an entry body containing full-width digits ("１２３")', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '今日は１２３円のパンを買った', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await screen.findByText('今日は１２３円のパンを買った');
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '123');
+
+        expect(await screen.findByText(/１２３/)).toBeTruthy();
+      });
+
+      it('matches a hiragana query ("らーめん") against an entry body containing katakana ("ラーメン")', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '昼にラーメンを食べた', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await screen.findByText('昼にラーメンを食べた');
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'らーめん');
+
+        expect(await screen.findByText(/ラーメン/)).toBeTruthy();
+      });
+
+      it('matches a katakana query ("ラーメン") against an entry body containing hiragana ("らーめん")', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '昼にらーめんを食べた', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await screen.findByText('昼にらーめんを食べた');
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'ラーメン');
+
+        expect(await screen.findByText(/らーめん/)).toBeTruthy();
+      });
+
+      it('matches a half-width katakana query ("ｺｰﾋｰ") against an entry body containing full-width katakana ("コーヒー")', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '朝はコーヒーを飲んだ', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await screen.findByText('朝はコーヒーを飲んだ');
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'ｺｰﾋｰ');
+
+        expect(await screen.findByText(/コーヒー/)).toBeTruthy();
+      });
+
+      it('still matches regardless of ASCII letter case even when combined with full-width normalization (regression, Issue #81 + #192)', async () => {
+        const now = new Date();
+        const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '今日はCafeでコーヒーを飲んだ', createdAt: isoAt(now, dayWithEntry) },
+            { id: '2', text: '仕事で疲れた一日だった', createdAt: isoAt(now, dayWithoutEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await screen.findByText('今日はCafeでコーヒーを飲んだ');
+
+        // 大文字小文字表記ゆれ(既存機能)と全角/半角表記ゆれ(今回の対応)が両方壊れていないことを、
+        // 全て小文字の半角"cafe"で検索して確認する
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'cafe');
+        expect(await screen.findByText(/Cafe/)).toBeTruthy();
+        expect(screen.queryByText(/仕事で疲れた/)).toBeNull();
+      });
+
+      it('shows no search results (見つかりませんでした) when the normalized query does not match any entry', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '今日は123円のパンを買った', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await screen.findByText('今日は123円のパンを買った');
+
+        // 全角へ正規化しても本文には存在しない数字なので、ヒットしない
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '４５６');
+
+        expect(await screen.findByText('見つかりませんでした')).toBeTruthy();
+      });
+
+      it('excerpts the original (non-normalized) text at the correct position even when the match was found via normalization (Issue #192)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        // マッチ箇所(全角の１２３)の前後にSEARCH_EXCERPT_CONTEXT_LENGTH(20文字)を超える文字を配置し、
+        // 正規化後の文字列上で見つけたマッチ位置を、元の文字列(全角のまま)上の正しい位置へ
+        // 復元できているかを検証する
+        const longEntryText = 'あ'.repeat(25) + '１２３' + 'い'.repeat(25);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([{ id: '1', text: longEntryText, createdAt: isoAt(now, dayWithEntry) }]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        // 半角の"123"で検索するが、抜粋には元の本文にある全角の"１２３"がそのまま現れるはず
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '123');
+
+        const resultText = await screen.findByText(/１２３/);
+        const excerpt = resultText.props.children as string;
+        // マッチ位置(matchStart=25, matchEnd=28)から前後20文字ずつ、両端は省略記号付きで
+        // 切り詰められた、元の文字列上の正しい範囲がそのまま抜粋されていることを厳密に検証する
+        expect(excerpt).toBe(`…${'あ'.repeat(20)}１２３${'い'.repeat(20)}…`);
+      });
+
+      it('excerpts the original text at the correct position even when the body contains surrogate-pair emoji before the match (regression)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        // マッチ箇所('123')より前にサロゲートペア絵文字(UTF-16で2コードユニット)を3つ配置し、
+        // 正規化後の文字列と元の文字列の対応付け(startMap/endMap)が絵文字によってズレないかを検証する
+        const longEntryText = '😀'.repeat(3) + 'あ'.repeat(30) + '123' + 'い'.repeat(30);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([{ id: '1', text: longEntryText, createdAt: isoAt(now, dayWithEntry) }]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '123');
+
+        const resultText = await screen.findByText(/123/);
+        const excerpt = resultText.props.children as string;
+        // 絵文字によるズレが無ければ、マッチ箇所の前後はちょうど20文字ずつになるはず
+        expect(excerpt).toBe(`…${'あ'.repeat(20)}123${'い'.repeat(20)}…`);
+      });
+    });
   });
 });
