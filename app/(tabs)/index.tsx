@@ -8,6 +8,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Dimensions,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
@@ -284,6 +286,60 @@ function getSearchExcerpt(text: string, query: string): string {
   return `${prefix}${excerpt}${suffix}`;
 }
 
+// モーダルの背景オーバーレイ(フェード)・コンテンツ(下端からのスライド)のアニメーション時間(ミリ秒)。
+// 4箇所のモーダル(日付一覧・編集・新規作成・年月ピッカー)すべてで同じ見た目・タイミングになるよう
+// 共通の定数として持つ
+const MODAL_ANIMATION_DURATION_MS = 220;
+
+// コンテンツのスライドイン開始位置(画面外下端)。modalContentの高さは中身の量によって変わるため、
+// 画面全体の高さを開始位置に使うことで、コンテンツの実際の高さによらず必ず画面外からスライドさせる
+const MODAL_SLIDE_DISTANCE = Dimensions.get('window').height;
+
+// 背景オーバーレイのフェードとコンテンツのスライドを分離してアニメーションさせるためのフック。
+// `Modal`自体の`animationType`は'none'にし、呼び出し側でこのフックが返すAnimated.Valueを
+// オーバーレイ/コンテンツそれぞれのstyleに適用する。
+// `isOpen`がtrue→falseになった瞬間に`Modal`の`visible`をfalseにすると退場アニメーションが
+// 再生される前にモーダルが消えてしまうため、実際に`Modal`を描画するかどうかを表す`isMounted`を
+// 別のstateとして持ち、退場アニメーション完了後のコールバックでfalseに反映する
+// (`isOpen`自体の値やその変化タイミングは、呼び出し側の既存の開閉ロジック・破棄確認Alert等に
+// 一切影響しない)
+function useModalSlideTransition(isOpen: boolean) {
+  const [isMounted, setIsMounted] = useState(isOpen);
+  const overlayOpacity = useRef(new Animated.Value(isOpen ? 1 : 0)).current;
+  const contentTranslateY = useRef(new Animated.Value(isOpen ? 0 : MODAL_SLIDE_DISTANCE)).current;
+
+  useEffect(() => {
+    if (isOpen) {
+      // 入場アニメーションを再生する前に描画状態にする(退場時はアニメーション完了後にfalseへ戻す)
+      setIsMounted(true);
+    }
+    // opacity/transformはどちらもuseNativeDriverの対象にでき、UIスレッド側でアニメーションが
+    // 進行するためJSスレッドの混雑(入力処理等)の影響を受けにくくなる
+    const animation = Animated.parallel([
+      Animated.timing(overlayOpacity, {
+        toValue: isOpen ? 1 : 0,
+        duration: MODAL_ANIMATION_DURATION_MS,
+        useNativeDriver: true,
+      }),
+      Animated.timing(contentTranslateY, {
+        toValue: isOpen ? 0 : MODAL_SLIDE_DISTANCE,
+        duration: MODAL_ANIMATION_DURATION_MS,
+        useNativeDriver: true,
+      }),
+    ]);
+    animation.start(({ finished }) => {
+      // 新しいアニメーション開始によって中断された場合はfinished===falseになる。
+      // その場合は何もせず、後から開始した(=最新の)アニメーション側の完了処理に任せる
+      if (finished && !isOpen) {
+        setIsMounted(false);
+      }
+    });
+    return () => animation.stop();
+  }, [isOpen, overlayOpacity, contentTranslateY]);
+
+  return { isMounted, overlayOpacity, contentTranslateY };
+}
+
 export default function HomeScreen() {
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
   // 初回のloadEntries完了までの間だけtrueにする読み込み中フラグ。
@@ -356,6 +412,14 @@ export default function HomeScreen() {
   // (月は上のdisplayedMonthをそのまま参照する)
   const [isMonthPickerVisible, setIsMonthPickerVisible] = useState(false);
   const [pickerYear, setPickerYear] = useState(displayedYear);
+
+  // 4つのモーダル(日付一覧・編集・新規作成・年月ピッカー)それぞれの、背景オーバーレイのフェードと
+  // コンテンツのスライドを分離したアニメーション制御(詳細はuseModalSlideTransitionのコメント参照)
+  const dateModalTransition = useModalSlideTransition(selectedDate !== null);
+  const editModalTransition = useModalSlideTransition(editingEntryId !== null);
+  const newEntryModalTransition = useModalSlideTransition(newEntryDate !== null);
+  const monthPickerTransition = useModalSlideTransition(isMonthPickerVisible);
+
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
   const backgroundColor = useThemeColor({}, 'background');
@@ -1215,8 +1279,8 @@ export default function HomeScreen() {
         </Pressable>
 
         <Modal
-          visible={selectedDate !== null}
-          animationType="slide"
+          visible={dateModalTransition.isMounted}
+          animationType="none"
           transparent
           onRequestClose={handleCloseDateModal}
           statusBarTranslucent
@@ -1225,81 +1289,100 @@ export default function HomeScreen() {
           {/* 背景の半透明オーバーレイをタップした場合はモーダルを閉じる。
               modalContent側は下でonStartShouldSetResponderによりタッチの伝播を止めているため、
               一覧内の項目をタップしても意図せず閉じてしまうことはない */}
-          <Pressable style={styles.modalOverlay} onPress={handleCloseDateModal}>
-            <ThemedView
-              style={[styles.modalContent, { borderColor: iconColor }]}
-              // オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
-              // modalContent内でのタッチ開始をこのViewがレスポンダーとして引き受け、伝播を止める
-              onStartShouldSetResponder={() => true}
+          <Pressable
+            style={styles.modalOverlay}
+            onPress={handleCloseDateModal}
+            testID="modal-overlay-pressable"
+          >
+            {/* 背景の暗さのみをフェードさせる(Animated.timingによるopacity制御)。
+                コンテンツ側はスライドのみでフェードさせないよう、opacityの対象をこの
+                絶対配置レイヤーに限定している */}
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                StyleSheet.absoluteFill,
+                styles.modalOverlayBackground,
+                { opacity: dateModalTransition.overlayOpacity },
+              ]}
+            />
+            <Animated.View
+              style={{ transform: [{ translateY: dateModalTransition.contentTranslateY }] }}
             >
-              <View style={styles.modalHeader}>
-                <ThemedText type="subtitle">
-                  {selectedDate ? formatDateHeading(selectedDate) : ''}
-                </ThemedText>
-                <Pressable onPress={handleCloseDateModal}>
-                  <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
-                    閉じる
+              <ThemedView
+                style={[styles.modalContent, { borderColor: iconColor }]}
+                // オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
+                // modalContent内でのタッチ開始をこのViewがレスポンダーとして引き受け、伝播を止める
+                onStartShouldSetResponder={() => true}
+              >
+                <View style={styles.modalHeader}>
+                  <ThemedText type="subtitle">
+                    {selectedDate ? formatDateHeading(selectedDate) : ''}
                   </ThemedText>
-                </Pressable>
-              </View>
-              {copyToastMessage ? (
-                <SaveToast
-                  message={copyToastMessage}
-                  onHide={handleHideCopyToast}
-                  testID="copy-toast"
-                />
-              ) : null}
-              <FlatList
-                data={selectedDateEntries}
-                keyExtractor={(item) => item.id}
-                // 一覧をスクロールした際にもキーボードを閉じられるようにする
-                keyboardDismissMode="on-drag"
-                renderItem={({ item }) => (
-                  <ThemedView style={[styles.entry, { borderBottomColor: iconColor }]}>
-                    <View style={styles.entryHeader}>
-                      <ThemedText style={styles.entryDate}>
-                        {formatEntryDateTime(item.createdAt)}
-                      </ThemedText>
-                      <View style={styles.entryActions}>
-                        <Pressable
-                          onPress={() => handleCopyEntry(item)}
-                          hitSlop={8}
-                          accessibilityRole="button"
-                          accessibilityLabel="日記本文をコピー"
-                        >
-                          <ThemedText style={[styles.entryActionText, { color: tintColor }]}>
-                            コピー
-                          </ThemedText>
-                        </Pressable>
-                        <Pressable onPress={() => handleStartEdit(item)} hitSlop={8}>
-                          <ThemedText style={[styles.entryActionText, { color: tintColor }]}>
-                            編集
-                          </ThemedText>
-                        </Pressable>
-                        <Pressable onPress={() => handleDeletePress(item)} hitSlop={8}>
-                          <ThemedText
-                            style={[
-                              styles.entryActionText,
-                              styles.entryDeleteText,
-                              { color: errorColor },
-                            ]}
+                  <Pressable onPress={handleCloseDateModal}>
+                    <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
+                      閉じる
+                    </ThemedText>
+                  </Pressable>
+                </View>
+                {copyToastMessage ? (
+                  <SaveToast
+                    message={copyToastMessage}
+                    onHide={handleHideCopyToast}
+                    testID="copy-toast"
+                  />
+                ) : null}
+                <FlatList
+                  data={selectedDateEntries}
+                  keyExtractor={(item) => item.id}
+                  // 一覧をスクロールした際にもキーボードを閉じられるようにする
+                  keyboardDismissMode="on-drag"
+                  renderItem={({ item }) => (
+                    <ThemedView style={[styles.entry, { borderBottomColor: iconColor }]}>
+                      <View style={styles.entryHeader}>
+                        <ThemedText style={styles.entryDate}>
+                          {formatEntryDateTime(item.createdAt)}
+                        </ThemedText>
+                        <View style={styles.entryActions}>
+                          <Pressable
+                            onPress={() => handleCopyEntry(item)}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel="日記本文をコピー"
                           >
-                            削除
-                          </ThemedText>
-                        </Pressable>
+                            <ThemedText style={[styles.entryActionText, { color: tintColor }]}>
+                              コピー
+                            </ThemedText>
+                          </Pressable>
+                          <Pressable onPress={() => handleStartEdit(item)} hitSlop={8}>
+                            <ThemedText style={[styles.entryActionText, { color: tintColor }]}>
+                              編集
+                            </ThemedText>
+                          </Pressable>
+                          <Pressable onPress={() => handleDeletePress(item)} hitSlop={8}>
+                            <ThemedText
+                              style={[
+                                styles.entryActionText,
+                                styles.entryDeleteText,
+                                { color: errorColor },
+                              ]}
+                            >
+                              削除
+                            </ThemedText>
+                          </Pressable>
+                        </View>
                       </View>
-                    </View>
-                    <ThemedText>{item.text}</ThemedText>
-                  </ThemedView>
-                )}
-              />
-            </ThemedView>
+                      <ThemedText>{item.text}</ThemedText>
+                    </ThemedView>
+                  )}
+                />
+              </ThemedView>
+            </Animated.View>
           </Pressable>
         </Modal>
 
         <Modal
-          visible={editingEntryId !== null}
-          animationType="slide"
+          visible={editModalTransition.isMounted}
+          animationType="none"
           transparent
           onRequestClose={handleCancelEdit}
           statusBarTranslucent
@@ -1312,72 +1395,88 @@ export default function HomeScreen() {
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           >
             {/* 背景の半透明オーバーレイをタップした場合はモーダルを閉じる(一覧モーダルと同じパターン) */}
-            <Pressable style={styles.modalOverlay} onPress={handleCancelEdit}>
-              <ThemedView
-                style={[styles.modalContent, { borderColor: iconColor }]}
-                // オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
-                // modalContent内でのタッチ開始をこのViewがレスポンダーとして引き受け、伝播を止める
-                onStartShouldSetResponder={() => true}
+            <Pressable
+              style={styles.modalOverlay}
+              onPress={handleCancelEdit}
+              testID="modal-overlay-pressable"
+            >
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  StyleSheet.absoluteFill,
+                  styles.modalOverlayBackground,
+                  { opacity: editModalTransition.overlayOpacity },
+                ]}
+              />
+              <Animated.View
+                style={{ transform: [{ translateY: editModalTransition.contentTranslateY }] }}
               >
-                <View style={styles.modalHeader}>
-                  <ThemedText type="subtitle">日記を編集</ThemedText>
-                  <Pressable onPress={handleCancelEdit}>
-                    <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
-                      閉じる
+                <ThemedView
+                  style={[styles.modalContent, { borderColor: iconColor }]}
+                  // オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
+                  // modalContent内でのタッチ開始をこのViewがレスポンダーとして引き受け、伝播を止める
+                  onStartShouldSetResponder={() => true}
+                >
+                  <View style={styles.modalHeader}>
+                    <ThemedText type="subtitle">日記を編集</ThemedText>
+                    <Pressable onPress={handleCancelEdit}>
+                      <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
+                        閉じる
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                  <TextInput
+                    style={[styles.input, { color: textColor, borderColor: tintColor }]}
+                    value={editDraft}
+                    onChangeText={handleChangeEditDraft}
+                    multiline
+                    // draft用TextInputと同様、スクリーンリーダー向けに明示的なラベルを付ける
+                    accessibilityLabel="日記本文"
+                    // draft用TextInputと同様の理由でmaxLength propはあえて指定しない
+                  />
+                  <View style={styles.composerFooter}>
+                    <ThemedText
+                      style={[
+                        styles.charCount,
+                        editDraftGraphemeCount >= BODY_MAX_LENGTH
+                          ? { color: errorColor }
+                          : { color: iconColor },
+                      ]}
+                    >
+                      {editDraftGraphemeCount}/{BODY_MAX_LENGTH}
                     </ThemedText>
-                  </Pressable>
-                </View>
-                <TextInput
-                  style={[styles.input, { color: textColor, borderColor: tintColor }]}
-                  value={editDraft}
-                  onChangeText={handleChangeEditDraft}
-                  multiline
-                  // draft用TextInputと同様、スクリーンリーダー向けに明示的なラベルを付ける
-                  accessibilityLabel="日記本文"
-                  // draft用TextInputと同様の理由でmaxLength propはあえて指定しない
-                />
-                <View style={styles.composerFooter}>
-                  <ThemedText
-                    style={[
-                      styles.charCount,
-                      editDraftGraphemeCount >= BODY_MAX_LENGTH
-                        ? { color: errorColor }
-                        : { color: iconColor },
-                    ]}
-                  >
-                    {editDraftGraphemeCount}/{BODY_MAX_LENGTH}
-                  </ThemedText>
-                  <Pressable
-                    style={[
-                      styles.saveButton,
-                      { backgroundColor: tintColor },
-                      // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
-                      { opacity: !editDraft.trim() || isSavingEdit ? 0.5 : 1 },
-                    ]}
-                    onPress={handleSaveEdit}
-                    disabled={!editDraft.trim() || isSavingEdit}
-                    accessibilityRole="button"
-                    accessibilityLabel="保存"
-                    accessibilityState={{ disabled: !editDraft.trim() || isSavingEdit }}
-                  >
-                    <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
-                      保存
+                    <Pressable
+                      style={[
+                        styles.saveButton,
+                        { backgroundColor: tintColor },
+                        // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
+                        { opacity: !editDraft.trim() || isSavingEdit ? 0.5 : 1 },
+                      ]}
+                      onPress={handleSaveEdit}
+                      disabled={!editDraft.trim() || isSavingEdit}
+                      accessibilityRole="button"
+                      accessibilityLabel="保存"
+                      accessibilityState={{ disabled: !editDraft.trim() || isSavingEdit }}
+                    >
+                      <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
+                        保存
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                  {editError ? (
+                    <ThemedText style={[styles.errorText, { color: errorColor }]}>
+                      {editError}
                     </ThemedText>
-                  </Pressable>
-                </View>
-                {editError ? (
-                  <ThemedText style={[styles.errorText, { color: errorColor }]}>
-                    {editError}
-                  </ThemedText>
-                ) : null}
-              </ThemedView>
+                  ) : null}
+                </ThemedView>
+              </Animated.View>
             </Pressable>
           </KeyboardAvoidingView>
         </Modal>
 
         <Modal
-          visible={newEntryDate !== null}
-          animationType="slide"
+          visible={newEntryModalTransition.isMounted}
+          animationType="none"
           transparent
           onRequestClose={handleCancelNewEntry}
           statusBarTranslucent
@@ -1390,7 +1489,116 @@ export default function HomeScreen() {
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           >
             {/* 背景の半透明オーバーレイをタップした場合はモーダルを閉じる(他のモーダルと同じパターン) */}
-            <Pressable style={styles.modalOverlay} onPress={handleCancelNewEntry}>
+            <Pressable
+              style={styles.modalOverlay}
+              onPress={handleCancelNewEntry}
+              testID="modal-overlay-pressable"
+            >
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  StyleSheet.absoluteFill,
+                  styles.modalOverlayBackground,
+                  { opacity: newEntryModalTransition.overlayOpacity },
+                ]}
+              />
+              <Animated.View
+                style={{
+                  transform: [{ translateY: newEntryModalTransition.contentTranslateY }],
+                }}
+              >
+                <ThemedView
+                  style={[styles.modalContent, { borderColor: iconColor }]}
+                  // オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
+                  // modalContent内でのタッチ開始をこのViewがレスポンダーとして引き受け、伝播を止める
+                  onStartShouldSetResponder={() => true}
+                >
+                  <View style={styles.modalHeader}>
+                    <ThemedText type="subtitle">
+                      {newEntryDate ? formatDateHeading(newEntryDate) : ''}の日記を書く
+                    </ThemedText>
+                    <Pressable onPress={handleCancelNewEntry}>
+                      <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
+                        閉じる
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                  <TextInput
+                    style={[styles.input, { color: textColor, borderColor: tintColor }]}
+                    placeholder="その日の出来事や気持ちを書いてみましょう"
+                    placeholderTextColor={iconColor}
+                    value={newEntryDraft}
+                    onChangeText={handleChangeNewEntryDraft}
+                    multiline
+                    // draft用TextInputと同様、スクリーンリーダー向けに明示的なラベルを付ける
+                    accessibilityLabel="日記本文"
+                    // draft用TextInputと同様の理由でmaxLength propはあえて指定しない
+                  />
+                  <View style={styles.composerFooter}>
+                    <ThemedText
+                      style={[
+                        styles.charCount,
+                        newEntryDraftGraphemeCount >= BODY_MAX_LENGTH
+                          ? { color: errorColor }
+                          : { color: iconColor },
+                      ]}
+                    >
+                      {newEntryDraftGraphemeCount}/{BODY_MAX_LENGTH}
+                    </ThemedText>
+                    <Pressable
+                      style={[
+                        styles.saveButton,
+                        { backgroundColor: tintColor },
+                        // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
+                        { opacity: !newEntryDraft.trim() || isSavingNewEntry ? 0.5 : 1 },
+                      ]}
+                      onPress={handleSaveNewEntry}
+                      disabled={!newEntryDraft.trim() || isSavingNewEntry}
+                      accessibilityRole="button"
+                      accessibilityLabel="保存"
+                      accessibilityState={{ disabled: !newEntryDraft.trim() || isSavingNewEntry }}
+                    >
+                      <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
+                        保存
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                  {newEntryError ? (
+                    <ThemedText style={[styles.errorText, { color: errorColor }]}>
+                      {newEntryError}
+                    </ThemedText>
+                  ) : null}
+                </ThemedView>
+              </Animated.View>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        <Modal
+          visible={monthPickerTransition.isMounted}
+          animationType="none"
+          transparent
+          onRequestClose={handleCloseMonthPicker}
+          statusBarTranslucent
+          navigationBarTranslucent
+        >
+          {/* 背景の半透明オーバーレイをタップした場合はモーダルを閉じる(他のモーダルと同じパターン) */}
+          <Pressable
+            style={styles.modalOverlay}
+            onPress={handleCloseMonthPicker}
+            testID="modal-overlay-pressable"
+          >
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                StyleSheet.absoluteFill,
+                styles.modalOverlayBackground,
+                { opacity: monthPickerTransition.overlayOpacity },
+              ]}
+            />
+            <Animated.View
+              style={{ transform: [{ translateY: monthPickerTransition.contentTranslateY }] }}
+            >
               <ThemedView
                 style={[styles.modalContent, { borderColor: iconColor }]}
                 // オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
@@ -1398,135 +1606,66 @@ export default function HomeScreen() {
                 onStartShouldSetResponder={() => true}
               >
                 <View style={styles.modalHeader}>
-                  <ThemedText type="subtitle">
-                    {newEntryDate ? formatDateHeading(newEntryDate) : ''}の日記を書く
-                  </ThemedText>
-                  <Pressable onPress={handleCancelNewEntry}>
+                  <ThemedText type="subtitle">年月を選択</ThemedText>
+                  <Pressable onPress={handleCloseMonthPicker}>
                     <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
                       閉じる
                     </ThemedText>
                   </Pressable>
                 </View>
-                <TextInput
-                  style={[styles.input, { color: textColor, borderColor: tintColor }]}
-                  placeholder="その日の出来事や気持ちを書いてみましょう"
-                  placeholderTextColor={iconColor}
-                  value={newEntryDraft}
-                  onChangeText={handleChangeNewEntryDraft}
-                  multiline
-                  // draft用TextInputと同様、スクリーンリーダー向けに明示的なラベルを付ける
-                  accessibilityLabel="日記本文"
-                  // draft用TextInputと同様の理由でmaxLength propはあえて指定しない
-                />
-                <View style={styles.composerFooter}>
-                  <ThemedText
-                    style={[
-                      styles.charCount,
-                      newEntryDraftGraphemeCount >= BODY_MAX_LENGTH
-                        ? { color: errorColor }
-                        : { color: iconColor },
-                    ]}
-                  >
-                    {newEntryDraftGraphemeCount}/{BODY_MAX_LENGTH}
-                  </ThemedText>
+                <View style={styles.yearStepperRow}>
                   <Pressable
-                    style={[
-                      styles.saveButton,
-                      { backgroundColor: tintColor },
-                      // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
-                      { opacity: !newEntryDraft.trim() || isSavingNewEntry ? 0.5 : 1 },
-                    ]}
-                    onPress={handleSaveNewEntry}
-                    disabled={!newEntryDraft.trim() || isSavingNewEntry}
+                    onPress={() => handlePickerYearStep(-1)}
+                    hitSlop={8}
                     accessibilityRole="button"
-                    accessibilityLabel="保存"
-                    accessibilityState={{ disabled: !newEntryDraft.trim() || isSavingNewEntry }}
+                    accessibilityLabel="前の年"
                   >
-                    <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
-                      保存
+                    <ThemedText style={[styles.yearStepperArrow, { color: tintColor }]}>
+                      ‹
+                    </ThemedText>
+                  </Pressable>
+                  <ThemedText type="subtitle">{pickerYear}年</ThemedText>
+                  <Pressable
+                    onPress={() => handlePickerYearStep(1)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="次の年"
+                  >
+                    <ThemedText style={[styles.yearStepperArrow, { color: tintColor }]}>
+                      ›
                     </ThemedText>
                   </Pressable>
                 </View>
-                {newEntryError ? (
-                  <ThemedText style={[styles.errorText, { color: errorColor }]}>
-                    {newEntryError}
-                  </ThemedText>
-                ) : null}
-              </ThemedView>
-            </Pressable>
-          </KeyboardAvoidingView>
-        </Modal>
-
-        <Modal
-          visible={isMonthPickerVisible}
-          animationType="slide"
-          transparent
-          onRequestClose={handleCloseMonthPicker}
-          statusBarTranslucent
-          navigationBarTranslucent
-        >
-          {/* 背景の半透明オーバーレイをタップした場合はモーダルを閉じる(他のモーダルと同じパターン) */}
-          <Pressable style={styles.modalOverlay} onPress={handleCloseMonthPicker}>
-            <ThemedView
-              style={[styles.modalContent, { borderColor: iconColor }]}
-              // オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
-              // modalContent内でのタッチ開始をこのViewがレスポンダーとして引き受け、伝播を止める
-              onStartShouldSetResponder={() => true}
-            >
-              <View style={styles.modalHeader}>
-                <ThemedText type="subtitle">年月を選択</ThemedText>
-                <Pressable onPress={handleCloseMonthPicker}>
-                  <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
-                    閉じる
-                  </ThemedText>
-                </Pressable>
-              </View>
-              <View style={styles.yearStepperRow}>
-                <Pressable
-                  onPress={() => handlePickerYearStep(-1)}
-                  hitSlop={8}
-                  accessibilityRole="button"
-                  accessibilityLabel="前の年"
-                >
-                  <ThemedText style={[styles.yearStepperArrow, { color: tintColor }]}>‹</ThemedText>
-                </Pressable>
-                <ThemedText type="subtitle">{pickerYear}年</ThemedText>
-                <Pressable
-                  onPress={() => handlePickerYearStep(1)}
-                  hitSlop={8}
-                  accessibilityRole="button"
-                  accessibilityLabel="次の年"
-                >
-                  <ThemedText style={[styles.yearStepperArrow, { color: tintColor }]}>›</ThemedText>
-                </Pressable>
-              </View>
-              <View style={styles.monthGrid}>
-                {JA_MONTH_NAMES.map((monthName, index) => {
-                  const month = index + 1;
-                  const isSelected = pickerYear === displayedYear && month === displayedMonth;
-                  return (
-                    <Pressable
-                      key={monthName}
-                      style={[
-                        styles.monthGridButton,
-                        { borderColor: iconColor },
-                        isSelected ? { backgroundColor: tintColor, borderColor: tintColor } : null,
-                      ]}
-                      onPress={() => handleSelectMonth(month)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`${pickerYear}年${monthName}へ移動`}
-                      accessibilityState={{ selected: isSelected }}
-                    >
-                      <ThemedText
-                        style={isSelected ? { color: backgroundColor } : { color: textColor }}
+                <View style={styles.monthGrid}>
+                  {JA_MONTH_NAMES.map((monthName, index) => {
+                    const month = index + 1;
+                    const isSelected = pickerYear === displayedYear && month === displayedMonth;
+                    return (
+                      <Pressable
+                        key={monthName}
+                        style={[
+                          styles.monthGridButton,
+                          { borderColor: iconColor },
+                          isSelected
+                            ? { backgroundColor: tintColor, borderColor: tintColor }
+                            : null,
+                        ]}
+                        onPress={() => handleSelectMonth(month)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${pickerYear}年${monthName}へ移動`}
+                        accessibilityState={{ selected: isSelected }}
                       >
-                        {monthName}
-                      </ThemedText>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </ThemedView>
+                        <ThemedText
+                          style={isSelected ? { color: backgroundColor } : { color: textColor }}
+                        >
+                          {monthName}
+                        </ThemedText>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </ThemedView>
+            </Animated.View>
           </Pressable>
         </Modal>
       </TabScreenContainer>
@@ -1714,6 +1853,10 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
+  },
+  // 背景の暗さのみを別レイヤーとして持つことで、Animatedによるopacityのフェードを
+  // コンテンツ側のスライドから独立させる(詳細はuseModalSlideTransitionのコメント参照)
+  modalOverlayBackground: {
     backgroundColor: 'rgba(0, 0, 0, 0.4)',
   },
   modalContent: {

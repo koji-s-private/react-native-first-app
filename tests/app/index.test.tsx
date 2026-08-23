@@ -303,16 +303,14 @@ function flattenTexts(node: unknown, acc: string[] = []): string[] {
 // コールバック引数にも同じ`any`を明示注釈し`noImplicitAny`を回避する(実行時の挙動には影響しない)。
 type TestNode = any;
 
-// 日付一覧モーダルの背景オーバーレイPressableを特定するヘルパー(Issue #84)。実装側は
-// `modalOverlay`スタイルをエクスポートしていないため、同じ背景色を手がかりに探す。
-const MODAL_OVERLAY_BACKGROUND_COLOR = 'rgba(0, 0, 0, 0.4)';
+// 各モーダルの背景オーバーレイPressableを特定するヘルパー(Issue #84)。実装側は
+// `testID="modal-overlay-pressable"`を目印として付けている(Issue #217でオーバーレイの
+// フェードとコンテンツのスライドを分離した際、背景色は別レイヤー(Animated.View)へ
+// 移動したため、以前のような背景色ベースの特定は使えなくなった)。
 function getModalOverlayPressable(modal: TestNode): TestNode {
-  const overlay = modal
-    .findAll((node: TestNode) => typeof node.props.onPress === 'function')
-    .find(
-      (node: TestNode) =>
-        StyleSheet.flatten(node.props.style).backgroundColor === MODAL_OVERLAY_BACKGROUND_COLOR,
-    );
+  const overlay = modal.findAll(
+    (node: TestNode) => node.props.testID === 'modal-overlay-pressable',
+  )[0];
   if (!overlay) {
     throw new Error('modal overlay (Pressable) not found');
   }
