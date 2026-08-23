@@ -22,6 +22,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import HomeScreen from '@/app/(tabs)/index';
 import { TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID } from '@/components/tab-screen-container';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { decryptText, encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
 import { buildDiaryEntryKey, type DiaryEntry } from '@/utils/diary-storage';
@@ -1899,13 +1900,22 @@ describe('HomeScreen', () => {
 
       // react-native-calendarsのヘッダーは`importantForAccessibility="no-hide-descendants"`で
       // 内部テキストをアクセシビリティツリーから隠している(画面上には表示されている)ため、
-      // `includeHiddenElements`を指定して検索する。年月ジャンプ用ピッカーを開ける
-      // ボタンであることを示す末尾の"▾"込みの表記になる。
+      // `includeHiddenElements`を指定して検索する
       expect(
-        await screen.findByText(`${now.getFullYear()}年${now.getMonth() + 1}月 ▾`, {
+        await screen.findByText(`${now.getFullYear()}年${now.getMonth() + 1}月`, {
           includeHiddenElements: true,
         }),
       ).toBeTruthy();
+    });
+
+    it('shows a chevron-down IconSymbol next to the calendar header heading, indicating it opens the month picker (Issue #218)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const headerChevrons = screen
+        .UNSAFE_getAllByType(IconSymbol)
+        .filter((node) => node.props.name === 'chevron.down');
+      expect(headerChevrons).toHaveLength(1);
     });
 
     it('shows a weekday header row (日 月 火 水 木 金 土)', async () => {
@@ -2421,7 +2431,7 @@ describe('HomeScreen', () => {
     // 内部テキストをアクセシビリティツリーから隠している(画面上には表示されている)ため、
     // `includeHiddenElements`を指定して検索する(既存の「カレンダー表示とモーダル」テストと同様)
     function findCalendarHeaderText(year: number, month: number) {
-      return screen.findByText(`${year}年${month}月 ▾`, { includeHiddenElements: true });
+      return screen.findByText(`${year}年${month}月`, { includeHiddenElements: true });
     }
 
     // モーダルは[日付一覧, 編集, 新規作成, 年月ピッカー]の順でJSXに並んでいる
@@ -2461,7 +2471,7 @@ describe('HomeScreen', () => {
       expect(headerButton.props.accessibilityRole).toBe('button');
     });
 
-    it('increments/decrements the picker year via the "›"/"‹" year stepper buttons, without jumping the calendar until a month button is pressed (正常系)', async () => {
+    it('increments/decrements the picker year via the chevron-left/chevron-right year stepper buttons, without jumping the calendar until a month button is pressed (正常系)', async () => {
       const now = new Date();
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
@@ -2477,6 +2487,22 @@ describe('HomeScreen', () => {
 
       // 年ステッパーの操作だけではカレンダー本体の表示月はまだジャンプしていない
       expect(await findCalendarHeaderText(now.getFullYear(), now.getMonth() + 1)).toBeTruthy();
+    });
+
+    it('renders the year stepper buttons as chevron-left/chevron-right IconSymbols, not text glyphs (Issue #218)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+
+      const prevYearButton = screen.getByLabelText('前の年');
+      const nextYearButton = screen.getByLabelText('次の年');
+      const [prevYearIcon] = prevYearButton.findAllByType(IconSymbol);
+      const [nextYearIcon] = nextYearButton.findAllByType(IconSymbol);
+
+      expect(prevYearIcon.props.name).toBe('chevron.left');
+      expect(nextYearIcon.props.name).toBe('chevron.right');
     });
 
     it('jumps the calendar to the selected year/month and closes the modal when a month button is tapped (正常系)', async () => {
