@@ -95,7 +95,7 @@ jest.mock('expo-crypto', () => {
 // expo-secure-storeはjest-expoのオートモックだと`getItemAsync`が常に`undefined`を返し状態を
 // 永続化しないため、保存→再読み込みの暗号化ラウンドトリップを検証できるようインメモリで
 // キーと値を保持する独自モックに差し替える。
-// expo-hapticsも、保存成功時のハプティックフィードバック(Issue #55)を呼び出し引数まで
+// expo-hapticsも、保存成功時のハプティックフィードバックを呼び出し引数まで
 // 明示的にアサートできるよう、jest-expoのオートモックではなく独自モックに差し替える。
 jest.mock('expo-haptics', () => ({
   notificationAsync: jest.fn(() => Promise.resolve()),
@@ -178,18 +178,15 @@ const { __triggerRefocus: triggerRefocus } = require('expo-router') as {
 const STORAGE_KEY = 'diary-entries';
 const ENCRYPTED_PREFIX = 'encrypted:v1:';
 const INPUT_PLACEHOLDER = '今日の出来事や気持ちを書いてみましょう';
-// 日記本文のキーワード検索用の入力欄(composerとは別の検索専用入力欄、Issue #81)
+// 日記本文のキーワード検索用の入力欄
 const SEARCH_INPUT_PLACEHOLDER = '日記を検索';
 const CLOSE_BUTTON_TEXT = '閉じる';
 // 日記が0件のときにカレンダーの上に表示される案内メッセージ
 const EMPTY_STATE_TEXT = 'まだ日記がありません。最初の日記を書いてみましょう。';
 const KEYBOARD_AVOIDING_VIEW_TEST_ID = 'keyboard-avoiding-view';
 
-// Issue #34で保存ボタンにaccessibilityRole="button"を付与したことで、
-// `queryAllByRole('button')`は常に保存ボタンを含むようになった。カレンダーの日付セル
-// の個数だけを数えたいテストでは、保存ボタンを除外したこのヘルパーを使う。
-// Issue #181により、日記の無い日でも未来日でなければセル自体はタップ可能(ボタン)になったため、
-// このヘルパーは「タップ可能なセル(日記の有無を問わない)」を返す点に注意する。
+// `queryAllByRole('button')`は常に保存ボタンを含む。
+// カレンダーの日付セルの個数だけを数えたいテストでは、保存ボタンを除外したこのヘルパーを使う。
 function queryCalendarDayButtons() {
   return screen
     .queryAllByRole('button')
@@ -197,7 +194,7 @@ function queryCalendarDayButtons() {
 }
 
 // queryCalendarDayButtonsのうち、実際に日記が存在する日(accessibilityLabelが「日記あり」で
-// 終わるセル)だけに絞り込むヘルパー(Issue #181)。日記の無い日も新規作成用にタップ可能になった
+// 終わるセル)だけに絞り込むヘルパー。日記の無い日も新規作成用にタップ可能になった
 // ことで、旧来「タップ可能=日記あり」だった前提が崩れたテストで、この用途に置き換えて使う。
 function queryCalendarDayButtonsWithEntry() {
   return queryCalendarDayButtons().filter((button) =>
@@ -206,7 +203,7 @@ function queryCalendarDayButtonsWithEntry() {
 }
 
 // AsyncStorageに実際に永続化された値(暗号化済み文字列)を、テストで検証しやすいよう
-// 復号してJSONとしてパースするヘルパー。エントリ単位のキー方式(Issue #83)では
+// 復号してJSONとしてパースするヘルパー。エントリ単位のキー方式では
 // 1つの暗号化文字列は常に1エントリ分のオブジェクトを表す。`getOrCreateEncryptionKey`は
 // SecureStoreモックに永続化された鍵をそのまま返すため、画面側が使った鍵と同じ鍵が得られる。
 async function decryptPersistedEntry(encryptedValue: string): Promise<unknown> {
@@ -303,16 +300,12 @@ function flattenTexts(node: unknown, acc: string[] = []): string[] {
 // コールバック引数にも同じ`any`を明示注釈し`noImplicitAny`を回避する(実行時の挙動には影響しない)。
 type TestNode = any;
 
-// 日付一覧モーダルの背景オーバーレイPressableを特定するヘルパー(Issue #84)。実装側は
-// `modalOverlay`スタイルをエクスポートしていないため、同じ背景色を手がかりに探す。
-const MODAL_OVERLAY_BACKGROUND_COLOR = 'rgba(0, 0, 0, 0.4)';
+// 各モーダルの背景オーバーレイPressableを特定するヘルパー。実装側は
+// `testID="modal-overlay-pressable"`を目印として付けている。
 function getModalOverlayPressable(modal: TestNode): TestNode {
-  const overlay = modal
-    .findAll((node: TestNode) => typeof node.props.onPress === 'function')
-    .find(
-      (node: TestNode) =>
-        StyleSheet.flatten(node.props.style).backgroundColor === MODAL_OVERLAY_BACKGROUND_COLOR,
-    );
+  const overlay = modal.findAll(
+    (node: TestNode) => node.props.testID === 'modal-overlay-pressable',
+  )[0];
   if (!overlay) {
     throw new Error('modal overlay (Pressable) not found');
   }
@@ -336,7 +329,7 @@ describe('HomeScreen', () => {
   // 自動アンマウント(モジュール読み込み時に最上位で登録される`afterEach`)はマイクロタスク1回分しか
   // 待たずにunmountするため、CPU負荷が高い環境ではこのタイマーがunmount前後どちらで発火するか
   // タイミング競合し、act()外でのstate更新警告(`An update to VirtualizedList ... was not wrapped in
-  // act(...)`)を引き起こすことがある(Issue #196)。Jestはネストした`describe`内の`afterEach`を
+  // act(...)`)を引き起こすことがある。Jestはネストした`describe`内の`afterEach`を
   // 外側(モジュールレベル)より先に実行するため、ここで実際のマウント状態のまま50msより長く待つことで、
   // 予約されていたタイマーをunmountされる前に確実にact()内で発火させ、警告の発生を防ぐ。
   afterEach(async () => {
@@ -354,9 +347,6 @@ describe('HomeScreen', () => {
     await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
   });
 
-  // Issue #125: セーフエリア対応は共通コンポーネント`TabScreenContainer`に一本化されたため、
-  // タイトル自身の`marginTop`は常にベース余白(8)固定になり、インセットの加算は
-  // `TabScreenContainer`の外側ラッパーの`paddingTop`側で行われる。
   it('keeps the title margin at the fixed base value regardless of the safe area top inset (spacing is handled by TabScreenContainer)', async () => {
     render(<HomeScreen />);
     await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
@@ -432,7 +422,7 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('背景タップでキーボードを閉じる(Issue #50)', () => {
+  describe('背景タップでキーボードを閉じる', () => {
     // `Pressable`はReact.memoでラップされているため、react-test-rendererの内部実装上
     // メモ化された`type`が内側のアンラップ済み関数になり`screen.UNSAFE_getAllByType(Pressable)`
     // では一致しない。そのため型ではなく`accessible={false}` + `onPress`のprops組み合わせを
@@ -617,8 +607,6 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText('保存'));
 
       expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-      // Issue #181以降、日記の無い日のセルも(未来日でなければ)タップ可能になったため、
-      // 「日記が実際に存在するセル」のみを数えるヘルパーで検証する
       expect(queryCalendarDayButtonsWithEntry()).toHaveLength(0);
     });
 
@@ -708,7 +696,7 @@ describe('HomeScreen', () => {
       expect(StyleSheet.flatten(counterAtLimit.props.style).color).toBe(Colors.light.error);
     });
 
-    describe('絵文字(サロゲートペア・ZWJ結合絵文字)を含む本文の文字数カウント・切り詰め(Issue #139)', () => {
+    describe('絵文字(サロゲートペア・ZWJ結合絵文字)を含む本文の文字数カウント・切り詰め', () => {
       // ZWJ(Zero Width Joiner)で複数の絵文字コードポイントを結合した家族の絵文字。
       // 見た目上は1文字(1書記素クラスタ)だが、'👨'+ZWJ+'👩'+ZWJ+'👧'+ZWJ+'👦'を構成する
       // サロゲートペア4つ(各2ユニット)とZWJ3つ(各1ユニット)で、UTF-16コードユニットは11個ある
@@ -796,7 +784,7 @@ describe('HomeScreen', () => {
       expect(saveButton?.props.accessibilityState?.disabled).toBe(false);
     });
 
-    // Issue #34: スクリーンリーダー利用者にも入力欄・保存ボタンの役割が伝わるよう、
+    // スクリーンリーダー利用者にも入力欄・保存ボタンの役割が伝わるよう、
     // accessibilityLabel/accessibilityRole/accessibilityStateを検証する
     it('sets accessibilityLabel="日記本文" on the composer TextInput, and accessibilityRole="button"/accessibilityLabel="保存" on the save button so screen readers can identify each control', async () => {
       render(<HomeScreen />);
@@ -817,7 +805,7 @@ describe('HomeScreen', () => {
       expect(saveButton.props.accessibilityState?.disabled).toBe(false);
     });
 
-    it('renders the save button at reduced opacity (0.5) while the input is empty, and at full opacity (1) once text is entered, so the disabled state is also visible (正常系/境界値, Issue #42)', async () => {
+    it('renders the save button at reduced opacity (0.5) while the input is empty, and at full opacity (1) once text is entered, so the disabled state is also visible', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
@@ -831,7 +819,7 @@ describe('HomeScreen', () => {
       expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(0.5);
     });
 
-    it('keeps the save button at reduced opacity (0.5) when the input contains only whitespace, matching the disabled condition (異常系, Issue #42)', async () => {
+    it('keeps the save button at reduced opacity (0.5) when the input contains only whitespace, matching the disabled condition', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
@@ -841,7 +829,7 @@ describe('HomeScreen', () => {
       expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(0.5);
     });
 
-    it('keeps the save button at reduced opacity (0.5) while a save is in flight (isSaving), even once the user has typed a new non-empty draft, and restores full opacity once the save completes (境界値: isSaving overrides draft content in the opacity condition, Issue #42)', async () => {
+    it('keeps the save button at reduced opacity (0.5) while a save is in flight (isSaving), even once the user has typed a new non-empty draft, and restores full opacity once the save completes (境界値: isSaving overrides draft content in the opacity condition)', async () => {
       let resolveSetItem: () => void = () => {};
       jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
         () =>
@@ -958,7 +946,7 @@ describe('HomeScreen', () => {
       expect(await screen.findByText('再起動後も読める日記')).toBeTruthy();
     });
 
-    it('reloads from AsyncStorage when the screen regains focus, so data deleted elsewhere (e.g. from the settings tab) is not resurrected by a later save (regression for Issue #103 tab state bug)', async () => {
+    it('reloads from AsyncStorage when the screen regains focus, so data deleted elsewhere (e.g. from the settings tab) is not resurrected by a later save', async () => {
       const now = new Date();
       const key = await getOrCreateEncryptionKey();
       const storedEntries = [
@@ -1036,7 +1024,6 @@ describe('HomeScreen', () => {
 
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(STORAGE_KEY));
       // 壊れたデータは読み捨てられ、空の状態から始まるため、日記が実際に存在するセルは無い
-      // (Issue #181以降、日記の無いセル自体はタップ可能になったため、日記の有無で絞り込むヘルパーを使う)
       expect(queryCalendarDayButtonsWithEntry()).toHaveLength(0);
     });
 
@@ -1071,7 +1058,7 @@ describe('HomeScreen', () => {
 
       const errorMessage = await screen.findByText('保存に失敗しました。もう一度お試しください。');
       expect(errorMessage).toBeTruthy();
-      // エラーメッセージの文字色は、ハードコードではなくテーマ定数化されたColors.light.errorを使う(Issue #58)
+      // エラーメッセージの文字色は、ハードコードではなくテーマ定数化されたColors.light.errorを使う
       expect(StyleSheet.flatten(errorMessage.props.style).color).toBe(Colors.light.error);
 
       // 保存前の状態にロールバックされているため、新しい日記のタイトルはどこにも表示されない
@@ -1126,7 +1113,7 @@ describe('HomeScreen', () => {
       expect(screen.queryByText('保存中の日記')).toBeNull();
     });
 
-    it('keeps the draft empty (does not roll back) when the user typed something while a save was in flight and then deleted it all themselves, and that save later fails (regression for Issue #110)', async () => {
+    it('keeps the draft empty (does not roll back) when the user typed something while a save was in flight and then deleted it all themselves, and that save later fails', async () => {
       // pending中に一度何か入力したあと、ユーザー自身がそれを全部消して空文字列に戻した場合は
       // 「何も入力していない」ケースと区別し、ロールバックでpreviousDraftを復活させてはいけない
       const now = new Date();
@@ -1214,7 +1201,7 @@ describe('HomeScreen', () => {
       expect(screen.queryByText('保存に失敗しました。もう一度お試しください。')).toBeNull();
     });
 
-    it('ignores a second press of the save button while a save is still in flight, preventing a duplicate entry (Issue #70)', async () => {
+    it('ignores a second press of the save button while a save is still in flight, preventing a duplicate entry', async () => {
       // 保存ボタンの連打(タップと同時に発生する複数のonPressイベントを含む)によって
       // 同一内容の日記が重複保存されないことを確認する。AsyncStorage.setItemの解決を
       // 意図的に遅延させ、その完了前に2回目のpressを発火させる
@@ -1306,7 +1293,7 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('下書きの自動保存(Issue #54)', () => {
+  describe('下書きの自動保存', () => {
     // 実装(`app/(tabs)/index.tsx`)の`diary-draft`キー・デバウンス間隔(1000ms)と対応させる
     const DRAFT_STORAGE_KEY = 'diary-draft';
     const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
@@ -1516,7 +1503,7 @@ describe('HomeScreen', () => {
     });
 
     it('does not clear the auto-saved draft key when saving the diary entry fails, so it remains recoverable on next launch', async () => {
-      // 下書きキーのクリア(removeItem)はhandleSave成功時のみ実行される(Issue #54)。
+      // 下書きキーのクリア(removeItem)はhandleSave成功時のみ実行される。
       // 保存失敗時に下書きまで消えると、次回起動時の復元対象も失われてしまうため、この境界を検証する
       await AsyncStorage.setItem(DRAFT_STORAGE_KEY, '保存に失敗する日記');
       jest.clearAllMocks();
@@ -1590,7 +1577,7 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('保存成功時のフィードバック(Issue #55)', () => {
+  describe('保存成功時のフィードバック', () => {
     // 実装はハプティックを`process.env.EXPO_OS === 'ios'`の条件下でのみ発火させるが、
     // `process.env.EXPO_OS`はbabel-preset-expo(jest-expoのデフォルトで'ios'固定)によって
     // ビルド時にインライン化されるため、テスト実行中に書き換えても分岐には反映されない。
@@ -1738,9 +1725,9 @@ describe('HomeScreen', () => {
   });
 
   describe('空状態(日記が0件)の案内メッセージ', () => {
-    // Issue #39: 初回読み込み中はentriesの初期値が空配列であることに起因して空状態メッセージが
+    // 初回読み込み中はentriesの初期値が空配列であることに起因して空状態メッセージが
     // 一瞬誤って表示されてしまわないよう、代わりにローディング表示(ActivityIndicator)を出す。
-    it('shows a loading indicator instead of the empty state message before the async AsyncStorage load resolves (regression for Issue #39: prevents the empty state from flashing)', async () => {
+    it('shows a loading indicator instead of the empty state message before the async AsyncStorage load resolves (prevents the empty state from flashing)', async () => {
       // AsyncStorage.getItemの解決タイミングを呼び出し側から制御できるようにし、
       // 読み込みが完了する前の状態を確実に検証できるようにする
       let resolveGetItem: (value: string | null) => void = () => {};
@@ -1761,7 +1748,7 @@ describe('HomeScreen', () => {
       // カレンダー自体は読み込み中でも常に表示され続ける(曜日ヘッダーの存在で確認する)
       expect(screen.getByText('日', { includeHiddenElements: true })).toBeTruthy();
 
-      // 読み込みを完了させ、テスト終了後にact()の外側でstate更新が起きないようにする(Issue #128)
+      // 読み込みを完了させ、テスト終了後にact()の外側でstate更新が起きないようにする
       await act(async () => {
         resolveGetItem(null);
       });
@@ -1804,10 +1791,10 @@ describe('HomeScreen', () => {
       expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
     });
 
-    // Issue #39: isLoadingは初回読み込み完了時にfalseへ遷移した後は二度とtrueへ戻らない仕様。
+    // isLoadingは初回読み込み完了時にfalseへ遷移した後は二度とtrueへ戻らない仕様。
     // タブへ再フォーカスするたびにloadEntriesは再実行されるが、その都度ローディング表示が
     // ちらつかないことを確認する。
-    it('does not show the loading indicator again on a subsequent focus refetch (regression for Issue #39: isLoading only ever transitions true -> false, never back to true)', async () => {
+    it('does not show the loading indicator again on a subsequent focus refetch (isLoading only ever transitions true -> false, never back to true)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -1831,7 +1818,7 @@ describe('HomeScreen', () => {
       );
 
       // マウント時には日記本文(STORAGE_KEY)に加えて下書き復元用(diary-draft)のgetItemも
-      // 1回呼ばれているため(Issue #54)、再フォーカス後の合計は3回になる
+      // 1回呼ばれているため、再フォーカス後の合計は3回になる
       act(() => {
         (triggerRefocus as () => void)();
       });
@@ -1912,7 +1899,7 @@ describe('HomeScreen', () => {
 
       // react-native-calendarsのヘッダーは`importantForAccessibility="no-hide-descendants"`で
       // 内部テキストをアクセシビリティツリーから隠している(画面上には表示されている)ため、
-      // `includeHiddenElements`を指定して検索する。年月ジャンプ用ピッカー(Issue #76)を開ける
+      // `includeHiddenElements`を指定して検索する。年月ジャンプ用ピッカーを開ける
       // ボタンであることを示す末尾の"▾"込みの表記になる。
       expect(
         await screen.findByText(`${now.getFullYear()}年${now.getMonth() + 1}月 ▾`, {
@@ -1978,7 +1965,7 @@ describe('HomeScreen', () => {
       expect(screen.queryByText(twentyOneChars)).toBeNull();
     });
 
-    it('does not split a surrogate-pair emoji in the middle when truncating (regression: Issue #71)', async () => {
+    it('does not split a surrogate-pair emoji in the middle when truncating', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       // '😀'はサロゲートペア(UTF-16で2コードユニット)の絵文字。単純なUTF-16単位のslice(0, 20)
@@ -1996,7 +1983,7 @@ describe('HomeScreen', () => {
       expect(await screen.findByText(truncated)).toBeTruthy();
     });
 
-    it('does not split a ZWJ-joined family emoji in the middle when truncating (regression: Issue #71)', async () => {
+    it('does not split a ZWJ-joined family emoji in the middle when truncating', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       // ZWJ(Zero Width Joiner)で複数の絵文字コードポイントを結合した家族の絵文字(単一の書記素
@@ -2029,7 +2016,7 @@ describe('HomeScreen', () => {
       expect(screen.queryByText('あ…')).toBeNull();
     });
 
-    it('renders no title for an entry whose text is an empty string after the first line is trimmed, but still treats the day as having an entry (isPressable/statusLabel/accessibilityLabel and tap behavior are based on entriesByDate, not on the trimmed title) since entriesByDate already has an entry for that day (defensive boundary for directly-corrupted/legacy storage data, since the composer itself never saves an empty/whitespace-only entry; Issue #181 regression check)', async () => {
+    it('renders no title for an entry whose text is an empty string after the first line is trimmed, but still treats the day as having an entry (isPressable/statusLabel/accessibilityLabel and tap behavior are based on entriesByDate, not on the trimmed title) since entriesByDate already has an entry for that day (defensive boundary for directly-corrupted/legacy storage data, since the composer itself never saves an empty/whitespace-only entry)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -2057,7 +2044,7 @@ describe('HomeScreen', () => {
       expect(entryListModalAfter.props.visible).toBe(true);
     });
 
-    it('opens the new-entry creation modal (not the entry-list modal) when tapping a day cell that has no diary entries at all (Issue #181)', async () => {
+    it('opens the new-entry creation modal (not the entry-list modal) when tapping a day cell that has no diary entries at all', async () => {
       const now = new Date();
       const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -2069,7 +2056,7 @@ describe('HomeScreen', () => {
       await screen.findByText('日記あり');
 
       // 日記が実際に存在するセルは1つだけ(dayWithEntry分)である
-      // (Issue #181以降、日記の無い日のセルも未来日でなければタップ可能になったため、
+      // (日記の無い日のセルも未来日でなければタップ可能になったため、
       // 全体のボタン数ではなく「日記が実際に存在するセル」のみで絞り込んで確認する)
       expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
 
@@ -2083,7 +2070,7 @@ describe('HomeScreen', () => {
       expect(modals[2].props.visible).toBe(true);
     });
 
-    // Issue #114: スクリーンリーダー(VoiceOver/TalkBack)利用者にも、日付セルの数字だけでなく
+    // スクリーンリーダー(VoiceOver/TalkBack)利用者にも、日付セルの数字だけでなく
     // 「何年何月何日か」と「その日に日記があるかどうか」が伝わるよう、accessibilityLabel/
     // accessibilityStateを検証する
     it('sets an accessibilityLabel with the full date and "日記あり" on a day cell that has a diary entry, and does not mark it as accessibility-disabled', async () => {
@@ -2103,7 +2090,7 @@ describe('HomeScreen', () => {
       expect(dayCell.props.accessibilityState?.disabled).toBe(false);
     });
 
-    it('sets an accessibilityLabel with the full date, "日記なし" and "タップして新規作成" on a day cell without a diary entry that is today or in the past, and does not mark it as accessibility-disabled, since Issue #181 made such cells tappable to create a new entry', async () => {
+    it('sets an accessibilityLabel with the full date, "日記なし" and "タップして新規作成" on a day cell without a diary entry that is today or in the past, and does not mark it as accessibility-disabled, made such cells tappable to create a new entry', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       // 「今日」自体は常に未来日ではないため、日記の無い日として確実に使える
@@ -2121,7 +2108,7 @@ describe('HomeScreen', () => {
       expect(dayCell.props.accessibilityState?.disabled).toBe(false);
     });
 
-    it('sets an accessibilityLabel with the full date and plain "日記なし" (without the "タップして新規作成" suffix) on a future day cell without a diary entry, and marks it as accessibility-disabled, since future dates cannot be used to create a new entry (Issue #181)', async () => {
+    it('sets an accessibilityLabel with the full date and plain "日記なし" (without the "タップして新規作成" suffix) on a future day cell without a diary entry, and marks it as accessibility-disabled, since future dates cannot be used to create a new entry', async () => {
       const now = new Date();
       const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
 
@@ -2133,7 +2120,7 @@ describe('HomeScreen', () => {
       expect(dayCell.props.accessibilityState?.disabled).toBe(true);
     });
 
-    // Issue #114(境界値): showSixWeeksにより前後月の「はみ出し」日付セルも描画される。
+    // showSixWeeksにより前後月の「はみ出し」日付セルも描画される。
     // それらのセルは常に日記が無い(entriesByDateには当月のキーしか存在しない)ため、
     // 実装が`title`のみを見てdisabled判定していることを踏まえ、はみ出しセルでも
     // 正しい年月日のaccessibilityLabelとaccessibilityState.disabled=trueが付くことを確認する
@@ -2157,7 +2144,7 @@ describe('HomeScreen', () => {
       });
     });
 
-    it('does nothing (does not open any modal) when tapping a future day cell, even though it has no diary entries, since future dates are excluded from both the entry-list and the new-entry-creation flow (Issue #181, 異常系: 未来日)', async () => {
+    it('does nothing (does not open any modal) when tapping a future day cell, even though it has no diary entries, since future dates are excluded from both the entry-list and the new-entry-creation flow', async () => {
       const now = new Date();
       const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
 
@@ -2244,7 +2231,7 @@ describe('HomeScreen', () => {
       await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
     });
 
-    describe('背景タップでモーダルを閉じる(Issue #84)', () => {
+    describe('背景タップでモーダルを閉じる', () => {
       it('closes the modal when the semi-transparent background overlay is tapped (正常系)', async () => {
         const now = new Date();
         const { dayWithEntry } = pickTestDays(now);
@@ -2356,12 +2343,12 @@ describe('HomeScreen', () => {
       });
     });
 
-    it('sets statusBarTranslucent and navigationBarTranslucent on the entry-list modal, the edit modal, the new-entry creation modal, and the month picker modal, so they match the edge-to-edge display of the screen behind them (Issue #94, Issue #181)', async () => {
+    it('sets statusBarTranslucent and navigationBarTranslucent on the entry-list modal, the edit modal, the new-entry creation modal, and the month picker modal, so they match the edge-to-edge display of the screen behind them', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      // 日付タップ時の一覧モーダル・編集モーダル・新規作成モーダル(Issue #181)・
-      // 年月ピッカーモーダル(Issue #76)の4つが常にツリーに存在する
+      // 日付タップ時の一覧モーダル・編集モーダル・新規作成モーダル・
+      // 年月ピッカーモーダルの4つが常にツリーに存在する
       // (visibleプロパティで表示/非表示を切り替えているだけで、条件付きレンダリングではないため)
       const modals = screen.UNSAFE_getAllByType(Modal);
       expect(modals).toHaveLength(4);
@@ -2371,7 +2358,7 @@ describe('HomeScreen', () => {
       }
     });
 
-    it('keeps statusBarTranslucent and navigationBarTranslucent set to true on each modal even while it is actually open (visible=true), not just at rest (regression for Issue #94)', async () => {
+    it('keeps statusBarTranslucent and navigationBarTranslucent set to true on each modal even while it is actually open (visible=true), not just at rest', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -2412,7 +2399,7 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('カレンダーの年月ジャンプ用ピッカー(Issue #76)', () => {
+  describe('カレンダーの年月ジャンプ用ピッカー', () => {
     // react-native-calendarsに設定しているロケール(実装側のJA_MONTH_NAMES)と同じ表記。
     // 実装からは直接importできないため、テスト側でも同じ配列を用意する
     const MONTH_NAMES_JA = [
@@ -2437,7 +2424,7 @@ describe('HomeScreen', () => {
       return screen.findByText(`${year}年${month}月 ▾`, { includeHiddenElements: true });
     }
 
-    // モーダルは[日付一覧, 編集, 新規作成(Issue #181), 年月ピッカー]の順でJSXに並んでいる
+    // モーダルは[日付一覧, 編集, 新規作成, 年月ピッカー]の順でJSXに並んでいる
     // (実装側app/(tabs)/index.tsx参照)
     function getMonthPickerModal() {
       return screen.UNSAFE_getAllByType(Modal)[3];
@@ -2637,7 +2624,7 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('カレンダーセルの複数件数バッジ(Issue #72)', () => {
+  describe('カレンダーセルの複数件数バッジ', () => {
     // 同じ日に2件以上の日記がある場合、カレンダーセルの右上に「+N」の件数バッジを表示する。
     // バッジの本体View(styles.entryCountBadge)は`minWidth: 16, height: 16`という
     // 一意な組み合わせのスタイルを持つため、それを目印にView自体を特定するヘルパーを用意する。
@@ -2742,8 +2729,6 @@ describe('HomeScreen', () => {
 
       // 上記の通りバッジは合計1個(dayWithEntry分)のみであるため、
       // dayWithoutEntryのセルにはバッジが表示されていないことも合わせて確認できている。
-      // (タップした際に一覧モーダルが開かず新規作成モーダルが開くことはIssue #181の
-      // 別テストで検証する)
     });
 
     it('renders the badge with tintColor as its background and backgroundColor as its text color, following the same theme-color convention as the today badge (異常系/回帰防止: テーマ色の取り違え防止)', async () => {
@@ -2948,7 +2933,7 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('日記エントリの編集(Issue #33)', () => {
+  describe('日記エントリの編集', () => {
     // 編集モーダルの保存ボタンは、メインの入力欄(composer)の保存ボタンと同じ文言「保存」を使うため、
     // `getByText('保存')`だと2件ヒットしてしまう。JSXの描画順(composerの保存ボタンが先、
     // 編集モーダルの保存ボタンが後)に依存して2件目を編集モーダル側として取得する。
@@ -2958,7 +2943,7 @@ describe('HomeScreen', () => {
       return saveButtons[1];
     }
 
-    describe('編集モーダルのKeyboardAvoidingView (Issue #145)', () => {
+    describe('編集モーダルのKeyboardAvoidingView', () => {
       // `Platform.OS` はテスト間で状態を共有するモジュールレベルの値のため、
       // 変更したテストの後は必ず元の値(デフォルトの 'ios')へ戻す。
       const originalPlatformOS = Platform.OS;
@@ -3061,7 +3046,7 @@ describe('HomeScreen', () => {
       expect(screen.getByDisplayValue('編集前の日記')).toBeTruthy();
     });
 
-    // Issue #34: 編集モーダル側の入力欄・保存ボタンにもcomposerと同じアクセシビリティ属性が
+    // 編集モーダル側の入力欄・保存ボタンにもcomposerと同じアクセシビリティ属性が
     // 付いていることを検証する
     it('sets accessibilityLabel="日記本文" on the edit TextInput, and accessibilityRole="button"/accessibilityLabel="保存" with a matching accessibilityState on the edit save button', async () => {
       const now = new Date();
@@ -3119,7 +3104,7 @@ describe('HomeScreen', () => {
       expect(screen.getAllByText('編集キャンセル対象').length).toBeGreaterThanOrEqual(1);
     });
 
-    describe('背景タップでモーダルを閉じる(Issue #173)、破棄確認ダイアログ導入後の回帰(Issue #204)', () => {
+    describe('背景タップでモーダルを閉じる、破棄確認ダイアログ導入後の回帰', () => {
       it('shows the discard confirmation dialog (Alert.alert) instead of closing immediately when the semi-transparent background overlay is tapped after the draft has been changed, and only closes (editingEntryId becomes null / editDraft is cleared) once "破棄" is chosen (正常系)', async () => {
         const now = new Date();
         const { dayWithEntry } = pickTestDays(now);
@@ -3145,7 +3130,7 @@ describe('HomeScreen', () => {
         await screen.findByText('日記を編集');
 
         // 保存前に本文を書き換えておき、オーバーレイタップ後に即座には閉じず、破棄確認ダイアログが
-        // 出ることを確認する(Issue #204で仕様変更。以前は確認なしで即座に閉じていた)
+        // 出ることを確認する
         const editInput = screen.getByDisplayValue('編集モーダル背景タップ対象の日記');
         fireEvent.changeText(editInput, '保存されないはずの編集内容');
 
@@ -3182,7 +3167,7 @@ describe('HomeScreen', () => {
       });
 
       it('sets onStartShouldSetResponder on the edit modal content so a touch starting inside it is claimed there and does not propagate to the overlay Pressable behind it (境界値: propagation guard implementation contract)', async () => {
-        // fireEvent.pressの制約(Issue #84のテストと同様の理由)により、実装が伝播を止める
+        // fireEvent.pressの制約により、実装が伝播を止める
         // ガード(`onStartShouldSetResponder={() => true}`)が編集モーダルにも設定されtrueを返すことを直接検証する。
         const now = new Date();
         const { dayWithEntry } = pickTestDays(now);
@@ -3218,7 +3203,7 @@ describe('HomeScreen', () => {
       });
     });
 
-    describe('編集モーダルを閉じる際の未保存変更の破棄確認ダイアログ(Issue #204)', () => {
+    describe('編集モーダルを閉じる際の未保存変更の破棄確認ダイアログ', () => {
       async function pressAlertButton(label: string) {
         const alertMock = Alert.alert as jest.Mock;
         const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
@@ -3614,7 +3599,7 @@ describe('HomeScreen', () => {
       expect(AsyncStorage.setItem).not.toHaveBeenCalled();
     });
 
-    it('renders the edit save button at full opacity (1) when opened with prefilled text (正常系), and reduces it to 0.5 once the text is cleared to whitespace only (異常系), matching disabled={!editDraft.trim()} (Issue #42)', async () => {
+    it('renders the edit save button at full opacity (1) when opened with prefilled text (正常系), and reduces it to 0.5 once the text is cleared to whitespace only (異常系), matching disabled={!editDraft.trim()}', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -3667,7 +3652,7 @@ describe('HomeScreen', () => {
       expect(screen.getByText('1000/1000')).toBeTruthy();
     });
 
-    describe('絵文字(サロゲートペア・ZWJ結合絵文字)を含む本文の文字数カウント・切り詰め(編集用TextInput, Issue #139)', () => {
+    describe('絵文字(サロゲートペア・ZWJ結合絵文字)を含む本文の文字数カウント・切り詰め', () => {
       // ZWJ(Zero Width Joiner)で複数の絵文字コードポイントを結合した家族の絵文字。
       // 見た目上は1文字(1書記素クラスタ)だが、UTF-16コードユニットは11個ある
       // ('👨'+ZWJ+'👩'+ZWJ+'👧'+ZWJ+'👦'で、サロゲートペア4つ(各2ユニット)+ZWJ3つ(各1ユニット))
@@ -3738,7 +3723,7 @@ describe('HomeScreen', () => {
       const editErrorMessage =
         await screen.findByText('更新に失敗しました。もう一度お試しください。');
       expect(editErrorMessage).toBeTruthy();
-      // 編集モーダルのエラーメッセージも、テーマ定数化されたColors.light.errorを使う(Issue #58)
+      // 編集モーダルのエラーメッセージも、テーマ定数化されたColors.light.errorを使う
       expect(StyleSheet.flatten(editErrorMessage.props.style).color).toBe(Colors.light.error);
 
       // ロールバックにより、一覧・カレンダーセルとも編集前のテキストのまま残る
@@ -3748,7 +3733,7 @@ describe('HomeScreen', () => {
       expect(screen.getByText('日記を編集')).toBeTruthy();
     });
 
-    it('resets isSavingEdit after a save failure, re-enabling the save button so a retry can succeed (異常系→正常系, Issue #137 guard boundary)', async () => {
+    it('resets isSavingEdit after a save failure, re-enabling the save button so a retry can succeed', async () => {
       // handleSaveEditはtry/finallyでisSavingEditを必ずfalseへ戻すため、保存失敗直後でも
       // ガードで弾かれずに再度保存できるはず(finallyブロックが正しく効いていることの検証)
       const now = new Date();
@@ -3788,9 +3773,9 @@ describe('HomeScreen', () => {
       expect(screen.getAllByText('一度失敗した後に成功する編集').length).toBeGreaterThanOrEqual(1);
     });
 
-    it('ignores a second press of the edit save button while an update is still in flight, preventing a duplicate write (Issue #137)', async () => {
+    it('ignores a second press of the edit save button while an update is still in flight, preventing a duplicate write', async () => {
       // 編集モーダルの保存ボタン連打で同一の更新処理が重複実行されないことを確認する。
-      // handleSaveの連打防止テスト(Issue #70)と同様、setItemの解決を意図的に遅延させる
+      // handleSaveの連打防止テストと同様、setItemの解決を意図的に遅延させる
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -3830,7 +3815,6 @@ describe('HomeScreen', () => {
       resolveSetItem();
       // resolveSetItem後もgetAllDiaryEntries/setEntries等の非同期処理が続けて走るため、
       // CI環境での遅延に備えてデフォルト(1000ms)より長いタイムアウトを明示する
-      // (Issue #33の削除/編集競合テストにおける同様のwaitForと同じ方針)
       await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull(), {
         timeout: 5000,
       });
@@ -3842,7 +3826,7 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('日記エントリの削除(Issue #33)', () => {
+  describe('日記エントリの削除', () => {
     async function pressAlertButton(label: string) {
       const alertMock = Alert.alert as jest.Mock;
       const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
@@ -3872,7 +3856,7 @@ describe('HomeScreen', () => {
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       const deleteLink = screen.getByText('削除');
-      // 削除リンクの文字色も、テーマ定数化されたColors.light.errorを使う(Issue #58)
+      // 削除リンクの文字色も、テーマ定数化されたColors.light.errorを使う
       expect(StyleSheet.flatten(deleteLink.props.style).color).toBe(Colors.light.error);
       fireEvent.press(deleteLink);
 
@@ -3995,7 +3979,6 @@ describe('HomeScreen', () => {
       render(<HomeScreen />);
       await screen.findByText('その日最後の日記');
       // 削除前は、日記が実際に存在するカレンダーセルが1つ存在する
-      // (Issue #181以降、日記の無いセルもタップ可能になったため、日記の有無で絞り込むヘルパーを使う)
       expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
 
       fireEvent.press(screen.getByText('その日最後の日記'));
@@ -4017,7 +4000,7 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('日記の無い日をタップした新規作成モーダル(Issue #181)', () => {
+  describe('日記の無い日をタップした新規作成モーダル', () => {
     // 対象日('YYYY年M月D日、日記なし、タップして新規作成')のアクセシビリティラベルからセルを特定する
     function pastOrTodayCellLabel(date: Date): string {
       return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日、日記なし、タップして新規作成`;
@@ -4065,7 +4048,7 @@ describe('HomeScreen', () => {
       expect(modals[0].props.visible).toBe(false);
     });
 
-    it("saves a new entry anchored to local noon of the tapped date as createdAt (regardless of the current time-of-day), persists it encrypted, closes the modal, and reflects the title in that day's calendar cell (正常系, Issue #181)", async () => {
+    it("saves a new entry anchored to local noon of the tapped date as createdAt (regardless of the current time-of-day), persists it encrypted, closes the modal, and reflects the title in that day's calendar cell", async () => {
       const now = new Date();
       const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
 
@@ -4253,7 +4236,7 @@ describe('HomeScreen', () => {
       });
     });
 
-    it('does not open the new-entry modal when tapping a day that already has diary entries; the existing entry-list modal opens instead (regression, Issue #181)', async () => {
+    it('does not open the new-entry modal when tapping a day that already has diary entries; the existing entry-list modal opens instead', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -4272,7 +4255,7 @@ describe('HomeScreen', () => {
       expect(modals[2].props.visible).toBe(false);
     });
 
-    it("keeps the top composer's save flow (createdAt = the current moment, not local noon of a tapped date) unaffected by the new per-date creation modal (regression, Issue #181)", async () => {
+    it("keeps the top composer's save flow (createdAt = the current moment, not local noon of a tapped date) unaffected by the new per-date creation modal", async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
       jest.clearAllMocks();
@@ -4292,7 +4275,7 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('日記エントリのコピー(Issue #150)', () => {
+  describe('日記エントリのコピー', () => {
     it('copies the entry text to the clipboard via Clipboard.setStringAsync when the copy button is pressed (正常系)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
@@ -4423,8 +4406,8 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('保存/編集/削除の書き込み直列化によるレースコンディション対策(Issue #130)', () => {
-    // 日記エントリの削除(Issue #33)のdescribe内にある同名ヘルパーと同じ実装。
+  describe('保存/編集/削除の書き込み直列化によるレースコンディション対策', () => {
+    // 日記エントリの削除のdescribe内にある同名ヘルパーと同じ実装。
     // このdescribe単体でも複数の非同期操作を絡めたシナリオを組み立てやすくするため、
     // ここでも同じ内容のヘルパーをローカルに用意する。
     async function pressAlertButton(label: string) {
@@ -4438,7 +4421,7 @@ describe('HomeScreen', () => {
       });
     }
 
-    it("persists both a delete of entry A and a concurrent edit of entry B, even though A's persistence write is still pending when B's edit save is requested (regression for Issue #130: the write queue still serializes independent per-entry writes, each of which touches only its own AsyncStorage key)", async () => {
+    it("persists both a delete of entry A and a concurrent edit of entry B, even though A's persistence write is still pending when B's edit save is requested (the write queue still serializes independent per-entry writes, each of which touches only its own AsyncStorage key)", async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       const storedEntries = [
@@ -4533,7 +4516,7 @@ describe('HomeScreen', () => {
       expect(screen.getAllByText('Bの日記(編集後)').length).toBeGreaterThanOrEqual(1);
     });
 
-    it('persists a newly saved entry together with a concurrent deletion of a different entry, even though the deletion write is still pending when the new save is requested (regression for Issue #130, covering handleSave alongside handleDeleteEntry)', async () => {
+    it('persists a newly saved entry together with a concurrent deletion of a different entry, even though the deletion write is still pending when the new save is requested (covering handleSave alongside handleDeleteEntry)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       const storedEntries = [
@@ -4608,8 +4591,8 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('タブ再フォーカス時にpending中の書き込みキューを待ってから読み直す(Issue #152)', () => {
-    it('does not flicker back to stale data when useFocusEffect refires while a save is still pending in the write queue (regression for Issue #152)', async () => {
+  describe('タブ再フォーカス時にpending中の書き込みキューを待ってから読み直す', () => {
+    it('does not flicker back to stale data when useFocusEffect refires while a save is still pending in the write queue', async () => {
       const now = new Date();
       // 新規保存したエントリはcreatedAtが実行時点の「今日」になるため、既存エントリは
       // 「今日」とは別の日にしておき、カレンダー上で2つのタイトルを独立して検証できるようにする
@@ -4623,7 +4606,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       // 保存の永続化書き込み(enqueueDiaryWrite内のsetItem)の完了タイミングを制御できるようにする。
-      // 既存の直列化テスト(Issue #130)と同様、実際のAsyncStorageへの書き込み自体は元の実装
+      // 既存の直列化テストと同様、実際のAsyncStorageへの書き込み自体は元の実装
       // 経由で行い、完了タイミングだけを遅延させる
       const originalSetItem = AsyncStorage.setItem;
       let resolveSaveWrite: () => void = () => {};
@@ -4721,7 +4704,7 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('テーマに応じたエラー色(Issue #58)', () => {
+  describe('テーマに応じたエラー色', () => {
     // `hooks/use-color-scheme.ts`はreact-nativeの`useColorScheme`をそのままre-exportしているため、
     // jest-expo(react-native)のオートモック(常に'light'を返すjest.fn)を直接上書きすることで
     // ダークモードをシミュレートできる
@@ -4819,7 +4802,7 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('日記のキーワード検索(Issue #81)', () => {
+  describe('日記のキーワード検索', () => {
     it('does not show the search results list while the search input is empty (regular calendar view is shown)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
@@ -5078,7 +5061,7 @@ describe('HomeScreen', () => {
       expect(excerpt.length).toBeLessThan(longEntryText.length);
     });
 
-    it('sets maxLength={1000} (BODY_MAX_LENGTH) on the search input, so it cannot exceed the diary body max length itself (boundary, Issue #171)', async () => {
+    it('sets maxLength={1000} (BODY_MAX_LENGTH) on the search input, so it cannot exceed the diary body max length itself', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
@@ -5088,7 +5071,7 @@ describe('HomeScreen', () => {
       expect(searchInput.props.maxLength).toBe(1000);
     });
 
-    describe('検索欄のクリアボタン(Issue #205)', () => {
+    describe('検索欄のクリアボタン', () => {
       it('does not show the clear button while the search input is empty', async () => {
         render(<HomeScreen />);
         await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
@@ -5168,7 +5151,7 @@ describe('HomeScreen', () => {
       });
     });
 
-    describe('全角/半角・ひらがな/カタカナの表記ゆれ吸収(Issue #192)', () => {
+    describe('全角/半角・ひらがな/カタカナの表記ゆれ吸収', () => {
       it('matches a full-width digit query ("１２３") against an entry body containing half-width digits ("123")', async () => {
         const now = new Date();
         const { dayWithEntry } = pickTestDays(now);
@@ -5264,7 +5247,7 @@ describe('HomeScreen', () => {
         expect(await screen.findByText(/コーヒー/)).toBeTruthy();
       });
 
-      it('still matches regardless of ASCII letter case even when combined with full-width normalization (regression, Issue #81 + #192)', async () => {
+      it('still matches regardless of ASCII letter case even when combined with full-width normalization', async () => {
         const now = new Date();
         const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
         await AsyncStorage.setItem(
@@ -5306,7 +5289,7 @@ describe('HomeScreen', () => {
         expect(await screen.findByText('見つかりませんでした')).toBeTruthy();
       });
 
-      it('excerpts the original (non-normalized) text at the correct position even when the match was found via normalization (Issue #192)', async () => {
+      it('excerpts the original (non-normalized) text at the correct position even when the match was found via normalization', async () => {
         const now = new Date();
         const { dayWithEntry } = pickTestDays(now);
         // マッチ箇所(全角の１２３)の前後にSEARCH_EXCERPT_CONTEXT_LENGTH(20文字)を超える文字を配置し、
