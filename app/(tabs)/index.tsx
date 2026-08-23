@@ -27,6 +27,7 @@ import { SaveToast } from '@/components/save-toast';
 import { TabScreenContainer } from '@/components/tab-screen-container';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import {
   deleteDiaryEntry,
@@ -977,13 +978,15 @@ export default function HomeScreen() {
         hitSlop={8}
         accessibilityRole="button"
         accessibilityLabel={`${displayedYear}年${displayedMonth}月、年月を選択して移動`}
+        style={styles.calendarHeaderButton}
       >
         <ThemedText
           allowFontScaling={false}
           style={[styles.calendarHeaderText, { color: textColor }]}
         >
-          {displayedYear}年{displayedMonth}月 ▾
+          {displayedYear}年{displayedMonth}月
         </ThemedText>
+        <IconSymbol name="chevron.down" size={18} color={textColor} />
       </Pressable>
     );
   }, [displayedYear, displayedMonth, handleOpenMonthPicker, textColor]);
@@ -1636,9 +1639,7 @@ export default function HomeScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="前の年"
                   >
-                    <ThemedText style={[styles.yearStepperArrow, { color: tintColor }]}>
-                      ‹
-                    </ThemedText>
+                    <IconSymbol name="chevron.left" size={24} color={tintColor} />
                   </Pressable>
                   <ThemedText type="subtitle">{pickerYear}年</ThemedText>
                   <Pressable
@@ -1647,9 +1648,7 @@ export default function HomeScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="次の年"
                   >
-                    <ThemedText style={[styles.yearStepperArrow, { color: tintColor }]}>
-                      ›
-                    </ThemedText>
+                    <IconSymbol name="chevron.right" size={24} color={tintColor} />
                   </Pressable>
                 </View>
                 <View style={styles.monthGrid}>
@@ -1796,9 +1795,13 @@ const styles = StyleSheet.create({
     // 実測に多少の誤差があっても、日付グリッドが外枠からはみ出して見えないようにする保険
     overflow: 'hidden',
   },
+  calendarHeaderButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
   calendarHeaderText: {
-    // react-native-calendarsのデフォルト見出し(textMonthFontSize/textMonthFontWeight)と
-    // 揃えた見た目にしつつ、タップ可能なボタンであることが伝わるよう末尾に▾を付けている
+    // react-native-calendarsのデフォルト見出し(textMonthFontSize/textMonthFontWeight)と揃えた見た目にしている
     fontSize: 18,
     fontWeight: '700',
   },
@@ -1807,11 +1810,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 24,
-  },
-  yearStepperArrow: {
-    fontSize: 24,
-    fontWeight: '700',
-    paddingHorizontal: 8,
   },
   monthGrid: {
     flexDirection: 'row',

@@ -17,7 +17,10 @@ const MAPPING = {
   'house.fill': 'home',
   'paperplane.fill': 'send',
   'chevron.left.forwardslash.chevron.right': 'code',
+  'chevron.left': 'chevron-left',
   'chevron.right': 'chevron-right',
+  // Material Iconsに'chevron-down'は存在しないため、視覚的に近い'expand-more'を使う
+  'chevron.down': 'expand-more',
   'gearshape.fill': 'settings',
 } as IconMapping;
 
