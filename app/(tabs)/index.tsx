@@ -728,8 +728,9 @@ export default function HomeScreen() {
     }
   }, [entries, enqueueDiaryWrite, isSavingNewEntry, newEntryDate, newEntryDraft]);
 
-  // 日付一覧モーダルを閉じる(開いていた編集モーダルがあれば合わせて閉じる)
-  const handleCloseDateModal = useCallback(() => {
+  // 日付一覧モーダルを実際に閉じる処理本体(handleCloseDateModalから、確認不要な場合は直接、
+  // 確認が必要な場合はAlert.alertの「破棄」選択時に呼ばれる)。開いていた編集モーダルがあれば合わせて閉じる
+  const closeDateModal = useCallback(() => {
     setSelectedDate(null);
     setEditingEntryId(null);
     setEditDraft('');
@@ -737,6 +738,21 @@ export default function HomeScreen() {
     // 次回モーダルを開いた際に前回のトーストが一瞬表示されてしまわないようリセットする
     setCopyToastMessage(null);
   }, []);
+
+  // 日付一覧モーダルを閉じる(背景タップ・「閉じる」ボタン・Android戻る操作の共通ハンドラ)。
+  // 編集モーダルを重ねて開いた状態で、編集開始時点の内容から変更されている場合のみ、
+  // 誤って編集内容を失わないよう確認ダイアログを挟む(handleCancelEditと同じパターン)
+  const handleCloseDateModal = useCallback(() => {
+    if (editingEntryId === null || editDraft.trim() === editOriginalTextRef.current.trim()) {
+      closeDateModal();
+      return;
+    }
+
+    Alert.alert('変更を破棄しますか?', '編集中の内容は保存されません。', [
+      { text: 'キャンセル', style: 'cancel' },
+      { text: '破棄', style: 'destructive', onPress: closeDateModal },
+    ]);
+  }, [editDraft, editingEntryId, closeDateModal]);
 
   const handleDeleteEntry = useCallback(
     async (entryId: string) => {
