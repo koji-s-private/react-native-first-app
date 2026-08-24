@@ -2776,6 +2776,43 @@ describe('HomeScreen', () => {
       expect(StyleSheet.flatten(badgeView.props.style).backgroundColor).toBe(Colors.light.tint);
     });
 
+    it("sets an explicit lineHeight close to fontSize on the badge text, overriding ThemedText's inherited default lineHeight so the digit stays vertically centered within the circle (回帰防止: Issue #219)", async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const storedEntries = [
+        { id: '1', text: '朝の日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
+        { id: '2', text: '夜の日記', createdAt: isoAt(now, dayWithEntry, 21, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+
+      render(<HomeScreen />);
+      await screen.findByText('朝の日記');
+
+      const badgeText = screen.getByText('+1');
+      const flattened = StyleSheet.flatten(badgeText.props.style);
+      // ThemedTextのdefaultスタイルのlineHeight(24)をそのまま引き継ぐと、高さ16pxのバッジ内で
+      // 数字が下寄りになるため、fontSizeに近い値が明示的に上書きされていることを確認する
+      expect(flattened.lineHeight).toBe(11);
+      expect(flattened.lineHeight).toBeLessThan(24);
+    });
+
+    it('shows a "+10" badge when a day has 11 diary entries, confirming double-digit counts still render correctly inside the badge (境界値: 2桁の件数)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const storedEntries = Array.from({ length: 11 }, (_, i) => ({
+        id: `${i}`,
+        text: `${i}件目の日記`,
+        createdAt: isoAt(now, dayWithEntry, i, 0),
+      }));
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+
+      render(<HomeScreen />);
+      await screen.findByText('0件目の日記');
+
+      expect(screen.getByText('+10')).toBeTruthy();
+      expect(findEntryCountBadgeViews()).toHaveLength(1);
+    });
+
     it('keeps the count badge visible after the day-entry modal for that date is opened and closed (regression: badge does not disappear due to modal interaction)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
