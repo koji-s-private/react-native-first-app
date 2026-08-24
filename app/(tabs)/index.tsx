@@ -1863,6 +1863,9 @@ const styles = StyleSheet.create({
   entryCountText: {
     fontSize: 9,
     fontWeight: '700',
+    // ThemedTextのdefaultスタイル(lineHeight: 24)を引き継ぐと丸の中で数字が下寄りになるため、
+    // fontSizeに近い値を明示して縦方向も中央に揃える
+    lineHeight: 11,
   },
   modalOverlay: {
     flex: 1,
