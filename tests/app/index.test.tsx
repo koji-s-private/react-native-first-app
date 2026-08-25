@@ -1915,7 +1915,7 @@ describe('HomeScreen', () => {
       ).toBeTruthy();
     });
 
-    it('shows a chevron-down IconSymbol next to the calendar header heading, indicating it opens the month picker (Issue #218)', async () => {
+    it('shows a chevron-down IconSymbol next to the calendar header heading, indicating it opens the month picker', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
@@ -2396,7 +2396,7 @@ describe('HomeScreen', () => {
       expect(await findCalendarHeaderText(now.getFullYear(), now.getMonth() + 1)).toBeTruthy();
     });
 
-    it('renders the year stepper buttons as chevron-left/chevron-right IconSymbols, not text glyphs (Issue #218)', async () => {
+    it('renders the year stepper buttons as chevron-left/chevron-right IconSymbols, not text glyphs', async () => {
       const now = new Date();
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
@@ -2559,7 +2559,7 @@ describe('HomeScreen', () => {
 
   describe('カレンダーセルの日記件数インジケーター(ドット/バッジ)', () => {
     // 日記が0件の日は何も表示せず、1件の日はドット(styles.entryDot)、2件以上の日は
-    // 合計件数を表示する丸バッジ(styles.entryCountBadge)を表示する(Issue #220)。
+    // 合計件数を表示する丸バッジ(styles.entryCountBadge)を表示する。
     // ドットは`width: 7, height: 7`、バッジ本体は`minWidth: 16, height: 16`という
     // 一意な組み合わせのスタイルを持つため、それぞれを目印にView自体を特定するヘルパーを用意する。
     function findEntryDotViews() {
@@ -2726,7 +2726,7 @@ describe('HomeScreen', () => {
       expect(StyleSheet.flatten(badgeView.props.style).backgroundColor).toBe(Colors.light.tint);
     });
 
-    it("sets an explicit lineHeight close to fontSize on the badge text, overriding ThemedText's inherited default lineHeight so the digit stays vertically centered within the circle (回帰防止: Issue #219)", async () => {
+    it("sets an explicit lineHeight close to fontSize on the badge text, overriding ThemedText's inherited default lineHeight so the digit stays vertically centered within the circle (回帰防止)", async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       const storedEntries = [
@@ -3471,7 +3471,7 @@ describe('HomeScreen', () => {
       });
     });
 
-    describe('日付一覧モーダルを閉じる際の未保存の編集内容の破棄確認ダイアログ(Issue #211)', () => {
+    describe('日付一覧モーダルを閉じる際の未保存の編集内容の破棄確認ダイアログ', () => {
       async function pressAlertButton(label: string) {
         const alertMock = Alert.alert as jest.Mock;
         const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
