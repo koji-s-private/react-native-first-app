@@ -1018,11 +1018,7 @@ export default function HomeScreen() {
       // その日にエントリが実在するか(タイトル文字列の有無ではなく、handleDayPressと同じ基準で判定する。
       // 本文が空白のみのレガシーデータではタイトルが空文字列になり得るため、両者を区別する必要がある)
       const hasEntries = Boolean(dayEntries?.length);
-      // その日に書かれた日記のうち最初の1件のタイトルのみをセルに表示する
-      const title = dayEntries?.length ? getEntryTitle(dayEntries[0].text) : null;
-      // 同じ日に2件以上の日記がある場合、2件目以降の件数を「+N」バッジで表示する
-      // (モーダルを開かなくても複数件あることに気づけるようにするため)
-      const extraEntryCount = dayEntries && dayEntries.length > 1 ? dayEntries.length - 1 : 0;
+      const entryCount = dayEntries?.length ?? 0;
       const isDisabled = state === 'disabled' || state === 'inactive';
       const isToday = state === 'today';
       // 日記が無い日でも、未来日でなければ新規作成モーダルを開けるようタップ可能にする。
@@ -1032,7 +1028,7 @@ export default function HomeScreen() {
       // 「何年何月何日か」と「その日に日記があるか・新規作成できるか」が伝わるようラベルを組み立てる
       // (フォーマットはモーダル見出しと同じformatDateHeadingを再利用する)
       const statusLabel = hasEntries
-        ? '日記あり'
+        ? `日記あり(${entryCount}件)`
         : isPressable
           ? '日記なし、タップして新規作成'
           : '日記なし';
@@ -1048,16 +1044,6 @@ export default function HomeScreen() {
           // タップしても反応しない日はスクリーンリーダーにも操作不可であることを明示的に伝える
           accessibilityState={{ disabled: !isPressable }}
         >
-          {extraEntryCount > 0 ? (
-            <View style={[styles.entryCountBadge, { backgroundColor: tintColor }]}>
-              <ThemedText
-                style={[styles.entryCountText, { color: backgroundColor }]}
-                maxFontSizeMultiplier={DAY_CELL_MAX_FONT_SCALE}
-              >
-                +{extraEntryCount}
-              </ThemedText>
-            </View>
-          ) : null}
           {isToday ? (
             // 今日のセルは数字を丸背景で囲んで強調する(一般的なカレンダーアプリの表現に合わせる)
             <View style={[styles.todayBadge, { backgroundColor: tintColor }]}>
@@ -1076,14 +1062,21 @@ export default function HomeScreen() {
               {date.day}
             </ThemedText>
           )}
-          {title ? (
-            <ThemedText
-              style={[styles.dayEntryTitle, { color: tintColor }]}
-              numberOfLines={1}
-              maxFontSizeMultiplier={DAY_CELL_MAX_FONT_SCALE}
-            >
-              {title}
-            </ThemedText>
+          {entryCount === 1 ? (
+            // タイトル文字は小さすぎて読めないため、日記が1件あることだけが伝わる
+            // 視認性の高いドットで代替する
+            <View style={[styles.entryDot, { backgroundColor: tintColor }]} />
+          ) : entryCount > 1 ? (
+            // 2件以上ある場合は合計件数を丸バッジで表示する(モーダルを開かなくても
+            // 複数件あることに気づけるようにするため)
+            <View style={[styles.entryCountBadge, { backgroundColor: tintColor }]}>
+              <ThemedText
+                style={[styles.entryCountText, { color: backgroundColor }]}
+                maxFontSizeMultiplier={DAY_CELL_MAX_FONT_SCALE}
+              >
+                {entryCount}
+              </ThemedText>
+            </View>
           ) : null}
         </Pressable>
       );
@@ -1829,8 +1822,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 4,
     gap: 2,
-    // 件数バッジ(entryCountBadge)をセル右上に絶対配置するための基準にする
-    position: 'relative',
   },
   dayNumber: {
     fontSize: 14,
@@ -1845,14 +1836,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dayEntryTitle: {
-    fontSize: 10,
-    paddingHorizontal: 2,
+  entryDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
   },
   entryCountBadge: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
     minWidth: 16,
     height: 16,
     borderRadius: 8,
