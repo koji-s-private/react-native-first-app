@@ -14,6 +14,7 @@ import {
   Modal,
   Platform,
   StyleSheet,
+  Text,
   useColorScheme,
   View,
 } from 'react-native';
@@ -194,12 +195,13 @@ function queryCalendarDayButtons() {
     .filter((button) => button.props.accessibilityLabel !== '保存');
 }
 
-// queryCalendarDayButtonsのうち、実際に日記が存在する日(accessibilityLabelが「日記あり」で
-// 終わるセル)だけに絞り込むヘルパー。日記の無い日も新規作成用にタップ可能になった
-// ことで、旧来「タップ可能=日記あり」だった前提が崩れたテストで、この用途に置き換えて使う。
+// queryCalendarDayButtonsのうち、実際に日記が存在する日(accessibilityLabelに「日記あり」を
+// 含むセル。件数付きの「日記あり(N件)」も含めて拾うため終端一致ではなく部分一致で判定する)
+// だけに絞り込むヘルパー。日記の無い日も新規作成用にタップ可能になったことで、
+// 旧来「タップ可能=日記あり」だった前提が崩れたテストで、この用途に置き換えて使う。
 function queryCalendarDayButtonsWithEntry() {
   return queryCalendarDayButtons().filter((button) =>
-    (button.props.accessibilityLabel as string | undefined)?.endsWith('日記あり'),
+    (button.props.accessibilityLabel as string | undefined)?.includes('日記あり'),
   );
 }
 
@@ -512,9 +514,9 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('キーボード確認用の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      fireEvent.press(screen.getByText('キーボード確認用の日記'));
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       // 検索キーワード未入力のため、日付一覧モーダル用のFlatListのみが該当する
@@ -535,7 +537,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('今日は公園を散歩した');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
       await screen.findByText(/公園/);
@@ -558,7 +560,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('今日は公園を散歩した');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
       await screen.findByText(/公園/);
@@ -581,12 +583,12 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('今日は公園を散歩した');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       // 日付一覧モーダルを開いたまま(閉じない)にしておく。visible=falseに戻ると
       // モーダル内のFlatListがアンマウントされてしまうため、開いたまま検索欄を操作することで
       // 2つのFlatListが同時にマウントされている状態を再現する
-      fireEvent.press(screen.getByText('今日は公園を散歩した'));
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
@@ -861,7 +863,7 @@ describe('HomeScreen', () => {
       await waitFor(() => expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(1));
     });
 
-    it('restores previously saved plaintext entries (from before encryption was introduced) from AsyncStorage and shows them when the day is tapped', async () => {
+    it('restores previously saved plaintext entries (from before encryption was introduced) from AsyncStorage and shows them in chronological order when the day is tapped', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       const storedEntries = [
@@ -873,17 +875,15 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      // その日最初(=最も時刻が早い)の日記のタイトルがカレンダーセルに表示される
-      expect(await screen.findByText('1件目の日記')).toBeTruthy();
-      expect(screen.queryByText('2件目の日記')).toBeNull();
-
-      // モーダル表示中も背後のカレンダーセルは残るため、先頭の日記のタイトルは2箇所に表示される
-      fireEvent.press(screen.getAllByText('1件目の日記')[0]);
-      expect(await screen.findByText('2件目の日記')).toBeTruthy();
-      expect(screen.getAllByText('1件目の日記').length).toBeGreaterThanOrEqual(1);
+      // 2件あるため、セルには件数バッジ「2」が表示され、タップすると一覧が開く
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
 
       // 時刻の昇順(先に書かれたものが先)に並んでいる
+      expect(await screen.findByText('1件目の日記')).toBeTruthy();
+      expect(screen.getByText('2件目の日記')).toBeTruthy();
       const texts = flattenTexts(screen.toJSON());
       expect(texts.indexOf('1件目の日記')).toBeLessThan(texts.indexOf('2件目の日記'));
     });
@@ -898,7 +898,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('過去の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       // マウント時の読み込みで、レガシーの単一キーは個別キー方式(暗号化済み)へ移行済みになっている
       expect(await readPersistedEntry('old')).toEqual(storedEntries[0]);
@@ -918,14 +918,14 @@ describe('HomeScreen', () => {
       // 移行済みの過去の日記はそのまま残っている
       expect(await readPersistedEntry('old')).toEqual(storedEntries[0]);
 
-      // セルのタイトルは変わらず一番早い時刻の「過去の日記」のまま
-      expect(screen.getByText('過去の日記')).toBeTruthy();
-      expect(screen.queryByText('今日の日記')).toBeNull();
+      // 同じ日に2件になったため、セルには件数バッジ「2」が表示される
+      const cellsWithEntry = queryCalendarDayButtonsWithEntry();
+      expect(cellsWithEntry).toHaveLength(1);
 
       // タップするとその日の一覧に新しい日記も含めて表示される
-      fireEvent.press(screen.getAllByText('過去の日記')[0]);
-      expect(await screen.findByText('今日の日記')).toBeTruthy();
-      expect(screen.getAllByText('過去の日記').length).toBeGreaterThanOrEqual(1);
+      fireEvent.press(cellsWithEntry[0]);
+      expect(await screen.findByText('過去の日記')).toBeTruthy();
+      expect(screen.getByText('今日の日記')).toBeTruthy();
     });
 
     it('persists diary entries encrypted and correctly reloads/decrypts them after remounting (simulating an app restart)', async () => {
@@ -944,7 +944,8 @@ describe('HomeScreen', () => {
       unmount();
 
       render(<HomeScreen />);
-      expect(await screen.findByText('再起動後も読める日記')).toBeTruthy();
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
     });
 
     it('reloads from AsyncStorage when the screen regains focus, so data deleted elsewhere (e.g. from the settings tab) is not resurrected by a later save', async () => {
@@ -958,7 +959,7 @@ describe('HomeScreen', () => {
       // 日記タブを開いて表示する(expo-routerのTabsは実機ではこの画面をアンマウントしないが、
       // このテストのモックではフォーカス再取得を模すために一度unmountし、下で再度renderする)
       const { unmount } = render(<HomeScreen />);
-      await screen.findByText('削除されるはずの日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
       unmount();
 
       // 設定タブでの「日記データを全件削除」操作を模して、移行済みの個別キーを直接削除する
@@ -994,7 +995,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('過去の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '今日の日記');
       fireEvent.press(screen.getByText('保存'));
@@ -1009,13 +1010,13 @@ describe('HomeScreen', () => {
       // 既存(移行済み)の過去の日記もそのまま残っている
       expect(await readPersistedEntry('old')).toEqual(storedEntries[0]);
 
-      // セルのタイトルは変わらず一番早い時刻の「過去の日記」のまま
-      expect(screen.getByText('過去の日記')).toBeTruthy();
-      expect(screen.queryByText('今日の日記')).toBeNull();
+      // 同じ日に2件になったため、セルには件数バッジ「2」が表示される
+      const cellsWithEntry = queryCalendarDayButtonsWithEntry();
+      expect(cellsWithEntry).toHaveLength(1);
 
-      fireEvent.press(screen.getAllByText('過去の日記')[0]);
-      expect(await screen.findByText('今日の日記')).toBeTruthy();
-      expect(screen.getAllByText('過去の日記').length).toBeGreaterThanOrEqual(1);
+      fireEvent.press(cellsWithEntry[0]);
+      expect(await screen.findByText('過去の日記')).toBeTruthy();
+      expect(screen.getByText('今日の日記')).toBeTruthy();
     });
 
     it('shows the empty state when stored data is corrupted (invalid JSON)', async () => {
@@ -1049,7 +1050,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('過去の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
 
@@ -1062,13 +1063,14 @@ describe('HomeScreen', () => {
       // エラーメッセージの文字色は、ハードコードではなくテーマ定数化されたColors.light.errorを使う
       expect(StyleSheet.flatten(errorMessage.props.style).color).toBe(Colors.light.error);
 
-      // 保存前の状態にロールバックされているため、新しい日記のタイトルはどこにも表示されない
-      expect(screen.queryByText('今日の日記')).toBeNull();
+      // 保存前の状態にロールバックされているため、日記は1件(既存の「過去の日記」)のみのまま
       expect(input.props.value).toBe('今日の日記');
-      expect(screen.getByText('過去の日記')).toBeTruthy();
+      const cellsWithEntry = queryCalendarDayButtonsWithEntry();
+      expect(cellsWithEntry).toHaveLength(1);
 
-      fireEvent.press(screen.getByText('過去の日記'));
+      fireEvent.press(cellsWithEntry[0]);
       await screen.findByText(CLOSE_BUTTON_TEXT);
+      expect(screen.getByText('過去の日記')).toBeTruthy();
       expect(screen.queryByText('今日の日記')).toBeNull();
     });
 
@@ -1091,7 +1093,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('過去の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       fireEvent.changeText(input, '保存中の日記');
@@ -1133,7 +1135,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('過去の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       fireEvent.changeText(input, '保存中の日記');
@@ -1175,7 +1177,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('過去の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       fireEvent.changeText(input, '保存中の日記');
@@ -1286,10 +1288,12 @@ describe('HomeScreen', () => {
       expect(new Set(ids).size).toBe(ids.length);
 
       // 同じ日に書かれた3件すべてが、セルをタップした一覧に表示される
-      // (セルには最初に書かれた「1件目」のタイトルのみが表示される)
-      expect(screen.getByText('1件目')).toBeTruthy();
-      fireEvent.press(screen.getByText('1件目'));
-      expect(await screen.findByText('2件目')).toBeTruthy();
+      // (3件になったセルには件数バッジ「3」が表示される)
+      const cellsWithEntry = queryCalendarDayButtonsWithEntry();
+      expect(cellsWithEntry).toHaveLength(1);
+      fireEvent.press(cellsWithEntry[0]);
+      expect(await screen.findByText('1件目')).toBeTruthy();
+      expect(screen.getByText('2件目')).toBeTruthy();
       expect(screen.getByText('3件目')).toBeTruthy();
     });
   });
@@ -1786,8 +1790,9 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      expect(await screen.findByText('既存の日記')).toBeTruthy();
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
       expect(screen.queryByText(EMPTY_STATE_TEXT)).toBeNull();
       expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
     });
@@ -1806,7 +1811,8 @@ describe('HomeScreen', () => {
       // 1回目のフォーカス(初回マウント)。画面はアンマウントせず、そのままstate(isLoading)を
       // 保持し続ける(実機のexpo-router Tabsがタブ画面をアンマウントしないのと同じ状況)
       render(<HomeScreen />);
-      expect(await screen.findByText('既存の日記')).toBeTruthy();
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
       expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
 
       // 2回目の読み込み(再フォーカス時)がまだpending中の間の表示を検証できるようにする
@@ -1829,7 +1835,7 @@ describe('HomeScreen', () => {
       // ローディング表示は再度出ない(空状態メッセージも、既存のentriesがまだ残っているため出ない)
       expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
       expect(screen.queryByText(EMPTY_STATE_TEXT)).toBeNull();
-      expect(screen.getByText('既存の日記')).toBeTruthy();
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
 
       await act(async () => {
         resolveGetItem(JSON.stringify([]));
@@ -1852,8 +1858,9 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      expect(await screen.findByText('既存の日記')).toBeTruthy();
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
       expect(screen.queryByText(EMPTY_STATE_TEXT)).toBeNull();
     });
 
@@ -1927,105 +1934,6 @@ describe('HomeScreen', () => {
       }
     });
 
-    it("shows the first entry's title of the day in the corresponding calendar cell", async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      const storedEntries = [
-        { id: '1', text: '朝の日記\n本文がここに続く', createdAt: isoAt(now, dayWithEntry, 9, 0) },
-      ];
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
-
-      render(<HomeScreen />);
-
-      // タイトルは本文の最初の行のみが使われる(改行以降は表示されない)
-      expect(await screen.findByText('朝の日記')).toBeTruthy();
-      expect(screen.queryByText('朝の日記\n本文がここに続く')).toBeNull();
-      expect(screen.queryByText('本文がここに続く')).toBeNull();
-    });
-
-    it('does not truncate a title whose first line is exactly 20 characters (boundary)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      const exactlyTwentyChars = 'あ'.repeat(20);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([
-          { id: '1', text: exactlyTwentyChars, createdAt: isoAt(now, dayWithEntry) },
-        ]),
-      );
-
-      render(<HomeScreen />);
-
-      expect(await screen.findByText(exactlyTwentyChars)).toBeTruthy();
-    });
-
-    it('truncates a title whose first line is 21 characters with an ellipsis (boundary)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      const twentyOneChars = 'い'.repeat(21);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: twentyOneChars, createdAt: isoAt(now, dayWithEntry) }]),
-      );
-
-      render(<HomeScreen />);
-
-      const truncated = `${'い'.repeat(20)}…`;
-      expect(await screen.findByText(truncated)).toBeTruthy();
-      expect(screen.queryByText(twentyOneChars)).toBeNull();
-    });
-
-    it('does not split a surrogate-pair emoji in the middle when truncating', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      // '😀'はサロゲートペア(UTF-16で2コードユニット)の絵文字。単純なUTF-16単位のslice(0, 20)
-      // だと絵文字の途中(サロゲートの片割れ)で切れてしまう境界を狙う構成
-      const text = `${'あ'.repeat(19)}😀切れたら文字化け`;
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text, createdAt: isoAt(now, dayWithEntry) }]),
-      );
-
-      render(<HomeScreen />);
-
-      // 絵文字がサロゲートペアの片割れで壊れず、丸ごと1文字として20文字目に含まれる
-      const truncated = `${'あ'.repeat(19)}😀…`;
-      expect(await screen.findByText(truncated)).toBeTruthy();
-    });
-
-    it('does not split a ZWJ-joined family emoji in the middle when truncating', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      // ZWJ(Zero Width Joiner)で複数の絵文字コードポイントを結合した家族の絵文字(単一の書記素
-      // クラスタ)。コードポイント単位の分割(Array.from())だと境目で分断されてしまう構成
-      const family = '👨\u200d👩\u200d👧\u200d👦';
-      const text = `${'う'.repeat(19)}${family}途中で切れたら文字化け`;
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text, createdAt: isoAt(now, dayWithEntry) }]),
-      );
-
-      render(<HomeScreen />);
-
-      // ZWJ結合絵文字が途中で壊れず、丸ごと1文字(書記素クラスタ)として20文字目に含まれる
-      const truncated = `${'う'.repeat(19)}${family}…`;
-      expect(await screen.findByText(truncated)).toBeTruthy();
-    });
-
-    it('shows a very short (1 character) diary entry as its title as-is, without truncation or an ellipsis (boundary)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: 'あ', createdAt: isoAt(now, dayWithEntry) }]),
-      );
-
-      render(<HomeScreen />);
-
-      expect(await screen.findByText('あ')).toBeTruthy();
-      expect(screen.queryByText('あ…')).toBeNull();
-    });
-
     it('renders no title for an entry whose text is an empty string after the first line is trimmed, but still treats the day as having an entry (isPressable/statusLabel/accessibilityLabel and tap behavior are based on entriesByDate, not on the trimmed title) since entriesByDate already has an entry for that day (defensive boundary for directly-corrupted/legacy storage data, since the composer itself never saves an empty/whitespace-only entry)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
@@ -2063,7 +1971,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('日記あり');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       // 日記が実際に存在するセルは1つだけ(dayWithEntry分)である
       // (日記の無い日のセルも未来日でなければタップ可能になったため、
@@ -2083,7 +1991,7 @@ describe('HomeScreen', () => {
     // スクリーンリーダー(VoiceOver/TalkBack)利用者にも、日付セルの数字だけでなく
     // 「何年何月何日か」と「その日に日記があるかどうか」が伝わるよう、accessibilityLabel/
     // accessibilityStateを検証する
-    it('sets an accessibilityLabel with the full date and "日記あり" on a day cell that has a diary entry, and does not mark it as accessibility-disabled', async () => {
+    it('sets an accessibilityLabel with the full date and "日記あり(N件)" on a day cell that has a diary entry, and does not mark it as accessibility-disabled', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -2092,9 +2000,9 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('日記あり');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      const expectedLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${dayWithEntry}日、日記あり`;
+      const expectedLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${dayWithEntry}日、日記あり(1件)`;
       const dayCell = screen.getByLabelText(expectedLabel);
       expect(dayCell.props.accessibilityRole).toBe('button');
       expect(dayCell.props.accessibilityState?.disabled).toBe(false);
@@ -2110,7 +2018,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('日記あり');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       const expectedLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日、日記なし、タップして新規作成`;
       const dayCell = screen.getByLabelText(expectedLabel);
@@ -2182,15 +2090,14 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await screen.findByText('朝の出来事');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      // カレンダーセルには先頭の日記のタイトルのみが表示されているため、ここでは一意に取得できる
-      fireEvent.press(screen.getByText('朝の出来事'));
+      // 3件になったセルには件数バッジが表示されるため、日付の数字でタップする
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
 
-      expect(await screen.findByText('昼の出来事')).toBeTruthy();
+      expect(await screen.findByText('朝の出来事')).toBeTruthy();
+      expect(screen.getByText('昼の出来事')).toBeTruthy();
       expect(screen.getByText('夜の出来事')).toBeTruthy();
-      // モーダル表示中は背後のカレンダーセルにも同じタイトルが残るため2箇所に表示される
-      expect(screen.getAllByText('朝の出来事').length).toBeGreaterThanOrEqual(1);
 
       // 見出しに日付('YYYY年M月D日')が表示される
       expect(
@@ -2212,9 +2119,9 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('日記本文');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      fireEvent.press(screen.getByText('日記本文'));
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
 
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -2231,9 +2138,9 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('日記本文');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      fireEvent.press(screen.getByText('日記本文'));
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
@@ -2253,9 +2160,9 @@ describe('HomeScreen', () => {
         );
 
         render(<HomeScreen />);
-        await screen.findByText('背景タップ対象の日記');
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-        fireEvent.press(screen.getByText('背景タップ対象の日記'));
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
         await screen.findByText(CLOSE_BUTTON_TEXT);
 
         const [entryListModal] = screen.UNSAFE_getAllByType(Modal);
@@ -2268,8 +2175,8 @@ describe('HomeScreen', () => {
         expect(
           screen.queryByText(`${now.getFullYear()}年${now.getMonth() + 1}月${dayWithEntry}日`),
         ).toBeNull();
-        // 閉じた後もデータ自体は消えておらず、カレンダーセルには引き続きタイトルが表示される
-        expect(screen.getByText('背景タップ対象の日記')).toBeTruthy();
+        // 閉じた後もデータ自体は消えておらず、カレンダーセルには引き続きインジケーターが表示される
+        expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
       });
 
       it('keeps the entry-list modal open (does not let the tap bubble to the overlay) when pressing an interactive element inside it, such as the edit button (境界値/異常系: propagation guard regression)', async () => {
@@ -2283,9 +2190,9 @@ describe('HomeScreen', () => {
         );
 
         render(<HomeScreen />);
-        await screen.findByText('編集ボタン確認用の日記');
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-        fireEvent.press(screen.getByText('編集ボタン確認用の日記'));
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
         await screen.findByText(CLOSE_BUTTON_TEXT);
 
         fireEvent.press(screen.getByText('編集'));
@@ -2312,9 +2219,9 @@ describe('HomeScreen', () => {
         );
 
         render(<HomeScreen />);
-        await screen.findByText('ガード確認用の日記');
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-        fireEvent.press(screen.getByText('ガード確認用の日記'));
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
         await screen.findByText(CLOSE_BUTTON_TEXT);
 
         const [entryListModal] = screen.UNSAFE_getAllByType(Modal);
@@ -2337,9 +2244,9 @@ describe('HomeScreen', () => {
         );
 
         render(<HomeScreen />);
-        await screen.findByText('戻る操作確認用の日記');
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-        fireEvent.press(screen.getByText('戻る操作確認用の日記'));
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
         await screen.findByText(CLOSE_BUTTON_TEXT);
 
         const [entryListModal] = screen.UNSAFE_getAllByType(Modal);
@@ -2377,7 +2284,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('編集対象の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       // 日付タップ前は両モーダルとも非表示(visible=false)だが、translucent系のpropは
       // 表示状態に関わらず常に設定されている静的なpropである
@@ -2386,7 +2293,7 @@ describe('HomeScreen', () => {
       expect(editModalBeforeOpen.props.visible).toBe(false);
 
       // 一覧モーダルを開いた状態(visible=true)でも維持されていることを確認する
-      fireEvent.press(screen.getByText('編集対象の日記'));
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       const [entryListModalOpen, editModalStillClosed] = screen.UNSAFE_getAllByType(Modal);
@@ -2650,10 +2557,18 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('カレンダーセルの複数件数バッジ', () => {
-    // 同じ日に2件以上の日記がある場合、カレンダーセルの右上に「+N」の件数バッジを表示する。
-    // バッジの本体View(styles.entryCountBadge)は`minWidth: 16, height: 16`という
-    // 一意な組み合わせのスタイルを持つため、それを目印にView自体を特定するヘルパーを用意する。
+  describe('カレンダーセルの日記件数インジケーター(ドット/バッジ)', () => {
+    // 日記が0件の日は何も表示せず、1件の日はドット(styles.entryDot)、2件以上の日は
+    // 合計件数を表示する丸バッジ(styles.entryCountBadge)を表示する(Issue #220)。
+    // ドットは`width: 7, height: 7`、バッジ本体は`minWidth: 16, height: 16`という
+    // 一意な組み合わせのスタイルを持つため、それぞれを目印にView自体を特定するヘルパーを用意する。
+    function findEntryDotViews() {
+      return screen.UNSAFE_getAllByType(View).filter((node) => {
+        const flattened = StyleSheet.flatten(node.props.style ?? {});
+        return flattened.width === 7 && flattened.height === 7;
+      });
+    }
+
     function findEntryCountBadgeViews() {
       return screen.UNSAFE_getAllByType(View).filter((node) => {
         const flattened = StyleSheet.flatten(node.props.style ?? {});
@@ -2661,7 +2576,26 @@ describe('HomeScreen', () => {
       });
     }
 
-    it('does not show a count badge when a day has exactly 1 diary entry (正常系/境界値: 単一件数)', async () => {
+    // バッジ内の件数テキスト(styles.entryCountText)を取得するヘルパー。日付セルの数字
+    // (例: 二桁未満の日付は同じ文字列になりうる)と衝突しうるため、素朴なgetByText(String(count))
+    // ではなく、バッジテキストに固有のスタイル(lineHeight: 11。詳細は下の回帰テストを参照)を
+    // 目印に絞り込む。
+    function findEntryCountBadgeTexts() {
+      return screen.UNSAFE_getAllByType(Text).filter((node) => {
+        const flattened = StyleSheet.flatten(node.props.style ?? {});
+        return flattened.lineHeight === 11;
+      });
+    }
+
+    it('shows neither a dot nor a count badge when there are no diary entries at all (境界値: 0件)', async () => {
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      expect(findEntryDotViews()).toHaveLength(0);
+      expect(findEntryCountBadgeViews()).toHaveLength(0);
+    });
+
+    it('shows a dot (not a count badge, and not the entry title) when a day has exactly 1 diary entry (正常系/境界値: 単一件数)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -2670,13 +2604,15 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('1件のみの日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      expect(screen.queryByText(/^\+\d+$/)).toBeNull();
+      expect(findEntryDotViews()).toHaveLength(1);
       expect(findEntryCountBadgeViews()).toHaveLength(0);
+      // 1件目のタイトル文字列自体はセルには表示されない(モーダルを開いたときのみ表示される)
+      expect(screen.queryByText('1件のみの日記')).toBeNull();
     });
 
-    it('shows a "+1" badge when a day has exactly 2 diary entries (正常系)', async () => {
+    it('shows a count badge displaying the total "2" (not "+1") when a day has exactly 2 diary entries (正常系)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       const storedEntries = [
@@ -2686,14 +2622,20 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await screen.findByText('朝の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      expect(screen.getByText('+1')).toBeTruthy();
-      // セル自体には先頭(最も時刻が早い)の日記のタイトルのみが表示され、2件目は表示されない
+      expect(findEntryDotViews()).toHaveLength(0);
+      const badgeTexts = findEntryCountBadgeTexts();
+      expect(badgeTexts).toHaveLength(1);
+      expect(String(badgeTexts[0].props.children)).toBe('2');
+      expect(screen.queryByText('+1')).toBeNull();
+      expect(findEntryCountBadgeViews()).toHaveLength(1);
+      // セル自体にはどちらの日記のタイトルも表示されない
+      expect(screen.queryByText('朝の日記')).toBeNull();
       expect(screen.queryByText('夜の日記')).toBeNull();
     });
 
-    it('shows a "+2" badge when a day has exactly 3 diary entries (正常系)', async () => {
+    it('shows a count badge displaying the total "3" (not "+2") when a day has exactly 3 diary entries (正常系)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       const storedEntries = [
@@ -2704,12 +2646,15 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await screen.findByText('朝の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      expect(screen.getByText('+2')).toBeTruthy();
+      const badgeTexts = findEntryCountBadgeTexts();
+      expect(badgeTexts).toHaveLength(1);
+      expect(String(badgeTexts[0].props.children)).toBe('3');
+      expect(screen.queryByText('+2')).toBeNull();
     });
 
-    it('shows a "+3" badge when a day has 4 diary entries (正常系: 最小の複数件数境界(2件)より先まで正しくスケールすることの確認)', async () => {
+    it('shows a count badge displaying the total "4" when a day has 4 diary entries (正常系: 最小の複数件数境界(2件)より先まで正しくスケールすることの確認)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       const storedEntries = [0, 1, 2, 3].map((i) => ({
@@ -2720,21 +2665,15 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await screen.findByText('0件目の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      expect(screen.getByText('+3')).toBeTruthy();
+      const badgeTexts = findEntryCountBadgeTexts();
+      expect(badgeTexts).toHaveLength(1);
+      expect(String(badgeTexts[0].props.children)).toBe('4');
       expect(findEntryCountBadgeViews()).toHaveLength(1);
     });
 
-    it('shows no badge anywhere when there are no diary entries at all (境界値: 0件)', async () => {
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-      expect(screen.queryByText(/^\+\d+$/)).toBeNull();
-      expect(findEntryCountBadgeViews()).toHaveLength(0);
-    });
-
-    it('does not show a badge on a day with no entries (entriesByDate has no key for it), even while another day in the same month has multiple entries (境界値: entriesByDateにキーが無い日付)', async () => {
+    it('does not show a dot or badge on a day with no entries (entriesByDate has no key for it), even while another day in the same month has multiple entries (境界値: entriesByDateにキーが無い日付)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       const storedEntries = [
@@ -2744,17 +2683,28 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await screen.findByText('朝の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       // 複数件の日には1つだけバッジが表示され、日記の無い日(dayWithoutEntry)には表示されない。
       // dayWithEntryとdayWithoutEntryの範囲は重複しないため、バッジが1個のみであることの確認は
       // dayWithoutEntry側にバッジが無いことの確認を兼ねる
-      expect(screen.getByText('+1')).toBeTruthy();
-      expect(screen.getAllByText(/^\+\d+$/)).toHaveLength(1);
       expect(findEntryCountBadgeViews()).toHaveLength(1);
+      expect(findEntryDotViews()).toHaveLength(0);
+    });
 
-      // 上記の通りバッジは合計1個(dayWithEntry分)のみであるため、
-      // dayWithoutEntryのセルにはバッジが表示されていないことも合わせて確認できている。
+    it('renders the dot with tintColor as its background, following the same theme-color convention as the count badge (正常系: 単一件数のテーマ色)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '1件のみの日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const [dotView] = findEntryDotViews();
+      expect(StyleSheet.flatten(dotView.props.style).backgroundColor).toBe(Colors.light.tint);
     });
 
     it('renders the badge with tintColor as its background and backgroundColor as its text color, following the same theme-color convention as the today badge (異常系/回帰防止: テーマ色の取り違え防止)', async () => {
@@ -2767,9 +2717,9 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await screen.findByText('朝の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      const badgeText = screen.getByText('+1');
+      const [badgeText] = findEntryCountBadgeTexts();
       expect(StyleSheet.flatten(badgeText.props.style).color).toBe(Colors.light.background);
 
       const [badgeView] = findEntryCountBadgeViews();
@@ -2786,9 +2736,9 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await screen.findByText('朝の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      const badgeText = screen.getByText('+1');
+      const [badgeText] = findEntryCountBadgeTexts();
       const flattened = StyleSheet.flatten(badgeText.props.style);
       // ThemedTextのdefaultスタイルのlineHeight(24)をそのまま引き継ぐと、高さ16pxのバッジ内で
       // 数字が下寄りになるため、fontSizeに近い値が明示的に上書きされていることを確認する
@@ -2796,7 +2746,7 @@ describe('HomeScreen', () => {
       expect(flattened.lineHeight).toBeLessThan(24);
     });
 
-    it('shows a "+10" badge when a day has 11 diary entries, confirming double-digit counts still render correctly inside the badge (境界値: 2桁の件数)', async () => {
+    it('shows a count badge displaying the total "11" (not "+10") when a day has 11 diary entries, confirming double-digit counts still render correctly inside the badge (境界値: 2桁の件数)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       const storedEntries = Array.from({ length: 11 }, (_, i) => ({
@@ -2807,9 +2757,12 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await screen.findByText('0件目の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      expect(screen.getByText('+10')).toBeTruthy();
+      const badgeTexts = findEntryCountBadgeTexts();
+      expect(badgeTexts).toHaveLength(1);
+      expect(String(badgeTexts[0].props.children)).toBe('11');
+      expect(screen.queryByText('+10')).toBeNull();
       expect(findEntryCountBadgeViews()).toHaveLength(1);
     });
 
@@ -2823,18 +2776,19 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await screen.findByText('朝の日記');
-      expect(screen.getByText('+1')).toBeTruthy();
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      expect(findEntryCountBadgeViews()).toHaveLength(1);
 
-      fireEvent.press(screen.getByText('朝の日記'));
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
       fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
       await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
 
-      expect(screen.getByText('+1')).toBeTruthy();
+      expect(findEntryCountBadgeViews()).toHaveLength(1);
+      expect(String(findEntryCountBadgeTexts()[0].props.children)).toBe('2');
     });
 
-    it('updates the badge from "+1" to "+2" once a third entry is saved for a day that already had 2 entries (正常系: 動的な件数増加への追従)', async () => {
+    it('updates the badge from "2" to "3" once a third entry is saved for a day that already had 2 entries (正常系: 動的な件数増加への追従)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       const storedEntries = [
@@ -2844,8 +2798,8 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await screen.findByText('朝の日記');
-      expect(screen.getByText('+1')).toBeTruthy();
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      expect(String(findEntryCountBadgeTexts()[0].props.children)).toBe('2');
 
       // 保存欄からの追加は「今日」の日付にしか保存できない実装のため、pickTestDaysが選ぶ範囲
       // (10〜20日)と実行日が一致しない限り直接は再現できない。そのためAsyncStorageへ直接
@@ -2858,8 +2812,65 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(threeEntries), key));
       triggerRefocus();
 
-      await waitFor(() => expect(screen.getByText('+2')).toBeTruthy());
-      expect(screen.queryByText('+1')).toBeNull();
+      await waitFor(() => expect(String(findEntryCountBadgeTexts()[0].props.children)).toBe('3'));
+    });
+
+    it('changes the dot to a count badge once a second entry is added to a day that had exactly 1 entry (正常系: ドットからバッジへの切り替わり)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const storedEntries = [
+        { id: '1', text: '1件目の日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      expect(findEntryDotViews()).toHaveLength(1);
+      expect(findEntryCountBadgeViews()).toHaveLength(0);
+
+      const key = await getOrCreateEncryptionKey();
+      const twoEntries = [
+        ...storedEntries,
+        { id: '2', text: '2件目の日記', createdAt: isoAt(now, dayWithEntry, 21, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, encryptText(JSON.stringify(twoEntries), key));
+      triggerRefocus();
+
+      await waitFor(() => expect(findEntryCountBadgeViews()).toHaveLength(1));
+      expect(findEntryDotViews()).toHaveLength(0);
+      expect(String(findEntryCountBadgeTexts()[0].props.children)).toBe('2');
+    });
+
+    it('includes the entry count in the accessibilityLabel of a day cell with diary entries, e.g. "日記あり(3件)" (アクセシビリティ)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const storedEntries = [
+        { id: '1', text: '朝の日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
+        { id: '2', text: '昼の日記', createdAt: isoAt(now, dayWithEntry, 12, 0) },
+        { id: '3', text: '夜の日記', createdAt: isoAt(now, dayWithEntry, 21, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const expectedLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${dayWithEntry}日、日記あり(3件)`;
+      expect(screen.getByLabelText(expectedLabel)).toBeTruthy();
+    });
+
+    it('includes the entry count of 1 in the accessibilityLabel of a day cell with a single diary entry, e.g. "日記あり(1件)" (アクセシビリティ/境界値)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: '1件のみの日記', createdAt: isoAt(now, dayWithEntry) }]),
+      );
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const expectedLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${dayWithEntry}日、日記あり(1件)`;
+      expect(screen.getByLabelText(expectedLabel)).toBeTruthy();
     });
   });
 
@@ -2905,31 +2916,44 @@ describe('HomeScreen', () => {
       expect(todayNumber?.props.maxFontSizeMultiplier).toBe(EXPECTED_MAX_FONT_SCALE);
     });
 
-    it('sets maxFontSizeMultiplier on the diary title shown inside a day cell', async () => {
+    it('sets maxFontSizeMultiplier on the entry-count badge text shown inside a day cell with 2 or more entries', async () => {
       const now = new Date();
       const day = pickNonTodayDayInRange(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: 'フォント拡大確認用の日記', createdAt: isoAt(now, day) }]),
-      );
+      const storedEntries = [
+        { id: '1', text: 'フォント拡大確認用の日記1', createdAt: isoAt(now, day, 7, 0) },
+        { id: '2', text: 'フォント拡大確認用の日記2', createdAt: isoAt(now, day, 21, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      const title = await screen.findByText('フォント拡大確認用の日記');
-      expect(title.props.maxFontSizeMultiplier).toBe(EXPECTED_MAX_FONT_SCALE);
+      // 日付セルの数字(例: 二桁未満の日付)と表示内容が衝突しうるため、バッジテキストに
+      // 固有のスタイル(lineHeight: 11)を目印に絞り込む
+      const [badgeText] = screen.UNSAFE_getAllByType(Text).filter((node) => {
+        const flattened = StyleSheet.flatten(node.props.style ?? {});
+        return flattened.lineHeight === 11;
+      });
+      expect(badgeText.props.maxFontSizeMultiplier).toBe(EXPECTED_MAX_FONT_SCALE);
     });
 
-    it('still shows the day number and diary title as before (regression check: adding maxFontSizeMultiplier does not change rendered content)', async () => {
+    it('still shows the day number and entry-count badge as before (regression check: adding maxFontSizeMultiplier does not change rendered content)', async () => {
       const now = new Date();
       const day = pickNonTodayDayInRange(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '回帰確認用の日記', createdAt: isoAt(now, day) }]),
-      );
+      const storedEntries = [
+        { id: '1', text: '回帰確認用の日記1', createdAt: isoAt(now, day, 7, 0) },
+        { id: '2', text: '回帰確認用の日記2', createdAt: isoAt(now, day, 21, 0) },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      expect(await screen.findByText('回帰確認用の日記')).toBeTruthy();
+      const badgeViews = screen.UNSAFE_getAllByType(View).filter((node) => {
+        const flattened = StyleSheet.flatten(node.props.style ?? {});
+        return flattened.minWidth === 16 && flattened.height === 16;
+      });
+      expect(badgeViews).toHaveLength(1);
       expect(screen.getByText(String(day))).toBeTruthy();
     });
   });
@@ -2953,9 +2977,11 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await screen.findByText('日付一桁テスト');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      fireEvent.press(screen.getByText('日付一桁テスト'));
+      // 1桁の日付は前後月の「はみ出し」セルの数字と衝突しうるため、
+      // 日記が実際に存在するセルに絞り込んでからタップする
+      fireEvent.press(queryCalendarDayButtonsWithEntry()[0]);
 
       const expected = `${now.getFullYear()}/${padTwo(now.getMonth() + 1)}/${padTwo(singleDigitDay)} 09:05`;
       expect(await screen.findByText(expected)).toBeTruthy();
@@ -2970,9 +2996,9 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await screen.findByText('真夜中テスト');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      fireEvent.press(screen.getByText('真夜中テスト'));
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
 
       const expected = `${now.getFullYear()}/${padTwo(now.getMonth() + 1)}/${padTwo(dayWithEntry)} 00:00`;
       expect(await screen.findByText(expected)).toBeTruthy();
@@ -2987,9 +3013,9 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await screen.findByText('時刻一桁テスト');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      fireEvent.press(screen.getByText('時刻一桁テスト'));
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
 
       const expected = `${now.getFullYear()}/${padTwo(now.getMonth() + 1)}/${padTwo(dayWithEntry)} 09:30`;
       expect(await screen.findByText(expected)).toBeTruthy();
@@ -3024,8 +3050,8 @@ describe('HomeScreen', () => {
         );
 
         render(<HomeScreen />);
-        await screen.findByText(text);
-        fireEvent.press(screen.getByText(text));
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
         await screen.findByText(CLOSE_BUTTON_TEXT);
         fireEvent.press(screen.getByText('編集'));
         await screen.findByText('日記を編集');
@@ -3098,8 +3124,8 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('編集前の日記');
-      fireEvent.press(screen.getByText('編集前の日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       fireEvent.press(screen.getByText('編集'));
@@ -3120,8 +3146,8 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('編集前の日記');
-      fireEvent.press(screen.getByText('編集前の日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
       fireEvent.press(screen.getByText('編集'));
       await screen.findByText('日記を編集');
@@ -3150,8 +3176,8 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('編集キャンセル対象');
-      fireEvent.press(screen.getByText('編集キャンセル対象'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       fireEvent.press(screen.getByText('編集'));
@@ -3185,8 +3211,8 @@ describe('HomeScreen', () => {
         jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
         render(<HomeScreen />);
-        await screen.findByText('編集モーダル背景タップ対象の日記');
-        fireEvent.press(screen.getByText('編集モーダル背景タップ対象の日記'));
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
         await screen.findByText(CLOSE_BUTTON_TEXT);
 
         fireEvent.press(screen.getByText('編集'));
@@ -3246,8 +3272,8 @@ describe('HomeScreen', () => {
         );
 
         render(<HomeScreen />);
-        await screen.findByText('編集モーダルガード確認用の日記');
-        fireEvent.press(screen.getByText('編集モーダルガード確認用の日記'));
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
         await screen.findByText(CLOSE_BUTTON_TEXT);
 
         fireEvent.press(screen.getByText('編集'));
@@ -3289,8 +3315,8 @@ describe('HomeScreen', () => {
         jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
         render(<HomeScreen />);
-        await screen.findByText(text);
-        fireEvent.press(screen.getByText(text));
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
         await screen.findByText(CLOSE_BUTTON_TEXT);
         fireEvent.press(screen.getByText('編集'));
         await screen.findByText('日記を編集');
@@ -3468,8 +3494,8 @@ describe('HomeScreen', () => {
         jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
         render(<HomeScreen />);
-        await screen.findByText(text);
-        fireEvent.press(screen.getByText(text));
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
         await screen.findByText(CLOSE_BUTTON_TEXT);
         fireEvent.press(screen.getByText('編集'));
         await screen.findByText('日記を編集');
@@ -3492,8 +3518,8 @@ describe('HomeScreen', () => {
         jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
         render(<HomeScreen />);
-        await screen.findByText('一覧閉じる・未オープン対象の日記');
-        fireEvent.press(screen.getByText('一覧閉じる・未オープン対象の日記'));
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
         await screen.findByText(CLOSE_BUTTON_TEXT);
 
         const [entryListModal] = screen.UNSAFE_getAllByType(Modal);
@@ -3581,13 +3607,14 @@ describe('HomeScreen', () => {
         expect(AsyncStorage.setItem).not.toHaveBeenCalled();
 
         // 元の本文は変更されずに残っている(破棄されたのはeditDraftのみ)
-        expect(screen.getAllByText('一覧閉じる破棄対象の日記').length).toBeGreaterThanOrEqual(1);
+        expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
         expect(screen.queryByText('破棄される内容(一覧)')).toBeNull();
 
         // editDraftがリセットされていることを、再度日付セルを押して確認する
         // (前回破棄した内容が残っていれば、再度「編集」を押した際のTextInputの表示値が
         // '破棄される内容(一覧)'のままになってしまうはず)
-        fireEvent.press(screen.getByText('一覧閉じる破棄対象の日記'));
+        const { dayWithEntry } = pickTestDays(new Date());
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
         await screen.findByText(CLOSE_BUTTON_TEXT);
         fireEvent.press(screen.getByText('編集'));
         await screen.findByText('日記を編集');
@@ -3607,8 +3634,8 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('編集前の日記');
-      fireEvent.press(screen.getByText('編集前の日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
       fireEvent.press(screen.getByText('編集'));
       await screen.findByText('日記を編集');
@@ -3649,8 +3676,8 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('空にされる日記');
-      fireEvent.press(screen.getByText('空にされる日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
       fireEvent.press(screen.getByText('編集'));
       await screen.findByText('日記を編集');
@@ -3671,8 +3698,8 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('編集前の日記');
-      fireEvent.press(screen.getByText('編集前の日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
       fireEvent.press(screen.getByText('編集'));
       await screen.findByText('日記を編集');
@@ -3701,8 +3728,8 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('文字数上限確認用');
-      fireEvent.press(screen.getByText('文字数上限確認用'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
       fireEvent.press(screen.getByText('編集'));
       await screen.findByText('日記を編集');
@@ -3730,8 +3757,8 @@ describe('HomeScreen', () => {
         );
 
         render(<HomeScreen />);
-        await screen.findByText(initialText);
-        fireEvent.press(screen.getByText(initialText));
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
         await screen.findByText(CLOSE_BUTTON_TEXT);
         fireEvent.press(screen.getByText('編集'));
         await screen.findByText('日記を編集');
@@ -3773,8 +3800,8 @@ describe('HomeScreen', () => {
       jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
 
       render(<HomeScreen />);
-      await screen.findByText('編集前の日記');
-      fireEvent.press(screen.getByText('編集前の日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
       fireEvent.press(screen.getByText('編集'));
       await screen.findByText('日記を編集');
@@ -3810,8 +3837,8 @@ describe('HomeScreen', () => {
       jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
 
       render(<HomeScreen />);
-      await screen.findByText('編集前の日記');
-      fireEvent.press(screen.getByText('編集前の日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
       fireEvent.press(screen.getByText('編集'));
       await screen.findByText('日記を編集');
@@ -3856,8 +3883,8 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('編集前の日記');
-      fireEvent.press(screen.getByText('編集前の日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
       fireEvent.press(screen.getByText('編集'));
       await screen.findByText('日記を編集');
@@ -3914,8 +3941,8 @@ describe('HomeScreen', () => {
       jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
       render(<HomeScreen />);
-      await screen.findByText('削除確認用の日記');
-      fireEvent.press(screen.getByText('削除確認用の日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       const deleteLink = screen.getByText('削除');
@@ -3950,8 +3977,8 @@ describe('HomeScreen', () => {
       jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
       render(<HomeScreen />);
-      await screen.findByText('残る日記');
-      fireEvent.press(screen.getByText('残る日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText('削除される日記');
 
       // 時刻昇順で描画されるため、2件目(削除される日記)の削除ボタンは配列の2番目
@@ -3987,8 +4014,8 @@ describe('HomeScreen', () => {
       jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
       render(<HomeScreen />);
-      await screen.findByText('キャンセル対象の日記');
-      fireEvent.press(screen.getByText('キャンセル対象の日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       fireEvent.press(screen.getByText('削除'));
@@ -4009,8 +4036,8 @@ describe('HomeScreen', () => {
       jest.spyOn(AsyncStorage, 'removeItem').mockRejectedValueOnce(new Error('remove failed'));
 
       render(<HomeScreen />);
-      await screen.findByText('削除失敗する日記');
-      fireEvent.press(screen.getByText('削除失敗する日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       fireEvent.press(screen.getByText('削除'));
@@ -4040,11 +4067,11 @@ describe('HomeScreen', () => {
       jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
       render(<HomeScreen />);
-      await screen.findByText('その日最後の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
       // 削除前は、日記が実際に存在するカレンダーセルが1つ存在する
       expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
 
-      fireEvent.press(screen.getByText('その日最後の日記'));
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       fireEvent.press(screen.getByText('削除'));
@@ -4111,7 +4138,7 @@ describe('HomeScreen', () => {
       expect(modals[0].props.visible).toBe(false);
     });
 
-    it("saves a new entry anchored to local noon of the tapped date as createdAt (regardless of the current time-of-day), persists it encrypted, closes the modal, and reflects the title in that day's calendar cell", async () => {
+    it("saves a new entry anchored to local noon of the tapped date as createdAt (regardless of the current time-of-day), persists it encrypted, closes the modal, and reflects the entry in that day's calendar cell", async () => {
       const now = new Date();
       const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
 
@@ -4146,8 +4173,8 @@ describe('HomeScreen', () => {
       });
 
       // entriesByDateはcreatedAtの日付(=タップした日付)をキーにするため、
-      // 対象日のカレンダーセルにタイトルとして反映される
-      expect(screen.getByText('過去日の新規日記')).toBeTruthy();
+      // 対象日のカレンダーセルに日記件数インジケーターとして反映される
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
     });
 
     it('shows an error message and rolls back the optimistic calendar update when persisting the new entry fails, keeping the modal open with the input preserved (異常系)', async () => {
@@ -4308,9 +4335,9 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('既存の日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      fireEvent.press(screen.getByText('既存の日記'));
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
 
       await screen.findByText(CLOSE_BUTTON_TEXT);
       const modals = screen.UNSAFE_getAllByType(Modal);
@@ -4352,8 +4379,8 @@ describe('HomeScreen', () => {
       mockSetStringAsync.mockResolvedValueOnce(true);
 
       render(<HomeScreen />);
-      await screen.findByText('コピー対象の日記本文');
-      fireEvent.press(screen.getByText('コピー対象の日記本文'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       fireEvent.press(screen.getByText('コピー'));
@@ -4375,8 +4402,8 @@ describe('HomeScreen', () => {
       mockSetStringAsync.mockResolvedValueOnce(true);
 
       render(<HomeScreen />);
-      await screen.findByText('トースト確認用の日記');
-      fireEvent.press(screen.getByText('トースト確認用の日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       expect(screen.queryByText('コピーしました')).toBeNull();
@@ -4401,8 +4428,8 @@ describe('HomeScreen', () => {
       mockSetStringAsync.mockResolvedValueOnce(true);
 
       render(<HomeScreen />);
-      await screen.findByText('モーダル再オープン確認用');
-      fireEvent.press(screen.getByText('モーダル再オープン確認用'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       fireEvent.press(screen.getByText('コピー'));
@@ -4412,7 +4439,7 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
       await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
 
-      fireEvent.press(screen.getByText('モーダル再オープン確認用'));
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
       expect(screen.queryByText('コピーしました')).toBeNull();
     });
@@ -4431,8 +4458,8 @@ describe('HomeScreen', () => {
       mockSetStringAsync.mockRejectedValueOnce(new Error('clipboard write failed'));
 
       render(<HomeScreen />);
-      await screen.findByText('コピー失敗確認用の日記');
-      fireEvent.press(screen.getByText('コピー失敗確認用の日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       await act(async () => {
@@ -4460,8 +4487,8 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('アクセシビリティ確認用の日記');
-      fireEvent.press(screen.getByText('アクセシビリティ確認用の日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       const copyButton = screen.getByRole('button', { name: '日記本文をコピー' });
@@ -4520,9 +4547,9 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('Aの日記(削除される)');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      fireEvent.press(screen.getByText('Aの日記(削除される)'));
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText('Bの日記(編集前)');
 
       // Aの削除を確定する。楽観的UI更新は同期的に反映されるが、AsyncStorageへの
@@ -4613,9 +4640,9 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await screen.findByText('残る日記');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      fireEvent.press(screen.getByText('残る日記'));
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText('削除される日記');
 
       const deleteButtons = screen.getAllByText('削除');
@@ -4683,7 +4710,8 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      expect(await screen.findByText('既存の日記')).toBeTruthy();
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
 
       // 新規保存を開始する。楽観的UI更新は同期的に反映されるが、AsyncStorageへの実際の
       // 書き込み(enqueueDiaryWrite内のsetItem)はpendingのまま止まる
@@ -4691,8 +4719,9 @@ describe('HomeScreen', () => {
       fireEvent.press(screen.getByText('保存'));
 
       await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
-      // 楽観的UI更新により、書き込みが完了する前から新しい日記が一覧に表示されている
-      expect(screen.getByText('新しい日記')).toBeTruthy();
+      // 楽観的UI更新により、書き込みが完了する前から新しい日記のセルが一覧に加わっている
+      // (既存の日記の日・新規保存(今日)の日、あわせて2セル)
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(2);
 
       const getItemMock = AsyncStorage.getItem as jest.Mock;
       const getItemCallsWhilePending = getItemMock.mock.calls.length;
@@ -4705,10 +4734,9 @@ describe('HomeScreen', () => {
       // 修正前は、pending中の書き込みを待たずに即座にAsyncStorageを読み直し、まだ反映されていない
       // 古い内容で一覧を上書きしてしまっていた。修正後はキューの完了を待つため追加のgetItem呼び出しは発生しない
       expect(getItemMock.mock.calls.length).toBe(getItemCallsWhilePending);
-      // 読み直しがブロックされている間も、楽観的更新済みの新しい日記の表示が古い状態へ
+      // 読み直しがブロックされている間も、楽観的更新済みの新しい日記のセルが古い状態へ
       // 巻き戻ってちらつくことはない
-      expect(screen.getByText('新しい日記')).toBeTruthy();
-      expect(screen.getByText('既存の日記')).toBeTruthy();
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(2);
 
       // pending中の書き込みを完了させる
       await act(async () => {
@@ -4721,9 +4749,8 @@ describe('HomeScreen', () => {
       );
 
       // 最終的に画面には、pending中だった書き込みが反映された最新の状態(既存+新規)が
-      // 表示され続けている(一時的にせよ新しい日記が消えることはなかった)
-      expect(screen.getByText('新しい日記')).toBeTruthy();
-      expect(screen.getByText('既存の日記')).toBeTruthy();
+      // 表示され続けている(一時的にせよ新しい日記のセルが消えることはなかった)
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(2);
 
       // 実際に永続化された内容にも新しい日記が反映されている(新規保存は自分専用の個別キーに書き込まれる)
       const setItemMock = AsyncStorage.setItem as jest.Mock;
@@ -4749,7 +4776,8 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      expect(await screen.findByText('既存の日記')).toBeTruthy();
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
 
       const getItemMock = AsyncStorage.getItem as jest.Mock;
       const callsBeforeRefocus = getItemMock.mock.calls.length;
@@ -4763,7 +4791,7 @@ describe('HomeScreen', () => {
       await waitFor(() =>
         expect(getItemMock.mock.calls.length).toBeGreaterThan(callsBeforeRefocus),
       );
-      expect(screen.getByText('既存の日記')).toBeTruthy();
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
     });
   });
 
@@ -4824,8 +4852,8 @@ describe('HomeScreen', () => {
       jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
 
       render(<HomeScreen />);
-      await screen.findByText('編集前の日記');
-      fireEvent.press(screen.getByText('編集前の日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
       fireEvent.press(screen.getByText('編集'));
       await screen.findByText('日記を編集');
@@ -4856,8 +4884,8 @@ describe('HomeScreen', () => {
       mockedUseColorScheme.mockReturnValue('dark');
 
       render(<HomeScreen />);
-      await screen.findByText('削除確認用の日記');
-      fireEvent.press(screen.getByText('削除確認用の日記'));
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(screen.getByText(String(dayWithEntry)));
       await screen.findByText(CLOSE_BUTTON_TEXT);
 
       const deleteLink = screen.getByText('削除');
@@ -4878,7 +4906,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('今日は公園を散歩した');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       // 検索欄は表示されているが、キーワード未入力のうちは検索結果一覧(「見つかりませんでした」等)は表示されない
       expect(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER)).toBeTruthy();
@@ -4898,7 +4926,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('今日は公園を散歩した');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
       fireEvent.changeText(searchInput, '公園');
@@ -4919,7 +4947,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('今日は公園を散歩した');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       fireEvent.changeText(
         screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER),
@@ -4941,7 +4969,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('今日は公園を散歩した');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
       fireEvent.changeText(searchInput, '該当しないはずのキーワード');
@@ -4950,7 +4978,7 @@ describe('HomeScreen', () => {
       fireEvent.changeText(searchInput, '');
       await waitFor(() => expect(screen.queryByText('見つかりませんでした')).toBeNull());
       // 通常のカレンダー表示(セル)に戻っている
-      expect(screen.getByText('今日は公園を散歩した')).toBeTruthy();
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
     });
 
     it('opens the day-entry modal for the tapped search result, using the existing selectedDate modal', async () => {
@@ -4965,7 +4993,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('今日は公園を散歩した');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
       const resultItem = await screen.findByText(/公園/);
@@ -5011,7 +5039,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('今日は公園を散歩した');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
       await screen.findByText(/公園/);
@@ -5034,7 +5062,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('今日はAppleパイを食べた');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
 
@@ -5060,13 +5088,13 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await screen.findByText('今日は公園を散歩した');
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       // 空白のみのキーワードはtrim後に空文字列として扱われ、検索結果一覧(0件メッセージ含む)は表示されない
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '   ');
 
       expect(screen.queryByText('見つかりませんでした')).toBeNull();
-      expect(screen.getByText('今日は公園を散歩した')).toBeTruthy();
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
     });
 
     it('sorts multiple matching search results by date, newest first', async () => {
@@ -5163,7 +5191,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await screen.findByText('今日は公園を散歩した');
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
         const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
         fireEvent.changeText(searchInput, '公園');
@@ -5175,7 +5203,7 @@ describe('HomeScreen', () => {
         // クリア後は検索結果一覧ではなく通常のカレンダー表示(セル)に戻り、
         // クリアボタン自体も再び非表示になる
         await waitFor(() => expect(screen.queryByLabelText('検索キーワードをクリア')).toBeNull());
-        expect(screen.getByText('今日は公園を散歩した')).toBeTruthy();
+        expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
       });
 
       it('shows the clear button even for a whitespace-only query, even though the calendar view (not the results list) stays shown (boundary: clear button visibility uses the raw searchQuery, not the trimmed value)', async () => {
@@ -5227,7 +5255,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await screen.findByText('今日は123円のパンを買った');
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '１２３');
 
@@ -5246,7 +5274,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await screen.findByText('今日は１２３円のパンを買った');
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '123');
 
@@ -5265,7 +5293,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await screen.findByText('昼にラーメンを食べた');
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'らーめん');
 
@@ -5284,7 +5312,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await screen.findByText('昼にらーめんを食べた');
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'ラーメン');
 
@@ -5303,7 +5331,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await screen.findByText('朝はコーヒーを飲んだ');
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'ｺｰﾋｰ');
 
@@ -5323,7 +5351,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await screen.findByText('今日はCafeでコーヒーを飲んだ');
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
         // 大文字小文字表記ゆれ(既存機能)と全角/半角表記ゆれ(今回の対応)が両方壊れていないことを、
         // 全て小文字の半角"cafe"で検索して確認する
@@ -5344,7 +5372,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await screen.findByText('今日は123円のパンを買った');
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
         // 全角へ正規化しても本文には存在しない数字なので、ヒットしない
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '４５６');
