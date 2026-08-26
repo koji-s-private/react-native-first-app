@@ -184,6 +184,15 @@ describe('DayEntriesScreen', () => {
     expect(flattened.indexOf('朝の出来事')).toBeLessThan(flattened.indexOf('夜の出来事'));
   });
 
+  it('renders an empty list without crashing when no entries exist for the given date (異常系/境界値: 空の日)', async () => {
+    render(<DayEntriesScreen />);
+
+    await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+    expect(screen.queryByText('コピー')).toBeNull();
+    expect(screen.queryByText('編集')).toBeNull();
+    expect(screen.queryByText('削除')).toBeNull();
+  });
+
   it("shows each entry's date/time in a 'YYYY/MM/DD HH:mm' format", async () => {
     await seedDiaryEntries([{ id: '1', text: '日記本文', createdAt: localIso(DATE_KEY, 9, 5) }]);
 
@@ -333,6 +342,25 @@ describe('DayEntriesScreen', () => {
       expect(screen.getByText('残る日記')).toBeTruthy();
       expect(await AsyncStorage.getItem(buildDiaryEntryKey('2'))).toBeNull();
       expect(await AsyncStorage.getItem(buildDiaryEntryKey('1'))).not.toBeNull();
+    });
+
+    it('leaves an empty list (without crashing) after deleting the only entry for the date (境界値: 最後の1件を削除)', async () => {
+      await seedDiaryEntries([{ id: '1', text: '最後の1件', createdAt: localIso(DATE_KEY, 9, 0) }]);
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<DayEntriesScreen />);
+      await screen.findByText('最後の1件');
+
+      fireEvent.press(screen.getByText('削除'));
+      const [, , buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+      const confirmButton = buttons.find((b: { text: string }) => b.text === '削除');
+      await act(async () => {
+        confirmButton.onPress();
+      });
+
+      await waitFor(() => expect(screen.queryByText('最後の1件')).toBeNull());
+      expect(screen.queryByText('削除')).toBeNull();
+      expect(await AsyncStorage.getItem(buildDiaryEntryKey('1'))).toBeNull();
     });
 
     it('does not delete the entry when "キャンセル" is chosen in the confirmation dialog (正常系)', async () => {
