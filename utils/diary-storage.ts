@@ -205,6 +205,33 @@ export async function getAllDiaryEntries(): Promise<DiaryEntry[]> {
 }
 
 /**
+ * idを指定して日記エントリ1件だけをAsyncStorageから取得する。
+ * `app/edit-entry/[id].tsx`(編集画面)が、全件を読み込む`getAllDiaryEntries`を使わずに
+ * 対象の1件だけをO(1)で取得するために使う。
+ * 見つからない場合・復号やパースに失敗した場合はnullを返す(呼び出し元での例外処理を不要にする)。
+ */
+export async function getDiaryEntryById(id: string): Promise<DiaryEntry | null> {
+  try {
+    const stored = await AsyncStorage.getItem(buildDiaryEntryKey(id));
+    if (!stored) {
+      return null;
+    }
+
+    let parsed: unknown;
+    if (isEncryptedPayload(stored)) {
+      const key = await getOrCreateEncryptionKey();
+      parsed = JSON.parse(decryptText(stored, key));
+    } else {
+      // 暗号化対応前に保存された平文JSON(後方互換)
+      parsed = JSON.parse(stored);
+    }
+    return isDiaryEntry(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 日記エントリ1件を暗号化して該当の個別キーに保存する(新規追加・編集どちらでも使う)。
  * 1回のAsyncStorage書き込みで完結し、他のエントリの読み書きは発生させない。
  */

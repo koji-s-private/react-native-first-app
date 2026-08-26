@@ -1,6 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import * as Clipboard from 'expo-clipboard';
 import { randomUUID } from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
@@ -30,6 +29,8 @@ import { buildDiaryEntryKey, type DiaryEntry } from '@/utils/diary-storage';
 
 // `expo-router`の`Link`(Trigger/Preview/Menuを伴う複合API)はナビゲーション/routerコンテキストを
 // 要求するため、単体レンダリングでも動くよう単純なパススルーコンポーネントに差し替える。
+// `useRouter`も同様にナビゲーションコンテキストを要求するため、`push`呼び出しをテストから
+// 検証できるjest.fnに差し替える(Issue #221: 日付タップ/検索結果タップでの画面遷移の検証に使う)。
 jest.mock('expo-router', () => {
   const PassThrough = ({ children }: PropsWithChildren) => children;
 
@@ -79,7 +80,12 @@ jest.mock('expo-router', () => {
     }
   }
 
-  return { Link, useFocusEffect, __triggerRefocus };
+  const mockPush = jest.fn();
+  function useRouter() {
+    return { push: mockPush };
+  }
+
+  return { Link, useFocusEffect, useRouter, __triggerRefocus, __mockPush: mockPush };
 });
 
 // jest-expoのオートモックは`randomUUID()`が常に`undefined`を返すため、ID一意性検証のために
@@ -102,12 +108,6 @@ jest.mock('expo-crypto', () => {
 jest.mock('expo-haptics', () => ({
   notificationAsync: jest.fn(() => Promise.resolve()),
   NotificationFeedbackType: { Success: 'success' },
-}));
-
-// jest-expoのオートモックだと`setStringAsync`が実際のPromiseを返さず呼び出し引数の検証や
-// reject時の異常系テストが行えないため、expo-hapticsと同様に明示的なモックへ差し替える。
-jest.mock('expo-clipboard', () => ({
-  setStringAsync: jest.fn(() => Promise.resolve(true)),
 }));
 
 jest.mock('expo-secure-store', () => {
@@ -170,11 +170,11 @@ jest.mock('react-native/Libraries/Components/Keyboard/KeyboardAvoidingView', () 
 
 const mockRandomUUID = randomUUID as jest.Mock;
 const mockNotificationAsync = Haptics.notificationAsync as jest.Mock;
-const mockSetStringAsync = Clipboard.setStringAsync as jest.Mock;
 const secureStoreMock = SecureStore as unknown as { __reset: () => void };
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { __triggerRefocus: triggerRefocus } = require('expo-router') as {
+const { __triggerRefocus: triggerRefocus, __mockPush: mockPush } = require('expo-router') as {
   __triggerRefocus: () => void;
+  __mockPush: jest.Mock;
 };
 
 const STORAGE_KEY = 'diary-entries';
@@ -212,19 +212,6 @@ function queryCalendarDayButtonsWithEntry() {
 async function decryptPersistedEntry(encryptedValue: string): Promise<unknown> {
   const key = await getOrCreateEncryptionKey();
   return JSON.parse(decryptText(encryptedValue, key));
-}
-
-// テストの事前状態として、指定したエントリ群をエントリ単位の個別キー(`diary-entry:<id>`)へ
-// 暗号化して直接書き込むヘルパー。実装側(utils/diary-storage.ts)の保存方式と揃えることで、
-// レガシーの単一キー方式からの移行(マイグレーション)を経由せずに直接テスト対象の状態を作れる。
-async function seedDiaryEntries(entries: DiaryEntry[]): Promise<void> {
-  const key = await getOrCreateEncryptionKey();
-  for (const entry of entries) {
-    await AsyncStorage.setItem(
-      buildDiaryEntryKey(entry.id),
-      encryptText(JSON.stringify(entry), key),
-    );
-  }
 }
 
 // 個別キー方式で保存されているエントリを1件、AsyncStorageから直接読み取って復号するヘルパー
@@ -266,16 +253,14 @@ function isoAt(now: Date, day: number, hour = 9, minute = 0): string {
   return new Date(now.getFullYear(), now.getMonth(), day, hour, minute, 0).toISOString();
 }
 
-// 実装側(`app/(tabs)/index.tsx`)の非公開関数`formatEntryDateTime`と同じ'YYYY/MM/DD HH:mm'形式で
-// 日時を整形するテスト用ヘルパー。エントリ一覧モーダル内の時刻表示を検証するために使う
-function formatEntryDateTimeForTest(isoString: string): string {
-  const date = new Date(isoString);
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  const hours = `${date.getHours()}`.padStart(2, '0');
-  const minutes = `${date.getMinutes()}`.padStart(2, '0');
-  return `${year}/${month}/${day} ${hours}:${minutes}`;
+// 実装側の`toDateKey`と同じ'YYYY-MM-DD'形式のキーを組み立てるテスト用ヘルパー。
+// 日付タップ/検索結果タップ時に`router.push`へ渡される遷移先パスを検証するために使う
+// (Issue #221: 日付一覧モーダルを day-entries/[date] 画面への遷移に置き換えたことに伴う)
+function toDateKeyForTest(now: Date, day: number): string {
+  const year = now.getFullYear();
+  const month = `${now.getMonth() + 1}`.padStart(2, '0');
+  const paddedDay = `${day}`.padStart(2, '0');
+  return `${year}-${month}-${paddedDay}`;
 }
 
 // レンダリング結果(`screen.toJSON()`)から、画面に出現するテキストを出現順に一次元配列へ展開する。
@@ -488,41 +473,17 @@ describe('HomeScreen', () => {
     });
 
     // FlatListはメモ化されていない素のクラスコンポーネントのため`screen.UNSAFE_queryAllByType(FlatList)`
-    // で直接特定できる。また、日付一覧モーダルはReact Native実装上、一度も開いていない
-    // (visible=falseのまま)状態では内部state `isRendered` もfalseのままで中身がマウントされない
-    // (一度trueになると閉じてもマウントされ続ける)ため、検証には先に日付セルをタップして開く必要がある。
+    // で直接特定できる。日付一覧はIssue #221で専用画面(day-entries/[date].tsx)へ遷移する方式に
+    // 変わったため、この画面(HomeScreen)に残るFlatListは検索結果一覧のみになった。
     function queryAllFlatLists() {
       return screen.UNSAFE_queryAllByType(FlatList);
     }
 
-    it('does not mount the entry-list modal FlatList until the modal has been opened at least once (前提条件の確認)', async () => {
+    it('does not mount any FlatList until a search keyword is entered (前提条件の確認)', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       expect(queryAllFlatLists()).toHaveLength(0);
-    });
-
-    it('sets keyboardDismissMode="on-drag" on the entry-list modal FlatList once it is opened, so dragging it also dismisses the keyboard (正常系)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([
-          { id: '1', text: 'キーボード確認用の日記', createdAt: isoAt(now, dayWithEntry) },
-        ]),
-      );
-      jest.clearAllMocks();
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      // 検索キーワード未入力のため、日付一覧モーダル用のFlatListのみが該当する
-      const flatLists = queryAllFlatLists();
-      expect(flatLists).toHaveLength(1);
-      expect(flatLists[0].props.keyboardDismissMode).toBe('on-drag');
     });
 
     it('sets keyboardDismissMode="on-drag" on the search results FlatList once a keyword is entered (正常系)', async () => {
@@ -565,40 +526,10 @@ describe('HomeScreen', () => {
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
       await screen.findByText(/公園/);
 
-      // 日付一覧モーダルは未オープンのため、検索結果一覧用のFlatListのみが該当する
+      // HomeScreenに残るFlatListは検索結果一覧のみなので、これが該当する
       const flatLists = queryAllFlatLists();
       expect(flatLists).toHaveLength(1);
       expect(flatLists[0].props.keyboardShouldPersistTaps).toBe('handled');
-    });
-
-    it('sets keyboardDismissMode="on-drag" on both FlatLists simultaneously when the entry-list modal is left open while a search keyword is also entered (境界値: 両方が同時にマウントされているケース)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([
-          { id: '1', text: '今日は公園を散歩した', createdAt: isoAt(now, dayWithEntry) },
-        ]),
-      );
-      jest.clearAllMocks();
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-      // 日付一覧モーダルを開いたまま(閉じない)にしておく。visible=falseに戻ると
-      // モーダル内のFlatListがアンマウントされてしまうため、開いたまま検索欄を操作することで
-      // 2つのFlatListが同時にマウントされている状態を再現する
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
-      // 検索結果一覧用のFlatListがマウントされたことを、対象のFlatListが2つに増えたことで確認する
-      await waitFor(() => expect(queryAllFlatLists()).toHaveLength(2));
-
-      const flatLists = queryAllFlatLists();
-      for (const flatList of flatLists) {
-        expect(flatList.props.keyboardDismissMode).toBe('on-drag');
-      }
     });
   });
 
@@ -863,7 +794,7 @@ describe('HomeScreen', () => {
       await waitFor(() => expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(1));
     });
 
-    it('restores previously saved plaintext entries (from before encryption was introduced) from AsyncStorage and shows them in chronological order when the day is tapped', async () => {
+    it('restores previously saved plaintext entries (from before encryption was introduced) from AsyncStorage, showing a count badge, and navigates to the day-entries screen for that date when tapped', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       const storedEntries = [
@@ -877,15 +808,12 @@ describe('HomeScreen', () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      // 2件あるため、セルには件数バッジ「2」が表示され、タップすると一覧が開く
+      // 2件あるため、セルには件数バッジ「2」が表示され、タップするとその日の一覧画面へ遷移する
+      // (一覧の内容自体・時刻の昇順表示はtests/app/day-entries/[date].test.tsxで検証する)
       expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
       fireEvent.press(screen.getByText(String(dayWithEntry)));
 
-      // 時刻の昇順(先に書かれたものが先)に並んでいる
-      expect(await screen.findByText('1件目の日記')).toBeTruthy();
-      expect(screen.getByText('2件目の日記')).toBeTruthy();
-      const texts = flattenTexts(screen.toJSON());
-      expect(texts.indexOf('1件目の日記')).toBeLessThan(texts.indexOf('2件目の日記'));
+      expect(mockPush).toHaveBeenCalledWith(`/day-entries/${toDateKeyForTest(now, dayWithEntry)}`);
     });
 
     it('migrates a legacy plaintext entry into its own encrypted per-entry key on load, and persists newly saved entries independently', async () => {
@@ -922,10 +850,10 @@ describe('HomeScreen', () => {
       const cellsWithEntry = queryCalendarDayButtonsWithEntry();
       expect(cellsWithEntry).toHaveLength(1);
 
-      // タップするとその日の一覧に新しい日記も含めて表示される
+      // タップするとその日の一覧画面へ遷移する
+      // (一覧の内容自体はtests/app/day-entries/[date].test.tsxで検証する)
       fireEvent.press(cellsWithEntry[0]);
-      expect(await screen.findByText('過去の日記')).toBeTruthy();
-      expect(screen.getByText('今日の日記')).toBeTruthy();
+      expect(mockPush).toHaveBeenCalledWith(`/day-entries/${toDateKeyForTest(now, now.getDate())}`);
     });
 
     it('persists diary entries encrypted and correctly reloads/decrypts them after remounting (simulating an app restart)', async () => {
@@ -1014,9 +942,10 @@ describe('HomeScreen', () => {
       const cellsWithEntry = queryCalendarDayButtonsWithEntry();
       expect(cellsWithEntry).toHaveLength(1);
 
+      // タップするとその日の一覧画面へ遷移する
+      // (一覧の内容自体はtests/app/day-entries/[date].test.tsxで検証する)
       fireEvent.press(cellsWithEntry[0]);
-      expect(await screen.findByText('過去の日記')).toBeTruthy();
-      expect(screen.getByText('今日の日記')).toBeTruthy();
+      expect(mockPush).toHaveBeenCalledWith(`/day-entries/${toDateKeyForTest(now, now.getDate())}`);
     });
 
     it('shows the empty state when stored data is corrupted (invalid JSON)', async () => {
@@ -1068,10 +997,10 @@ describe('HomeScreen', () => {
       const cellsWithEntry = queryCalendarDayButtonsWithEntry();
       expect(cellsWithEntry).toHaveLength(1);
 
+      // タップするとその日の一覧画面へ遷移する
+      // (一覧の内容自体はtests/app/day-entries/[date].test.tsxで検証する)
       fireEvent.press(cellsWithEntry[0]);
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-      expect(screen.getByText('過去の日記')).toBeTruthy();
-      expect(screen.queryByText('今日の日記')).toBeNull();
+      expect(mockPush).toHaveBeenCalled();
     });
 
     it('does not overwrite draft text the user typed while a save was still in flight, when that save later fails', async () => {
@@ -1287,14 +1216,12 @@ describe('HomeScreen', () => {
       const ids = persistedEntries.map((entry) => entry.id);
       expect(new Set(ids).size).toBe(ids.length);
 
-      // 同じ日に書かれた3件すべてが、セルをタップした一覧に表示される
-      // (3件になったセルには件数バッジ「3」が表示される)
+      // 同じ日に書かれた3件すべてが保存され、セルには件数バッジ「3」が表示される
+      // (一覧の内容自体はtests/app/day-entries/[date].test.tsxで検証する)
       const cellsWithEntry = queryCalendarDayButtonsWithEntry();
       expect(cellsWithEntry).toHaveLength(1);
       fireEvent.press(cellsWithEntry[0]);
-      expect(await screen.findByText('1件目')).toBeTruthy();
-      expect(screen.getByText('2件目')).toBeTruthy();
-      expect(screen.getByText('3件目')).toBeTruthy();
+      expect(mockPush).toHaveBeenCalled();
     });
   });
 
@@ -1934,7 +1861,7 @@ describe('HomeScreen', () => {
       }
     });
 
-    it('renders no title for an entry whose text is an empty string after the first line is trimmed, but still treats the day as having an entry (isPressable/statusLabel/accessibilityLabel and tap behavior are based on entriesByDate, not on the trimmed title) since entriesByDate already has an entry for that day (defensive boundary for directly-corrupted/legacy storage data, since the composer itself never saves an empty/whitespace-only entry)', async () => {
+    it('navigates to the day-entries screen (not the new-entry creation modal) for an entry whose text is an empty string after the first line is trimmed, since tap behavior is based on entriesByDate, not on the trimmed title (defensive boundary for directly-corrupted/legacy storage data, since the composer itself never saves an empty/whitespace-only entry)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -1950,19 +1877,14 @@ describe('HomeScreen', () => {
       // このセルは「日記が実際に存在するセル」として1件カウントされる
       expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
 
-      const [entryListModalBefore] = screen.UNSAFE_getAllByType(Modal);
-      expect(entryListModalBefore.props.visible).toBe(false);
-
       fireEvent.press(screen.getByText(String(dayWithEntry)));
 
       // handleDayPressはentriesByDateの有無で分岐するため、タイトル表示が空でも
-      // 新規作成モーダルではなく既存の日付一覧モーダルが開く
-      await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeTruthy());
-      const [entryListModalAfter] = screen.UNSAFE_getAllByType(Modal);
-      expect(entryListModalAfter.props.visible).toBe(true);
+      // 新規作成モーダルではなく日付一覧画面への遷移が発生する
+      expect(mockPush).toHaveBeenCalledWith(`/day-entries/${toDateKeyForTest(now, dayWithEntry)}`);
     });
 
-    it('opens the new-entry creation modal (not the entry-list modal) when tapping a day cell that has no diary entries at all', async () => {
+    it('opens the new-entry creation modal (does not navigate) when tapping a day cell that has no diary entries at all', async () => {
       const now = new Date();
       const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -1981,11 +1903,10 @@ describe('HomeScreen', () => {
       const emptyDayCell = screen.getByText(String(dayWithoutEntry));
       fireEvent.press(emptyDayCell);
 
-      // 日付一覧モーダルではなく新規作成モーダルが開く(どちらも「閉じる」ボタンを持つため、
-      // 表示中のテキストではなく各Modalのvisible propで判定する)
-      const modals = screen.UNSAFE_getAllByType(Modal);
-      expect(modals[0].props.visible).toBe(false);
-      expect(modals[2].props.visible).toBe(true);
+      // 日付一覧画面への遷移ではなく新規作成モーダルが開く
+      const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
+      expect(newEntryModal.props.visible).toBe(true);
+      expect(mockPush).not.toHaveBeenCalled();
     });
 
     // スクリーンリーダー(VoiceOver/TalkBack)利用者にも、日付セルの数字だけでなく
@@ -2062,7 +1983,7 @@ describe('HomeScreen', () => {
       });
     });
 
-    it('does nothing (does not open any modal) when tapping a future day cell, even though it has no diary entries, since future dates are excluded from both the entry-list and the new-entry-creation flow', async () => {
+    it('does nothing (does not navigate or open any modal) when tapping a future day cell, even though it has no diary entries, since future dates are excluded from both the day-entries and the new-entry-creation flow', async () => {
       const now = new Date();
       const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
 
@@ -2074,12 +1995,12 @@ describe('HomeScreen', () => {
 
       fireEvent.press(dayCell);
 
-      expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull();
+      expect(mockPush).not.toHaveBeenCalled();
       const modals = screen.UNSAFE_getAllByType(Modal);
       expect(modals.every((modal) => modal.props.visible === false)).toBe(true);
     });
 
-    it('opens a modal listing all diary entries for a tapped date, in chronological order', async () => {
+    it('navigates to the day-entries screen for the tapped date when it has diary entries (一覧の内容自体はtests/app/day-entries/[date].test.tsxで検証する)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       const storedEntries = [
@@ -2095,224 +2016,22 @@ describe('HomeScreen', () => {
       // 3件になったセルには件数バッジが表示されるため、日付の数字でタップする
       fireEvent.press(screen.getByText(String(dayWithEntry)));
 
-      expect(await screen.findByText('朝の出来事')).toBeTruthy();
-      expect(screen.getByText('昼の出来事')).toBeTruthy();
-      expect(screen.getByText('夜の出来事')).toBeTruthy();
-
-      // 見出しに日付('YYYY年M月D日')が表示される
-      expect(
-        screen.getByText(`${now.getFullYear()}年${now.getMonth() + 1}月${dayWithEntry}日`),
-      ).toBeTruthy();
-
-      // 時刻の昇順に並んでいる
-      const texts = flattenTexts(screen.toJSON());
-      expect(texts.indexOf('朝の出来事')).toBeLessThan(texts.indexOf('昼の出来事'));
-      expect(texts.indexOf('昼の出来事')).toBeLessThan(texts.indexOf('夜の出来事'));
+      expect(mockPush).toHaveBeenCalledWith(`/day-entries/${toDateKeyForTest(now, dayWithEntry)}`);
     });
 
-    it("shows each entry's date/time in a locale-independent 'YYYY/MM/DD HH:mm' format regardless of the test environment's locale", async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '日記本文', createdAt: isoAt(now, dayWithEntry, 9, 5) }]),
-      );
-
+    it('sets statusBarTranslucent and navigationBarTranslucent on the new-entry creation modal and the month picker modal, so they match the edge-to-edge display of the screen behind them', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const day = String(dayWithEntry).padStart(2, '0');
-      expect(await screen.findByText(`${year}/${month}/${day} 09:05`)).toBeTruthy();
-    });
-
-    it('closes the modal when the close button is pressed', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '日記本文', createdAt: isoAt(now, dayWithEntry) }]),
-      );
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
-
-      await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
-    });
-
-    describe('背景タップでモーダルを閉じる', () => {
-      it('closes the modal when the semi-transparent background overlay is tapped (正常系)', async () => {
-        const now = new Date();
-        const { dayWithEntry } = pickTestDays(now);
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify([
-            { id: '1', text: '背景タップ対象の日記', createdAt: isoAt(now, dayWithEntry) },
-          ]),
-        );
-
-        render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-        fireEvent.press(screen.getByText(String(dayWithEntry)));
-        await screen.findByText(CLOSE_BUTTON_TEXT);
-
-        const [entryListModal] = screen.UNSAFE_getAllByType(Modal);
-        const overlay = getModalOverlayPressable(entryListModal);
-
-        fireEvent.press(overlay);
-
-        // selectedDateがnullに戻り、モーダルの見出し・閉じるボタンが表示されなくなる
-        await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
-        expect(
-          screen.queryByText(`${now.getFullYear()}年${now.getMonth() + 1}月${dayWithEntry}日`),
-        ).toBeNull();
-        // 閉じた後もデータ自体は消えておらず、カレンダーセルには引き続きインジケーターが表示される
-        expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
-      });
-
-      it('keeps the entry-list modal open (does not let the tap bubble to the overlay) when pressing an interactive element inside it, such as the edit button (境界値/異常系: propagation guard regression)', async () => {
-        const now = new Date();
-        const { dayWithEntry } = pickTestDays(now);
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify([
-            { id: '1', text: '編集ボタン確認用の日記', createdAt: isoAt(now, dayWithEntry) },
-          ]),
-        );
-
-        render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-        fireEvent.press(screen.getByText(String(dayWithEntry)));
-        await screen.findByText(CLOSE_BUTTON_TEXT);
-
-        fireEvent.press(screen.getByText('編集'));
-
-        // 編集モーダルが開く一方、日付一覧モーダル自体は閉じられていない
-        // (modalContent側のonStartShouldSetResponderにより、内部のボタン操作が
-        // 背景オーバーレイのonPressまで伝播して意図せず閉じてしまうことはない)
-        expect(await screen.findByText('日記を編集')).toBeTruthy();
-        const [entryListModalStillOpen] = screen.UNSAFE_getAllByType(Modal);
-        expect(entryListModalStillOpen.props.visible).toBe(true);
-      });
-
-      it('sets onStartShouldSetResponder on the modal content so a touch starting inside it is claimed there and does not propagate to the overlay Pressable behind it (境界値: propagation guard implementation contract)', async () => {
-        // fireEvent.pressはネイティブのタッチレスポンダー交渉を完全には再現できないため、
-        // 「余白タップで閉じない」という挙動そのものではなく、実装のガード
-        // (`onStartShouldSetResponder={() => true}`)が実際に設定されtrueを返すことを直接検証する。
-        const now = new Date();
-        const { dayWithEntry } = pickTestDays(now);
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify([
-            { id: '1', text: 'ガード確認用の日記', createdAt: isoAt(now, dayWithEntry) },
-          ]),
-        );
-
-        render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-        fireEvent.press(screen.getByText(String(dayWithEntry)));
-        await screen.findByText(CLOSE_BUTTON_TEXT);
-
-        const [entryListModal] = screen.UNSAFE_getAllByType(Modal);
-        const [modalContentResponder] = entryListModal.findAll(
-          (node: TestNode) => typeof node.props.onStartShouldSetResponder === 'function',
-        );
-
-        expect(modalContentResponder).toBeTruthy();
-        expect(modalContentResponder.props.onStartShouldSetResponder()).toBe(true);
-      });
-
-      it('still closes the modal via onRequestClose (Android hardware back / gesture), unaffected by the overlay becoming a Pressable (regression)', async () => {
-        const now = new Date();
-        const { dayWithEntry } = pickTestDays(now);
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify([
-            { id: '1', text: '戻る操作確認用の日記', createdAt: isoAt(now, dayWithEntry) },
-          ]),
-        );
-
-        render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-        fireEvent.press(screen.getByText(String(dayWithEntry)));
-        await screen.findByText(CLOSE_BUTTON_TEXT);
-
-        const [entryListModal] = screen.UNSAFE_getAllByType(Modal);
-        expect(typeof entryListModal.props.onRequestClose).toBe('function');
-
-        act(() => {
-          entryListModal.props.onRequestClose();
-        });
-
-        await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
-      });
-    });
-
-    it('sets statusBarTranslucent and navigationBarTranslucent on the entry-list modal, the edit modal, the new-entry creation modal, and the month picker modal, so they match the edge-to-edge display of the screen behind them', async () => {
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-      // 日付タップ時の一覧モーダル・編集モーダル・新規作成モーダル・
-      // 年月ピッカーモーダルの4つが常にツリーに存在する
-      // (visibleプロパティで表示/非表示を切り替えているだけで、条件付きレンダリングではないため)
+      // 新規作成モーダル・年月ピッカーモーダルの2つが常にツリーに存在する
+      // (visibleプロパティで表示/非表示を切り替えているだけで、条件付きレンダリングではないため。
+      // 日付一覧・編集は専用画面への遷移(Issue #221)に置き換えたため対象外になった)
       const modals = screen.UNSAFE_getAllByType(Modal);
-      expect(modals).toHaveLength(4);
+      expect(modals).toHaveLength(2);
       for (const modal of modals) {
         expect(modal.props.statusBarTranslucent).toBe(true);
         expect(modal.props.navigationBarTranslucent).toBe(true);
       }
-    });
-
-    it('keeps statusBarTranslucent and navigationBarTranslucent set to true on each modal even while it is actually open (visible=true), not just at rest', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '編集対象の日記', createdAt: isoAt(now, dayWithEntry) }]),
-      );
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-      // 日付タップ前は両モーダルとも非表示(visible=false)だが、translucent系のpropは
-      // 表示状態に関わらず常に設定されている静的なpropである
-      const [entryListModalBeforeOpen, editModalBeforeOpen] = screen.UNSAFE_getAllByType(Modal);
-      expect(entryListModalBeforeOpen.props.visible).toBe(false);
-      expect(editModalBeforeOpen.props.visible).toBe(false);
-
-      // 一覧モーダルを開いた状態(visible=true)でも維持されていることを確認する
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      const [entryListModalOpen, editModalStillClosed] = screen.UNSAFE_getAllByType(Modal);
-      expect(entryListModalOpen.props.visible).toBe(true);
-      expect(entryListModalOpen.props.statusBarTranslucent).toBe(true);
-      expect(entryListModalOpen.props.navigationBarTranslucent).toBe(true);
-      expect(editModalStillClosed.props.visible).toBe(false);
-      expect(editModalStillClosed.props.statusBarTranslucent).toBe(true);
-      expect(editModalStillClosed.props.navigationBarTranslucent).toBe(true);
-
-      // 続けて編集モーダルを開いた状態(visible=true)でも維持されていることを確認する
-      fireEvent.press(screen.getByText('編集'));
-      await screen.findByText('日記を編集');
-
-      const [entryListModalStillOpen, editModalOpen] = screen.UNSAFE_getAllByType(Modal);
-      expect(entryListModalStillOpen.props.visible).toBe(true);
-      expect(editModalOpen.props.visible).toBe(true);
-      expect(editModalOpen.props.statusBarTranslucent).toBe(true);
-      expect(editModalOpen.props.navigationBarTranslucent).toBe(true);
     });
   });
 
@@ -2344,7 +2063,9 @@ describe('HomeScreen', () => {
     // モーダルは[日付一覧, 編集, 新規作成, 年月ピッカー]の順でJSXに並んでいる
     // (実装側app/(tabs)/index.tsx参照)
     function getMonthPickerModal() {
-      return screen.UNSAFE_getAllByType(Modal)[3];
+      // 日付一覧・編集は専用画面への遷移(Issue #221)に置き換えたため、この画面に残る
+      // モーダルは新規作成モーダル(index 0)・年月ピッカーモーダル(index 1)の2つのみになった
+      return screen.UNSAFE_getAllByType(Modal)[1];
     }
 
     async function openMonthPicker(now: Date) {
@@ -2766,7 +2487,7 @@ describe('HomeScreen', () => {
       expect(findEntryCountBadgeViews()).toHaveLength(1);
     });
 
-    it('keeps the count badge visible after the day-entry modal for that date is opened and closed (regression: badge does not disappear due to modal interaction)', async () => {
+    it('keeps the count badge visible after tapping the day cell to navigate to the day-entries screen (regression: badge does not disappear due to the navigation)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       const storedEntries = [
@@ -2780,9 +2501,7 @@ describe('HomeScreen', () => {
       expect(findEntryCountBadgeViews()).toHaveLength(1);
 
       fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-      fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
-      await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
+      expect(mockPush).toHaveBeenCalledWith(`/day-entries/${toDateKeyForTest(now, dayWithEntry)}`);
 
       expect(findEntryCountBadgeViews()).toHaveLength(1);
       expect(String(findEntryCountBadgeTexts()[0].props.children)).toBe('2');
@@ -2958,1138 +2677,6 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('formatEntryDateTime のゼロパディング(境界値)', () => {
-    // `react-native-calendars`が内部で使う`xdate`はモジュール読み込み時にネイティブの`Date`を
-    // 固定的に保持するため`jest.useFakeTimers`が反映されず、うるう年・年またぎ等の「表示月そのもの」
-    // を差し替えるケースは決定的にテストできない。実行時点の月の範囲内で日・時・分を選び、
-    // それぞれ1桁の値でゼロパディングされることを検証する(期待値は実装のpadStartを模倣せず
-    // 別ロジックのpadTwoで計算し、実装と同じ勘違いを見逃さないようにする)。
-    function padTwo(n: number): string {
-      return n < 10 ? `0${n}` : `${n}`;
-    }
-
-    it('zero-pads a single-digit day of month (e.g. day 3 -> "03")', async () => {
-      const now = new Date();
-      const singleDigitDay = 3; // 実行月に関わらず必ず存在する日を選ぶ
-      const storedEntries = [
-        { id: '1', text: '日付一桁テスト', createdAt: isoAt(now, singleDigitDay, 9, 5) },
-      ];
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-      // 1桁の日付は前後月の「はみ出し」セルの数字と衝突しうるため、
-      // 日記が実際に存在するセルに絞り込んでからタップする
-      fireEvent.press(queryCalendarDayButtonsWithEntry()[0]);
-
-      const expected = `${now.getFullYear()}/${padTwo(now.getMonth() + 1)}/${padTwo(singleDigitDay)} 09:05`;
-      expect(await screen.findByText(expected)).toBeTruthy();
-    });
-
-    it('zero-pads midnight (00:00) for both the hour and the minute', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      const storedEntries = [
-        { id: '1', text: '真夜中テスト', createdAt: isoAt(now, dayWithEntry, 0, 0) },
-      ];
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-
-      const expected = `${now.getFullYear()}/${padTwo(now.getMonth() + 1)}/${padTwo(dayWithEntry)} 00:00`;
-      expect(await screen.findByText(expected)).toBeTruthy();
-    });
-
-    it("zero-pads the hour when it is a single digit but the minute is not (e.g. '09:30')", async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      const storedEntries = [
-        { id: '1', text: '時刻一桁テスト', createdAt: isoAt(now, dayWithEntry, 9, 30) },
-      ];
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-
-      const expected = `${now.getFullYear()}/${padTwo(now.getMonth() + 1)}/${padTwo(dayWithEntry)} 09:30`;
-      expect(await screen.findByText(expected)).toBeTruthy();
-    });
-  });
-
-  describe('日記エントリの編集', () => {
-    // 編集モーダルの保存ボタンは、メインの入力欄(composer)の保存ボタンと同じ文言「保存」を使うため、
-    // `getByText('保存')`だと2件ヒットしてしまう。JSXの描画順(composerの保存ボタンが先、
-    // 編集モーダルの保存ボタンが後)に依存して2件目を編集モーダル側として取得する。
-    function getEditSaveButton() {
-      const saveButtons = screen.getAllByText('保存');
-      expect(saveButtons).toHaveLength(2);
-      return saveButtons[1];
-    }
-
-    describe('編集モーダルのKeyboardAvoidingView', () => {
-      // `Platform.OS` はテスト間で状態を共有するモジュールレベルの値のため、
-      // 変更したテストの後は必ず元の値(デフォルトの 'ios')へ戻す。
-      const originalPlatformOS = Platform.OS;
-
-      afterEach(() => {
-        Platform.OS = originalPlatformOS;
-      });
-
-      async function openEditModalFor(text: string) {
-        const now = new Date();
-        const { dayWithEntry } = pickTestDays(now);
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify([{ id: '1', text, createdAt: isoAt(now, dayWithEntry) }]),
-        );
-
-        render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-        fireEvent.press(screen.getByText(String(dayWithEntry)));
-        await screen.findByText(CLOSE_BUTTON_TEXT);
-        fireEvent.press(screen.getByText('編集'));
-        await screen.findByText('日記を編集');
-      }
-
-      it('wraps the edit modal content in its own KeyboardAvoidingView so the input/save button are not hidden by the keyboard (正常系)', async () => {
-        await openEditModalFor('編集モーダルKAV確認用の日記');
-
-        // 画面全体を覆う既存のKeyboardAvoidingViewと、編集モーダル専用のKeyboardAvoidingViewの
-        // 合計2つが存在することを確認する
-        const keyboardAvoidingViews = screen.getAllByTestId(KEYBOARD_AVOIDING_VIEW_TEST_ID);
-        expect(keyboardAvoidingViews).toHaveLength(2);
-      });
-
-      it('uses behavior="height" for the edit modal on Android so the input and save button are not hidden by the keyboard', async () => {
-        Platform.OS = 'android';
-
-        await openEditModalFor('編集モーダルAndroid確認用の日記');
-
-        const keyboardAvoidingViews = screen.getAllByTestId(KEYBOARD_AVOIDING_VIEW_TEST_ID);
-        expect(keyboardAvoidingViews).toHaveLength(2);
-        // 画面全体用・編集モーダル用のどちらも、プラットフォームに応じたbehaviorが渡っている
-        for (const view of keyboardAvoidingViews) {
-          expect(view.props.accessibilityValue.text).toBe('height');
-        }
-      });
-
-      it('keeps behavior="padding" for the edit modal on iOS (regression check)', async () => {
-        Platform.OS = 'ios';
-
-        await openEditModalFor('編集モーダルiOS確認用の日記');
-
-        const keyboardAvoidingViews = screen.getAllByTestId(KEYBOARD_AVOIDING_VIEW_TEST_ID);
-        expect(keyboardAvoidingViews).toHaveLength(2);
-        for (const view of keyboardAvoidingViews) {
-          expect(view.props.accessibilityValue.text).toBe('padding');
-        }
-      });
-
-      it('does not wrap the edit modal content in a KeyboardAvoidingView while the modal is closed (異常系/境界値)', async () => {
-        const now = new Date();
-        const { dayWithEntry } = pickTestDays(now);
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify([
-            {
-              id: '1',
-              text: '編集モーダル未オープン確認用の日記',
-              createdAt: isoAt(now, dayWithEntry),
-            },
-          ]),
-        );
-
-        render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-        // 編集モーダルを開いていない状態では、画面全体用の1つしか存在しない
-        // (Modalはvisible={false}の間、中身をレンダリングしないため)
-        const keyboardAvoidingViews = screen.getAllByTestId(KEYBOARD_AVOIDING_VIEW_TEST_ID);
-        expect(keyboardAvoidingViews).toHaveLength(1);
-      });
-    });
-
-    it('opens the edit modal with the existing text prefilled when the edit button is pressed (正常系)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt: isoAt(now, dayWithEntry) }]),
-      );
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      fireEvent.press(screen.getByText('編集'));
-
-      expect(await screen.findByText('日記を編集')).toBeTruthy();
-      // 既存の本文が編集用の入力欄にそのまま表示されている
-      expect(screen.getByDisplayValue('編集前の日記')).toBeTruthy();
-    });
-
-    // 編集モーダル側の入力欄・保存ボタンにもcomposerと同じアクセシビリティ属性が
-    // 付いていることを検証する
-    it('sets accessibilityLabel="日記本文" on the edit TextInput, and accessibilityRole="button"/accessibilityLabel="保存" with a matching accessibilityState on the edit save button', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt: isoAt(now, dayWithEntry) }]),
-      );
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-      fireEvent.press(screen.getByText('編集'));
-      await screen.findByText('日記を編集');
-
-      // composer用と編集モーダル用のTextInputが両方マウントされているため、
-      // 表示中の値で編集モーダル側を特定する
-      const editInputs = screen.getAllByLabelText('日記本文');
-      const editInput = editInputs.find((input) => input.props.value === '編集前の日記');
-      expect(editInput).toBeTruthy();
-
-      const editSaveButton = getEditSaveButton().parent?.parent?.parent;
-      expect(editSaveButton?.props.accessibilityRole).toBe('button');
-      expect(editSaveButton?.props.accessibilityLabel).toBe('保存');
-      expect(editSaveButton?.props.accessibilityState?.disabled).toBe(false);
-    });
-
-    it('closes the edit modal without saving when its close button is pressed', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([
-          { id: '1', text: '編集キャンセル対象', createdAt: isoAt(now, dayWithEntry) },
-        ]),
-      );
-      jest.clearAllMocks();
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      fireEvent.press(screen.getByText('編集'));
-      await screen.findByText('日記を編集');
-
-      // 編集モーダル自身の「閉じる」ボタンを押す(日付一覧モーダルとは別の閉じるボタン)
-      const closeButtons = screen.getAllByText(CLOSE_BUTTON_TEXT);
-      fireEvent.press(closeButtons[closeButtons.length - 1]);
-
-      await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
-      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-      // 変更されずに元のテキストのまま残っている
-      expect(screen.getAllByText('編集キャンセル対象').length).toBeGreaterThanOrEqual(1);
-    });
-
-    describe('背景タップでモーダルを閉じる、破棄確認ダイアログ導入後の回帰', () => {
-      it('shows the discard confirmation dialog (Alert.alert) instead of closing immediately when the semi-transparent background overlay is tapped after the draft has been changed, and only closes (editingEntryId becomes null / editDraft is cleared) once "破棄" is chosen (正常系)', async () => {
-        const now = new Date();
-        const { dayWithEntry } = pickTestDays(now);
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify([
-            {
-              id: '1',
-              text: '編集モーダル背景タップ対象の日記',
-              createdAt: isoAt(now, dayWithEntry),
-            },
-          ]),
-        );
-        jest.clearAllMocks();
-        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-
-        render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-        fireEvent.press(screen.getByText(String(dayWithEntry)));
-        await screen.findByText(CLOSE_BUTTON_TEXT);
-
-        fireEvent.press(screen.getByText('編集'));
-        await screen.findByText('日記を編集');
-
-        // 保存前に本文を書き換えておき、オーバーレイタップ後に即座には閉じず、破棄確認ダイアログが
-        // 出ることを確認する
-        const editInput = screen.getByDisplayValue('編集モーダル背景タップ対象の日記');
-        fireEvent.changeText(editInput, '保存されないはずの編集内容');
-
-        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
-        const overlay = getModalOverlayPressable(editModal);
-
-        fireEvent.press(overlay);
-
-        // ダイアログが出た段階ではまだモーダルは開いたままで、破棄もされていない
-        expect(Alert.alert).toHaveBeenCalledTimes(1);
-        expect(screen.getByText('日記を編集')).toBeTruthy();
-        expect(editModal.props.visible).toBe(true);
-        expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-
-        // ダイアログの「破棄」を選ぶと、editingEntryIdがnullに戻り見出しが表示されなくなる
-        const [, , buttons] = (Alert.alert as jest.Mock).mock.calls[0];
-        const discardButton = (buttons as { text: string; onPress?: () => void }[]).find(
-          (b) => b.text === '破棄',
-        );
-        expect(discardButton).toBeDefined();
-        await act(async () => {
-          discardButton?.onPress?.();
-        });
-
-        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
-        expect(editModal.props.visible).toBe(false);
-        // editDraftの変更内容は保存されず破棄される(handleCancelEditと同じ効果)
-        expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-        // 元の本文はそのまま残っている
-        expect(
-          screen.getAllByText('編集モーダル背景タップ対象の日記').length,
-        ).toBeGreaterThanOrEqual(1);
-        expect(screen.queryByText('保存されないはずの編集内容')).toBeNull();
-      });
-
-      it('sets onStartShouldSetResponder on the edit modal content so a touch starting inside it is claimed there and does not propagate to the overlay Pressable behind it (境界値: propagation guard implementation contract)', async () => {
-        // fireEvent.pressの制約により、実装が伝播を止める
-        // ガード(`onStartShouldSetResponder={() => true}`)が編集モーダルにも設定されtrueを返すことを直接検証する。
-        const now = new Date();
-        const { dayWithEntry } = pickTestDays(now);
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify([
-            {
-              id: '1',
-              text: '編集モーダルガード確認用の日記',
-              createdAt: isoAt(now, dayWithEntry),
-            },
-          ]),
-        );
-
-        render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-        fireEvent.press(screen.getByText(String(dayWithEntry)));
-        await screen.findByText(CLOSE_BUTTON_TEXT);
-
-        fireEvent.press(screen.getByText('編集'));
-        await screen.findByText('日記を編集');
-
-        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
-        const [modalContentResponder] = editModal.findAll(
-          (node: TestNode) => typeof node.props.onStartShouldSetResponder === 'function',
-        );
-
-        expect(modalContentResponder).toBeTruthy();
-        expect(modalContentResponder.props.onStartShouldSetResponder()).toBe(true);
-
-        // ガードが効いている間も、編集モーダル自体は開いたままである
-        expect(editModal.props.visible).toBe(true);
-      });
-    });
-
-    describe('編集モーダルを閉じる際の未保存変更の破棄確認ダイアログ', () => {
-      async function pressAlertButton(label: string) {
-        const alertMock = Alert.alert as jest.Mock;
-        const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
-        const buttons = lastCall[2] as { text: string; onPress?: () => void }[];
-        const button = buttons.find((b) => b.text === label);
-        expect(button).toBeDefined();
-        await act(async () => {
-          button?.onPress?.();
-        });
-      }
-
-      async function openEditModalFor(text: string) {
-        const now = new Date();
-        const { dayWithEntry } = pickTestDays(now);
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify([{ id: '1', text, createdAt: isoAt(now, dayWithEntry) }]),
-        );
-        jest.clearAllMocks();
-        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-
-        render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-        fireEvent.press(screen.getByText(String(dayWithEntry)));
-        await screen.findByText(CLOSE_BUTTON_TEXT);
-        fireEvent.press(screen.getByText('編集'));
-        await screen.findByText('日記を編集');
-      }
-
-      it('closes the edit modal immediately without any confirmation dialog when the overlay is tapped and the draft has not been changed (正常系)', async () => {
-        await openEditModalFor('未変更・背景タップ対象の日記');
-
-        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
-        const overlay = getModalOverlayPressable(editModal);
-        fireEvent.press(overlay);
-
-        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
-        expect(Alert.alert).not.toHaveBeenCalled();
-        expect(editModal.props.visible).toBe(false);
-      });
-
-      it('closes the edit modal immediately without any confirmation dialog when the close button is pressed and the draft has not been changed (正常系)', async () => {
-        await openEditModalFor('未変更・閉じるボタン対象の日記');
-
-        const closeButtons = screen.getAllByText(CLOSE_BUTTON_TEXT);
-        fireEvent.press(closeButtons[closeButtons.length - 1]);
-
-        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
-        expect(Alert.alert).not.toHaveBeenCalled();
-      });
-
-      it('closes the edit modal immediately without any confirmation dialog via onRequestClose (Android hardware back / gesture) when the draft has not been changed (正常系)', async () => {
-        await openEditModalFor('未変更・戻る操作対象の日記');
-
-        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
-        expect(typeof editModal.props.onRequestClose).toBe('function');
-
-        act(() => {
-          editModal.props.onRequestClose();
-        });
-
-        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
-        expect(Alert.alert).not.toHaveBeenCalled();
-      });
-
-      it('shows the discard confirmation dialog and keeps the edit modal open when the overlay is tapped after changing the draft (正常系)', async () => {
-        await openEditModalFor('変更あり・背景タップ対象の日記');
-
-        const editInput = screen.getByDisplayValue('変更あり・背景タップ対象の日記');
-        fireEvent.changeText(editInput, '変更後の内容(背景タップ)');
-
-        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
-        const overlay = getModalOverlayPressable(editModal);
-        fireEvent.press(overlay);
-
-        expect(Alert.alert).toHaveBeenCalledTimes(1);
-        const [title, message, buttons] = (Alert.alert as jest.Mock).mock.calls[0];
-        expect(title).toBe('変更を破棄しますか?');
-        expect(message).toBe('編集中の内容は保存されません。');
-        expect(buttons).toHaveLength(2);
-        expect(buttons[0]).toMatchObject({ text: 'キャンセル', style: 'cancel' });
-        expect(buttons[1]).toMatchObject({ text: '破棄', style: 'destructive' });
-
-        // ダイアログが出た段階ではまだモーダルは開いたまま
-        expect(screen.getByText('日記を編集')).toBeTruthy();
-        expect(editModal.props.visible).toBe(true);
-      });
-
-      it('shows the discard confirmation dialog and keeps the edit modal open when the close button is pressed after changing the draft (正常系)', async () => {
-        await openEditModalFor('変更あり・閉じるボタン対象の日記');
-
-        const editInput = screen.getByDisplayValue('変更あり・閉じるボタン対象の日記');
-        fireEvent.changeText(editInput, '変更後の内容(閉じるボタン)');
-
-        const closeButtons = screen.getAllByText(CLOSE_BUTTON_TEXT);
-        fireEvent.press(closeButtons[closeButtons.length - 1]);
-
-        expect(Alert.alert).toHaveBeenCalledTimes(1);
-        expect(screen.getByText('日記を編集')).toBeTruthy();
-      });
-
-      it('shows the discard confirmation dialog via onRequestClose (Android hardware back / gesture) after changing the draft, and keeps the modal open (正常系)', async () => {
-        await openEditModalFor('変更あり・戻る操作対象の日記');
-
-        const editInput = screen.getByDisplayValue('変更あり・戻る操作対象の日記');
-        fireEvent.changeText(editInput, '変更後の内容(戻る操作)');
-
-        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
-        act(() => {
-          editModal.props.onRequestClose();
-        });
-
-        expect(Alert.alert).toHaveBeenCalledTimes(1);
-        expect(screen.getByText('日記を編集')).toBeTruthy();
-        expect(editModal.props.visible).toBe(true);
-      });
-
-      it('keeps the edit modal open and preserves the unsaved draft when "キャンセル" is chosen in the discard confirmation dialog (正常系)', async () => {
-        await openEditModalFor('キャンセル選択対象の日記');
-
-        const editInput = screen.getByDisplayValue('キャンセル選択対象の日記');
-        fireEvent.changeText(editInput, 'キャンセルで保持される内容');
-
-        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
-        const overlay = getModalOverlayPressable(editModal);
-        fireEvent.press(overlay);
-        await pressAlertButton('キャンセル');
-
-        // モーダルは開いたまま、入力内容(editDraft)も保持されている
-        expect(editModal.props.visible).toBe(true);
-        expect(screen.getByDisplayValue('キャンセルで保持される内容')).toBeTruthy();
-        expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-      });
-
-      it('closes the edit modal and discards the unsaved draft (editDraft is reset) when "破棄" is chosen in the discard confirmation dialog (正常系)', async () => {
-        await openEditModalFor('破棄選択対象の日記');
-
-        const editInput = screen.getByDisplayValue('破棄選択対象の日記');
-        fireEvent.changeText(editInput, '破棄されるはずの内容');
-
-        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
-        const overlay = getModalOverlayPressable(editModal);
-        fireEvent.press(overlay);
-        await pressAlertButton('破棄');
-
-        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
-        expect(editModal.props.visible).toBe(false);
-        expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-        // 元の本文は変更されずに残っている
-        expect(screen.getAllByText('破棄選択対象の日記').length).toBeGreaterThanOrEqual(1);
-        expect(screen.queryByText('破棄されるはずの内容')).toBeNull();
-
-        // editDraftがリセットされていることを、日付一覧モーダルはまだ開いたままなので
-        // 再度「編集」を押すだけで確認できる(前回破棄した内容が残っていれば、TextInputの
-        // 表示値が'破棄されるはずの内容'のままになってしまうはず)
-        fireEvent.press(screen.getByText('編集'));
-        await screen.findByText('日記を編集');
-        expect(screen.getByDisplayValue('破棄選択対象の日記')).toBeTruthy();
-        expect(screen.queryByDisplayValue('破棄されるはずの内容')).toBeNull();
-      });
-
-      it('treats the draft as "unchanged" (closes without confirmation) when it differs from the original only by leading/trailing whitespace that disappears after trimming (境界値)', async () => {
-        await openEditModalFor('前後空白トリム境界値対象の日記');
-
-        const editInput = screen.getByDisplayValue('前後空白トリム境界値対象の日記');
-        // 前後に空白を付与するが、trimすれば元の内容と一致する
-        fireEvent.changeText(editInput, '  前後空白トリム境界値対象の日記  ');
-
-        const [, editModal] = screen.UNSAFE_getAllByType(Modal);
-        const overlay = getModalOverlayPressable(editModal);
-        fireEvent.press(overlay);
-
-        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
-        expect(Alert.alert).not.toHaveBeenCalled();
-        expect(editModal.props.visible).toBe(false);
-      });
-    });
-
-    describe('日付一覧モーダルを閉じる際の未保存の編集内容の破棄確認ダイアログ', () => {
-      async function pressAlertButton(label: string) {
-        const alertMock = Alert.alert as jest.Mock;
-        const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
-        const buttons = lastCall[2] as { text: string; onPress?: () => void }[];
-        const button = buttons.find((b) => b.text === label);
-        expect(button).toBeDefined();
-        await act(async () => {
-          button?.onPress?.();
-        });
-      }
-
-      async function openEditModalFor(text: string) {
-        const now = new Date();
-        const { dayWithEntry } = pickTestDays(now);
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify([{ id: '1', text, createdAt: isoAt(now, dayWithEntry) }]),
-        );
-        jest.clearAllMocks();
-        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-
-        render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-        fireEvent.press(screen.getByText(String(dayWithEntry)));
-        await screen.findByText(CLOSE_BUTTON_TEXT);
-        fireEvent.press(screen.getByText('編集'));
-        await screen.findByText('日記を編集');
-      }
-
-      it('closes the entry-list modal immediately without any confirmation dialog when the background overlay is tapped and the edit modal is not open (正常系)', async () => {
-        const now = new Date();
-        const { dayWithEntry } = pickTestDays(now);
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify([
-            {
-              id: '1',
-              text: '一覧閉じる・未オープン対象の日記',
-              createdAt: isoAt(now, dayWithEntry),
-            },
-          ]),
-        );
-        jest.clearAllMocks();
-        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-
-        render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-        fireEvent.press(screen.getByText(String(dayWithEntry)));
-        await screen.findByText(CLOSE_BUTTON_TEXT);
-
-        const [entryListModal] = screen.UNSAFE_getAllByType(Modal);
-        const overlay = getModalOverlayPressable(entryListModal);
-        fireEvent.press(overlay);
-
-        await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
-        expect(Alert.alert).not.toHaveBeenCalled();
-        expect(entryListModal.props.visible).toBe(false);
-      });
-
-      it("closes both the entry-list modal and the edit modal immediately without any confirmation dialog when the entry-list modal's own close button is pressed while the edit modal is open but the draft has not been changed (正常系)", async () => {
-        await openEditModalFor('一覧閉じる・未変更対象の日記');
-
-        // 一覧モーダル自身の「閉じる」ボタン(編集モーダルの「閉じる」ボタンより先に描画される)を押す
-        const closeButtons = screen.getAllByText(CLOSE_BUTTON_TEXT);
-        fireEvent.press(closeButtons[0]);
-
-        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
-        expect(Alert.alert).not.toHaveBeenCalled();
-        expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull();
-
-        const [entryListModal, editModal] = screen.UNSAFE_getAllByType(Modal);
-        expect(entryListModal.props.visible).toBe(false);
-        expect(editModal.props.visible).toBe(false);
-      });
-
-      it("shows the discard confirmation dialog (Alert.alert) and keeps both the entry-list modal and the edit modal open when the entry-list modal's own close button is pressed after the draft has been changed (境界値/異常系)", async () => {
-        await openEditModalFor('一覧閉じる・変更あり対象の日記');
-
-        const editInput = screen.getByDisplayValue('一覧閉じる・変更あり対象の日記');
-        fireEvent.changeText(editInput, '変更後の内容(一覧閉じる)');
-
-        const closeButtons = screen.getAllByText(CLOSE_BUTTON_TEXT);
-        fireEvent.press(closeButtons[0]);
-
-        expect(Alert.alert).toHaveBeenCalledTimes(1);
-        const [title, message, buttons] = (Alert.alert as jest.Mock).mock.calls[0];
-        expect(title).toBe('変更を破棄しますか?');
-        expect(message).toBe('編集中の内容は保存されません。');
-        expect(buttons).toHaveLength(2);
-        expect(buttons[0]).toMatchObject({ text: 'キャンセル', style: 'cancel' });
-        expect(buttons[1]).toMatchObject({ text: '破棄', style: 'destructive' });
-
-        // ダイアログが出た段階では日付一覧・編集モーダルともまだ開いたまま
-        const [entryListModal, editModal] = screen.UNSAFE_getAllByType(Modal);
-        expect(entryListModal.props.visible).toBe(true);
-        expect(editModal.props.visible).toBe(true);
-        expect(screen.getByText('日記を編集')).toBeTruthy();
-      });
-
-      it('keeps both modals open and preserves the unsaved draft/selectedDate/editingEntryId when "キャンセル" is chosen in the discard confirmation dialog triggered from the entry-list modal (境界値/異常系)', async () => {
-        await openEditModalFor('一覧閉じるキャンセル対象の日記');
-
-        const editInput = screen.getByDisplayValue('一覧閉じるキャンセル対象の日記');
-        fireEvent.changeText(editInput, 'キャンセルで保持される内容(一覧)');
-
-        const closeButtons = screen.getAllByText(CLOSE_BUTTON_TEXT);
-        fireEvent.press(closeButtons[0]);
-        await pressAlertButton('キャンセル');
-
-        // 日付一覧・編集モーダルともに開いたまま、editDraftも保持されている
-        const [entryListModal, editModal] = screen.UNSAFE_getAllByType(Modal);
-        expect(entryListModal.props.visible).toBe(true);
-        expect(editModal.props.visible).toBe(true);
-        expect(screen.getByDisplayValue('キャンセルで保持される内容(一覧)')).toBeTruthy();
-        expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-      });
-
-      it('closes both the entry-list modal and the edit modal, discarding the unsaved draft (selectedDate/editingEntryId/editDraft are all reset), when "破棄" is chosen in the discard confirmation dialog triggered from the entry-list modal (正常系)', async () => {
-        await openEditModalFor('一覧閉じる破棄対象の日記');
-
-        const editInput = screen.getByDisplayValue('一覧閉じる破棄対象の日記');
-        fireEvent.changeText(editInput, '破棄される内容(一覧)');
-
-        const closeButtons = screen.getAllByText(CLOSE_BUTTON_TEXT);
-        fireEvent.press(closeButtons[0]);
-        await pressAlertButton('破棄');
-
-        await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
-        expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull();
-        const [entryListModal, editModal] = screen.UNSAFE_getAllByType(Modal);
-        expect(entryListModal.props.visible).toBe(false);
-        expect(editModal.props.visible).toBe(false);
-        expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-
-        // 元の本文は変更されずに残っている(破棄されたのはeditDraftのみ)
-        expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
-        expect(screen.queryByText('破棄される内容(一覧)')).toBeNull();
-
-        // editDraftがリセットされていることを、再度日付セルを押して確認する
-        // (前回破棄した内容が残っていれば、再度「編集」を押した際のTextInputの表示値が
-        // '破棄される内容(一覧)'のままになってしまうはず)
-        const { dayWithEntry } = pickTestDays(new Date());
-        fireEvent.press(screen.getByText(String(dayWithEntry)));
-        await screen.findByText(CLOSE_BUTTON_TEXT);
-        fireEvent.press(screen.getByText('編集'));
-        await screen.findByText('日記を編集');
-        expect(screen.getByDisplayValue('一覧閉じる破棄対象の日記')).toBeTruthy();
-        expect(screen.queryByDisplayValue('破棄される内容(一覧)')).toBeNull();
-      });
-    });
-
-    it('updates the entry text (keeping createdAt unchanged), refreshes the list, and persists it encrypted when the edit is saved (正常系)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      const createdAt = isoAt(now, dayWithEntry, 9, 0);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt }]),
-      );
-      jest.clearAllMocks();
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-      fireEvent.press(screen.getByText('編集'));
-      await screen.findByText('日記を編集');
-
-      const editInput = screen.getByDisplayValue('編集前の日記');
-      fireEvent.changeText(editInput, '編集後の日記');
-      fireEvent.press(getEditSaveButton());
-
-      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
-      const [savedKey, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
-      // 編集保存も対象エントリ専用の個別キーに書き込まれる(レガシーの単一キーではない)
-      expect(savedKey).toBe(buildDiaryEntryKey('1'));
-      expect((value as string).startsWith(ENCRYPTED_PREFIX)).toBe(true);
-
-      // 保存が成功すると編集モーダルは閉じ、一覧・カレンダーセルの表示が更新される
-      await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
-      expect(screen.queryByText('編集前の日記')).toBeNull();
-      expect(screen.getAllByText('編集後の日記').length).toBeGreaterThanOrEqual(1);
-
-      // 永続化された内容もtextのみ更新され、createdAtは変わらない
-      const persisted = (await decryptPersistedEntry(value)) as {
-        id: string;
-        text: string;
-        createdAt: string;
-      };
-      expect(persisted.id).toBe('1');
-      expect(persisted.text).toBe('編集後の日記');
-      expect(persisted.createdAt).toBe(createdAt);
-    });
-
-    it('does not save and disables the save button when the edited text is emptied out (defense in depth)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '空にされる日記', createdAt: isoAt(now, dayWithEntry) }]),
-      );
-      jest.clearAllMocks();
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-      fireEvent.press(screen.getByText('編集'));
-      await screen.findByText('日記を編集');
-
-      const editInput = screen.getByDisplayValue('空にされる日記');
-      fireEvent.changeText(editInput, '   ');
-      fireEvent.press(getEditSaveButton());
-
-      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-    });
-
-    it('renders the edit save button at full opacity (1) when opened with prefilled text (正常系), and reduces it to 0.5 once the text is cleared to whitespace only (異常系), matching disabled={!editDraft.trim()}', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt: isoAt(now, dayWithEntry) }]),
-      );
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-      fireEvent.press(screen.getByText('編集'));
-      await screen.findByText('日記を編集');
-
-      const editSaveButton = getEditSaveButton().parent?.parent?.parent;
-      // 編集モーダルは既存の本文が入った状態で開くため、初期表示から通常の不透明度になる
-      expect(StyleSheet.flatten(editSaveButton?.props.style).opacity).toBe(1);
-
-      const editInput = screen.getByDisplayValue('編集前の日記');
-      fireEvent.changeText(editInput, '   ');
-      expect(StyleSheet.flatten(editSaveButton?.props.style).opacity).toBe(0.5);
-
-      // 再度文字を入力すると通常の不透明度に戻る(境界値: 空⇔非空の切り替わり)
-      fireEvent.changeText(editInput, '編集後の日記');
-      expect(StyleSheet.flatten(editSaveButton?.props.style).opacity).toBe(1);
-    });
-
-    it('truncates the edit input exceeding the max length via onChangeText (edit TextInput no longer has a maxLength prop either)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([
-          { id: '1', text: '文字数上限確認用', createdAt: isoAt(now, dayWithEntry) },
-        ]),
-      );
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-      fireEvent.press(screen.getByText('編集'));
-      await screen.findByText('日記を編集');
-
-      const editInput = screen.getByDisplayValue('文字数上限確認用');
-      // maxLength propは指定していないため、handleChangeEditDraft内のgrapheme単位の切り詰めを直接確認する
-      fireEvent.changeText(editInput, 'あ'.repeat(1001));
-
-      expect(editInput.props.value).toBe('あ'.repeat(1000));
-      expect(screen.getByText('1000/1000')).toBeTruthy();
-    });
-
-    describe('絵文字(サロゲートペア・ZWJ結合絵文字)を含む本文の文字数カウント・切り詰め', () => {
-      // ZWJ(Zero Width Joiner)で複数の絵文字コードポイントを結合した家族の絵文字。
-      // 見た目上は1文字(1書記素クラスタ)だが、UTF-16コードユニットは11個ある
-      // ('👨'+ZWJ+'👩'+ZWJ+'👧'+ZWJ+'👦'で、サロゲートペア4つ(各2ユニット)+ZWJ3つ(各1ユニット))
-      const familyEmoji = '👨‍👩‍👧‍👦';
-
-      async function openEditModal(initialText: string) {
-        const now = new Date();
-        const { dayWithEntry } = pickTestDays(now);
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify([{ id: '1', text: initialText, createdAt: isoAt(now, dayWithEntry) }]),
-        );
-
-        render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-        fireEvent.press(screen.getByText(String(dayWithEntry)));
-        await screen.findByText(CLOSE_BUTTON_TEXT);
-        fireEvent.press(screen.getByText('編集'));
-        await screen.findByText('日記を編集');
-
-        return screen.getByDisplayValue(initialText);
-      }
-
-      it('counts a ZWJ-joined family emoji as a single grapheme in the edit character counter, not by UTF-16 code units', async () => {
-        const editInput = await openEditModal('編集前の日記');
-
-        fireEvent.changeText(editInput, familyEmoji);
-
-        // familyEmojiはUTF-16コードユニット単位では11だが、grapheme単位では1文字
-        expect(screen.getByText('1/1000')).toBeTruthy();
-        expect(screen.queryByText('11/1000')).toBeNull();
-      });
-
-      it('does not split a ZWJ-joined family emoji in the middle when truncating overlong edit input via onChangeText (boundary: exactly at the limit)', async () => {
-        const editInput = await openEditModal('編集前の日記');
-
-        // 999文字の'あ' + 家族の絵文字(1000文字目) + さらに超過する10文字、という構成
-        const overLimitText = `${'あ'.repeat(999)}${familyEmoji}${'あ'.repeat(10)}`;
-        fireEvent.changeText(editInput, overLimitText);
-
-        const expectedTruncated = `${'あ'.repeat(999)}${familyEmoji}`;
-        expect(editInput.props.value).toBe(expectedTruncated);
-        expect(screen.getByText('1000/1000')).toBeTruthy();
-      });
-    });
-
-    it('rolls back to the previous text and shows an error message when saving the edit fails (異常系)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt: isoAt(now, dayWithEntry) }]),
-      );
-      jest.clearAllMocks();
-      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-      fireEvent.press(screen.getByText('編集'));
-      await screen.findByText('日記を編集');
-
-      const editInput = screen.getByDisplayValue('編集前の日記');
-      fireEvent.changeText(editInput, '失敗するはずの編集');
-      fireEvent.press(getEditSaveButton());
-
-      const editErrorMessage =
-        await screen.findByText('更新に失敗しました。もう一度お試しください。');
-      expect(editErrorMessage).toBeTruthy();
-      // 編集モーダルのエラーメッセージも、テーマ定数化されたColors.light.errorを使う
-      expect(StyleSheet.flatten(editErrorMessage.props.style).color).toBe(Colors.light.error);
-
-      // ロールバックにより、一覧・カレンダーセルとも編集前のテキストのまま残る
-      // (編集モーダルは開いたままで、失敗した入力内容自体は消えない)
-      expect(screen.queryByText('失敗するはずの編集')).toBeNull();
-      expect(screen.getAllByText('編集前の日記').length).toBeGreaterThanOrEqual(1);
-      expect(screen.getByText('日記を編集')).toBeTruthy();
-    });
-
-    it('resets isSavingEdit after a save failure, re-enabling the save button so a retry can succeed', async () => {
-      // handleSaveEditはtry/finallyでisSavingEditを必ずfalseへ戻すため、保存失敗直後でも
-      // ガードで弾かれずに再度保存できるはず(finallyブロックが正しく効いていることの検証)
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt: isoAt(now, dayWithEntry) }]),
-      );
-      jest.clearAllMocks();
-      // 1回目の書き込みだけ失敗させ、2回目以降はデフォルトの(成功する)モック実装に戻す
-      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-      fireEvent.press(screen.getByText('編集'));
-      await screen.findByText('日記を編集');
-
-      const editInput = screen.getByDisplayValue('編集前の日記');
-      fireEvent.changeText(editInput, '一度失敗した後に成功する編集');
-      fireEvent.press(getEditSaveButton());
-
-      await screen.findByText('更新に失敗しました。もう一度お試しください。');
-      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
-
-      // 失敗直後に保存ボタンが無効化されたまま(isSavingEditがtrueのまま)になっていないことを、
-      // disabledプロパティで直接確認する
-      const editSaveButton = getEditSaveButton().parent?.parent?.parent;
-      expect(editSaveButton?.props.accessibilityState?.disabled).not.toBe(true);
-
-      // 同じ保存ボタンをもう一度押すと、ガードに阻まれず2回目の書き込みが実行される
-      fireEvent.press(getEditSaveButton());
-
-      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(2));
-      await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull());
-      expect(screen.getAllByText('一度失敗した後に成功する編集').length).toBeGreaterThanOrEqual(1);
-    });
-
-    it('ignores a second press of the edit save button while an update is still in flight, preventing a duplicate write', async () => {
-      // 編集モーダルの保存ボタン連打で同一の更新処理が重複実行されないことを確認する。
-      // handleSaveの連打防止テストと同様、setItemの解決を意図的に遅延させる
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt: isoAt(now, dayWithEntry) }]),
-      );
-      jest.clearAllMocks();
-
-      let resolveSetItem: () => void = () => {};
-      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
-        () =>
-          new Promise<void>((resolve) => {
-            resolveSetItem = resolve;
-          }),
-      );
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-      fireEvent.press(screen.getByText('編集'));
-      await screen.findByText('日記を編集');
-
-      const editInput = screen.getByDisplayValue('編集前の日記');
-      fireEvent.changeText(editInput, '連打される編集');
-      const editSaveButton = getEditSaveButton();
-      fireEvent.press(editSaveButton);
-      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
-
-      // 1回目の更新(AsyncStorage.setItem)がまだpendingの間に、続けて保存ボタンを連打する
-      fireEvent.press(editSaveButton);
-      fireEvent.press(editSaveButton);
-
-      // pending中の連打はガードされ、AsyncStorage.setItemは追加で呼ばれない
-      expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
-
-      resolveSetItem();
-      // resolveSetItem後もgetAllDiaryEntries/setEntries等の非同期処理が続けて走るため、
-      // CI環境での遅延に備えてデフォルト(1000ms)より長いタイムアウトを明示する
-      await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull(), {
-        timeout: 5000,
-      });
-
-      // 永続化された内容にも1件のみ含まれ、重複していない
-      const [, value] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
-      const persisted = (await decryptPersistedEntry(value)) as { text: string };
-      expect(persisted.text).toBe('連打される編集');
-    });
-  });
-
-  describe('日記エントリの削除', () => {
-    async function pressAlertButton(label: string) {
-      const alertMock = Alert.alert as jest.Mock;
-      const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
-      const buttons = lastCall[2] as { text: string; onPress?: () => void }[];
-      const button = buttons.find((b) => b.text === label);
-      expect(button).toBeDefined();
-      await act(async () => {
-        button?.onPress?.();
-      });
-    }
-
-    it('shows a confirmation dialog (Alert.alert) with cancel/delete options when the delete button is pressed, without deleting yet (正常系)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([
-          { id: '1', text: '削除確認用の日記', createdAt: isoAt(now, dayWithEntry) },
-        ]),
-      );
-      jest.clearAllMocks();
-      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      const deleteLink = screen.getByText('削除');
-      // 削除リンクの文字色も、テーマ定数化されたColors.light.errorを使う
-      expect(StyleSheet.flatten(deleteLink.props.style).color).toBe(Colors.light.error);
-      fireEvent.press(deleteLink);
-
-      expect(Alert.alert).toHaveBeenCalledTimes(1);
-      const [title, message, buttons] = (Alert.alert as jest.Mock).mock.calls[0];
-      expect(title).toBe('日記を削除しますか?');
-      expect(message).toBe('この操作は取り消せません。');
-      expect(buttons).toHaveLength(2);
-      expect(buttons[0]).toMatchObject({ text: 'キャンセル', style: 'cancel' });
-      expect(buttons[1]).toMatchObject({ text: '削除', style: 'destructive' });
-
-      // ダイアログを表示しただけの段階では削除処理はまだ呼ばれていない
-      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-      expect(screen.getAllByText('削除確認用の日記').length).toBeGreaterThanOrEqual(1);
-    });
-
-    it('deletes only the targeted entry from the list and persists the change to AsyncStorage encrypted when "削除" is confirmed (正常系)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      const storedEntries = [
-        { id: '1', text: '残る日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
-        { id: '2', text: '削除される日記', createdAt: isoAt(now, dayWithEntry, 12, 0) },
-      ];
-      // レガシーキー経由の移行時に発生するremoveItem呼び出しと区別できるよう、個別キー方式で
-      // 直接シードしておく(この後の削除操作によるremoveItem呼び出し回数だけを検証したいため)
-      await seedDiaryEntries(storedEntries);
-      jest.clearAllMocks();
-      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText('削除される日記');
-
-      // 時刻昇順で描画されるため、2件目(削除される日記)の削除ボタンは配列の2番目
-      const deleteButtons = screen.getAllByText('削除');
-      expect(deleteButtons).toHaveLength(2);
-      fireEvent.press(deleteButtons[1]);
-      await pressAlertButton('削除');
-
-      // 削除はentry専用の個別キーのremoveItemのみで完結し、setItemは呼ばれない
-      await waitFor(() => expect(AsyncStorage.removeItem).toHaveBeenCalledTimes(1));
-      expect(AsyncStorage.removeItem).toHaveBeenCalledWith(buildDiaryEntryKey('2'));
-      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-
-      // 削除された方は一覧から消え、残る方はそのまま表示される
-      expect(screen.queryByText('削除される日記')).toBeNull();
-      expect(screen.getAllByText('残る日記').length).toBeGreaterThanOrEqual(1);
-
-      // 残る方の個別キーはそのまま残っており、削除された方の個別キーは消えている
-      expect(await readPersistedEntry('1')).toEqual(storedEntries[0]);
-      expect(await AsyncStorage.getItem(buildDiaryEntryKey('2'))).toBeNull();
-    });
-
-    it('does not delete the entry when "キャンセル" is chosen in the confirmation dialog (正常系)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([
-          { id: '1', text: 'キャンセル対象の日記', createdAt: isoAt(now, dayWithEntry) },
-        ]),
-      );
-      jest.clearAllMocks();
-      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      fireEvent.press(screen.getByText('削除'));
-      await pressAlertButton('キャンセル');
-
-      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-      expect(screen.getAllByText('キャンセル対象の日記').length).toBeGreaterThanOrEqual(1);
-    });
-
-    it('rolls back the deletion (keeps the entry visible) and does not crash when AsyncStorage.removeItem fails during delete (異常系)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await seedDiaryEntries([
-        { id: '1', text: '削除失敗する日記', createdAt: isoAt(now, dayWithEntry) },
-      ]);
-      jest.clearAllMocks();
-      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-      jest.spyOn(AsyncStorage, 'removeItem').mockRejectedValueOnce(new Error('remove failed'));
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      fireEvent.press(screen.getByText('削除'));
-      await pressAlertButton('削除');
-
-      await waitFor(() =>
-        expect(Alert.alert).toHaveBeenLastCalledWith(
-          '削除に失敗しました',
-          'もう一度お試しください。',
-        ),
-      );
-
-      // ロールバックにより、一覧・カレンダーセルとも元のエントリが残っている
-      expect(screen.getAllByText('削除失敗する日記').length).toBeGreaterThanOrEqual(1);
-    });
-
-    it("removes the day's cell title from the calendar (entriesByDate) when the last remaining entry for that day is deleted (boundary)", async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([
-          { id: '1', text: 'その日最後の日記', createdAt: isoAt(now, dayWithEntry) },
-        ]),
-      );
-      jest.clearAllMocks();
-      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      // 削除前は、日記が実際に存在するカレンダーセルが1つ存在する
-      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
-
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      fireEvent.press(screen.getByText('削除'));
-      await pressAlertButton('削除');
-
-      await waitFor(() =>
-        expect(AsyncStorage.removeItem).toHaveBeenCalledWith(buildDiaryEntryKey('1')),
-      );
-      // 一覧モーダルはまだ開いたままだが、日記自体はもう表示されない(entriesByDateから消えた)
-      expect(screen.queryByText('その日最後の日記')).toBeNull();
-
-      // モーダルを閉じると、カレンダー上にも日記が実際に存在するセル(タイトル付き)が無くなっている
-      fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
-      await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
-      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(0);
-    });
-  });
-
   describe('日記の無い日をタップした新規作成モーダル', () => {
     // 対象日('YYYY年M月D日、日記なし、タップして新規作成')のアクセシビリティラベルからセルを特定する
     function pastOrTodayCellLabel(date: Date): string {
@@ -4120,7 +2707,7 @@ describe('HomeScreen', () => {
       return input!;
     }
 
-    it('opens the new-entry modal (not the entry-list modal) with a heading and placeholder for the tapped date, when a day without any diary entries that is today or in the past is tapped (正常系)', async () => {
+    it('opens the new-entry modal (does not navigate to the day-entries screen) with a heading and placeholder for the tapped date, when a day without any diary entries that is today or in the past is tapped (正常系)', async () => {
       const now = new Date();
       const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
 
@@ -4133,9 +2720,9 @@ describe('HomeScreen', () => {
       expect(await screen.findByText(heading)).toBeTruthy();
       expect(getNewEntryInput().props.placeholder).toBe('その日の出来事や気持ちを書いてみましょう');
 
-      const modals = screen.UNSAFE_getAllByType(Modal);
-      // 日付一覧モーダル(index 0)は開いていない
-      expect(modals[0].props.visible).toBe(false);
+      const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
+      expect(newEntryModal.props.visible).toBe(true);
+      expect(mockPush).not.toHaveBeenCalled();
     });
 
     it("saves a new entry anchored to local noon of the tapped date as createdAt (regardless of the current time-of-day), persists it encrypted, closes the modal, and reflects the entry in that day's calendar cell", async () => {
@@ -4168,8 +2755,8 @@ describe('HomeScreen', () => {
 
       // 保存に成功するとモーダルが閉じる
       await waitFor(() => {
-        const modals = screen.UNSAFE_getAllByType(Modal);
-        expect(modals[2].props.visible).toBe(false);
+        const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
+        expect(newEntryModal.props.visible).toBe(false);
       });
 
       // entriesByDateはcreatedAtの日付(=タップした日付)をキーにするため、
@@ -4196,8 +2783,8 @@ describe('HomeScreen', () => {
       expect(screen.queryByText('保存失敗する新規日記')).toBeNull();
 
       // モーダルは開いたままで、入力内容も保持されている
-      const modals = screen.UNSAFE_getAllByType(Modal);
-      expect(modals[2].props.visible).toBe(true);
+      const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
+      expect(newEntryModal.props.visible).toBe(true);
       expect(getNewEntryInput().props.value).toBe('保存失敗する新規日記');
     });
 
@@ -4289,7 +2876,7 @@ describe('HomeScreen', () => {
         openNewEntryModalFor(yesterday);
         fireEvent.changeText(getNewEntryInput(), '破棄されるはずの下書き');
 
-        const [, , newEntryModal] = screen.UNSAFE_getAllByType(Modal);
+        const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
         const overlay = getModalOverlayPressable(newEntryModal);
         fireEvent.press(overlay);
 
@@ -4315,7 +2902,7 @@ describe('HomeScreen', () => {
         openNewEntryModalFor(yesterday);
         fireEvent.changeText(getNewEntryInput(), 'キャンセルで残るはずの下書き');
 
-        const [, , newEntryModal] = screen.UNSAFE_getAllByType(Modal);
+        const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
         const overlay = getModalOverlayPressable(newEntryModal);
         fireEvent.press(overlay);
 
@@ -4326,7 +2913,7 @@ describe('HomeScreen', () => {
       });
     });
 
-    it('does not open the new-entry modal when tapping a day that already has diary entries; the existing entry-list modal opens instead', async () => {
+    it('does not open the new-entry modal when tapping a day that already has diary entries; navigates to the day-entries screen instead', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -4339,10 +2926,9 @@ describe('HomeScreen', () => {
 
       fireEvent.press(screen.getByText(String(dayWithEntry)));
 
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-      const modals = screen.UNSAFE_getAllByType(Modal);
-      expect(modals[0].props.visible).toBe(true);
-      expect(modals[2].props.visible).toBe(false);
+      expect(mockPush).toHaveBeenCalledWith(`/day-entries/${toDateKeyForTest(now, dayWithEntry)}`);
+      const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
+      expect(newEntryModal.props.visible).toBe(false);
     });
 
     it("keeps the top composer's save flow (createdAt = the current moment, not local noon of a tapped date) unaffected by the new per-date creation modal", async () => {
@@ -4362,322 +2948,6 @@ describe('HomeScreen', () => {
       const createdAtMs = new Date(persisted.createdAt).getTime();
       expect(createdAtMs).toBeGreaterThanOrEqual(beforeSave);
       expect(createdAtMs).toBeLessThanOrEqual(afterSave);
-    });
-  });
-
-  describe('日記エントリのコピー', () => {
-    it('copies the entry text to the clipboard via Clipboard.setStringAsync when the copy button is pressed (正常系)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([
-          { id: '1', text: 'コピー対象の日記本文', createdAt: isoAt(now, dayWithEntry) },
-        ]),
-      );
-      jest.clearAllMocks();
-      mockSetStringAsync.mockResolvedValueOnce(true);
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      fireEvent.press(screen.getByText('コピー'));
-
-      await waitFor(() => expect(mockSetStringAsync).toHaveBeenCalledTimes(1));
-      expect(mockSetStringAsync).toHaveBeenCalledWith('コピー対象の日記本文');
-    });
-
-    it('shows a success toast ("コピーしました") inside the entry-list modal after a successful copy (正常系)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([
-          { id: '1', text: 'トースト確認用の日記', createdAt: isoAt(now, dayWithEntry) },
-        ]),
-      );
-      jest.clearAllMocks();
-      mockSetStringAsync.mockResolvedValueOnce(true);
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      expect(screen.queryByText('コピーしました')).toBeNull();
-
-      fireEvent.press(screen.getByText('コピー'));
-
-      const toastMessage = await screen.findByText('コピーしました');
-      expect(toastMessage).toBeTruthy();
-      expect(screen.getByTestId('copy-toast')).toBeTruthy();
-    });
-
-    it('resets the copy toast when the entry-list modal is closed, so it does not briefly flash the next time it is opened (境界値)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([
-          { id: '1', text: 'モーダル再オープン確認用', createdAt: isoAt(now, dayWithEntry) },
-        ]),
-      );
-      jest.clearAllMocks();
-      mockSetStringAsync.mockResolvedValueOnce(true);
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      fireEvent.press(screen.getByText('コピー'));
-      expect(await screen.findByText('コピーしました')).toBeTruthy();
-
-      // トーストが自動で消える前にモーダルを閉じても、次回開いた際に前回のトーストが残らない
-      fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
-      await waitFor(() => expect(screen.queryByText(CLOSE_BUTTON_TEXT)).toBeNull());
-
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-      expect(screen.queryByText('コピーしました')).toBeNull();
-    });
-
-    it('shows an error alert and does not show the success toast when Clipboard.setStringAsync fails (異常系)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([
-          { id: '1', text: 'コピー失敗確認用の日記', createdAt: isoAt(now, dayWithEntry) },
-        ]),
-      );
-      jest.clearAllMocks();
-      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-      mockSetStringAsync.mockRejectedValueOnce(new Error('clipboard write failed'));
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      await act(async () => {
-        fireEvent.press(screen.getByText('コピー'));
-      });
-
-      await waitFor(() =>
-        expect(Alert.alert).toHaveBeenCalledWith(
-          'コピーに失敗しました',
-          'もう一度お試しください。',
-        ),
-      );
-      expect(screen.queryByText('コピーしました')).toBeNull();
-    });
-
-    it('sets accessibilityRole="button" and accessibilityLabel="日記本文をコピー" on the copy button so screen readers can identify it (アクセシビリティ)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([
-          { id: '1', text: 'アクセシビリティ確認用の日記', createdAt: isoAt(now, dayWithEntry) },
-        ]),
-      );
-      jest.clearAllMocks();
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      const copyButton = screen.getByRole('button', { name: '日記本文をコピー' });
-      expect(copyButton.props.accessibilityLabel).toBe('日記本文をコピー');
-    });
-  });
-
-  describe('保存/編集/削除の書き込み直列化によるレースコンディション対策', () => {
-    // 日記エントリの削除のdescribe内にある同名ヘルパーと同じ実装。
-    // このdescribe単体でも複数の非同期操作を絡めたシナリオを組み立てやすくするため、
-    // ここでも同じ内容のヘルパーをローカルに用意する。
-    async function pressAlertButton(label: string) {
-      const alertMock = Alert.alert as jest.Mock;
-      const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
-      const buttons = lastCall[2] as { text: string; onPress?: () => void }[];
-      const button = buttons.find((b) => b.text === label);
-      expect(button).toBeDefined();
-      await act(async () => {
-        button?.onPress?.();
-      });
-    }
-
-    it("persists both a delete of entry A and a concurrent edit of entry B, even though A's persistence write is still pending when B's edit save is requested (the write queue still serializes independent per-entry writes, each of which touches only its own AsyncStorage key)", async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      const storedEntries = [
-        { id: 'a', text: 'Aの日記(削除される)', createdAt: isoAt(now, dayWithEntry, 7, 0) },
-        { id: 'b', text: 'Bの日記(編集前)', createdAt: isoAt(now, dayWithEntry, 12, 0) },
-      ];
-      await seedDiaryEntries(storedEntries);
-      jest.clearAllMocks();
-      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-
-      // Aの削除(removeItem)・Bの編集保存(setItem)、それぞれの完了タイミングを個別に制御する。
-      // 実際の書き込みは元の実装(spyOn前の関数)経由で行い「完了タイミングだけ遅延させる」
-      // (単に解決を遅らせるだけだと実際には書き込まれないまま直列化の検証にならない)
-      const originalRemoveItem = AsyncStorage.removeItem;
-      const originalSetItem = AsyncStorage.setItem;
-      let resolveDeleteWrite: () => void = () => {};
-      let resolveEditWrite: () => void = () => {};
-      jest.spyOn(AsyncStorage, 'removeItem').mockImplementationOnce(
-        (key: string) =>
-          new Promise<void>((resolve) => {
-            resolveDeleteWrite = () => {
-              originalRemoveItem(key).then(resolve);
-            };
-          }),
-      );
-      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
-        (key: string, value: string) =>
-          new Promise<void>((resolve) => {
-            resolveEditWrite = () => {
-              originalSetItem(key, value).then(resolve);
-            };
-          }),
-      );
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText('Bの日記(編集前)');
-
-      // Aの削除を確定する。楽観的UI更新は同期的に反映されるが、AsyncStorageへの
-      // 実際の書き込み(enqueueDiaryWrite内のremoveItem)はpendingのまま止まる
-      const deleteButtons = screen.getAllByText('削除');
-      expect(deleteButtons).toHaveLength(2);
-      fireEvent.press(deleteButtons[0]);
-      await pressAlertButton('削除');
-
-      await waitFor(() => expect(AsyncStorage.removeItem).toHaveBeenCalledTimes(1), {
-        timeout: 5000,
-      });
-      // 楽観的UI更新により、Aは一覧からすでに消えている
-      expect(screen.queryByText('Aの日記(削除される)')).toBeNull();
-
-      // Aの書き込みがまだpendingのうちに、Bの編集保存を開始する
-      fireEvent.press(screen.getByText('編集'));
-      await screen.findByText('日記を編集');
-      const editInput = screen.getByDisplayValue('Bの日記(編集前)');
-      fireEvent.changeText(editInput, 'Bの日記(編集後)');
-      const saveButtons = screen.getAllByText('保存');
-      expect(saveButtons).toHaveLength(2);
-      fireEvent.press(saveButtons[1]);
-
-      // 書き込みキューによって直列化されているため、Aの削除が完了する前に
-      // Bの編集保存(setItem呼び出し)が発生することはない
-      // (このアサーションは、直列化前の実装では即座に発生してしまい失敗する)
-      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-
-      // Aの書き込みを完了させると、キューの次のタスク(Bの編集保存)が実行される
-      resolveDeleteWrite();
-      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1), {
-        timeout: 5000,
-      });
-
-      // Bの書き込みも完了させる
-      resolveEditWrite();
-      await waitFor(() => expect(screen.queryByText('日記を編集')).toBeNull(), {
-        timeout: 5000,
-      });
-
-      // 最終的にAsyncStorageへ永続化された内容には、Aの削除とBの編集の両方が反映されている
-      // (エントリごとに独立したキーへ書き込むため、互いの操作が古いスナップショットで
-      // 上書きし合うことはない)
-      expect(await AsyncStorage.getItem(buildDiaryEntryKey('a'))).toBeNull();
-      expect(await readPersistedEntry('b')).toEqual({
-        id: 'b',
-        text: 'Bの日記(編集後)',
-        createdAt: storedEntries[1].createdAt,
-      });
-
-      // 画面上の表示にも両方の変更が反映されている
-      expect(screen.queryByText('Aの日記(削除される)')).toBeNull();
-      expect(screen.getAllByText('Bの日記(編集後)').length).toBeGreaterThanOrEqual(1);
-    });
-
-    it('persists a newly saved entry together with a concurrent deletion of a different entry, even though the deletion write is still pending when the new save is requested (covering handleSave alongside handleDeleteEntry)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      const storedEntries = [
-        { id: 'keep', text: '残る日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
-        { id: 'todelete', text: '削除される日記', createdAt: isoAt(now, dayWithEntry, 12, 0) },
-      ];
-      await seedDiaryEntries(storedEntries);
-      jest.clearAllMocks();
-      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-
-      // 同上の理由により、実際の書き込みは元の実装経由で行い完了タイミングのみを遅延させる
-      const originalRemoveItem = AsyncStorage.removeItem;
-      const originalSetItem = AsyncStorage.setItem;
-      let resolveDeleteWrite: () => void = () => {};
-      let resolveSaveWrite: () => void = () => {};
-      jest.spyOn(AsyncStorage, 'removeItem').mockImplementationOnce(
-        (key: string) =>
-          new Promise<void>((resolve) => {
-            resolveDeleteWrite = () => {
-              originalRemoveItem(key).then(resolve);
-            };
-          }),
-      );
-      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
-        (key: string, value: string) =>
-          new Promise<void>((resolve) => {
-            resolveSaveWrite = () => {
-              originalSetItem(key, value).then(resolve);
-            };
-          }),
-      );
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText('削除される日記');
-
-      const deleteButtons = screen.getAllByText('削除');
-      expect(deleteButtons).toHaveLength(2);
-      fireEvent.press(deleteButtons[1]);
-      await pressAlertButton('削除');
-
-      await waitFor(() => expect(AsyncStorage.removeItem).toHaveBeenCalledTimes(1), {
-        timeout: 5000,
-      });
-
-      // 削除の書き込みがまだpendingのうちに、新規エントリの保存を開始する
-      const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
-      fireEvent.changeText(input, '新しい日記');
-      fireEvent.press(screen.getByText('保存'));
-
-      // 書き込みキューにより、削除の書き込みが完了するまで新規保存の書き込み(setItem)は発生しない
-      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-
-      resolveDeleteWrite();
-      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1), {
-        timeout: 5000,
-      });
-
-      resolveSaveWrite();
-      expect(await screen.findByText('保存しました', {}, { timeout: 5000 })).toBeTruthy();
-
-      // 削除されたエントリのキーは消え、既存の1件・新規保存した1件はそれぞれ独立して残っている
-      expect(await AsyncStorage.getItem(buildDiaryEntryKey('todelete'))).toBeNull();
-      expect(await readPersistedEntry('keep')).toEqual(storedEntries[0]);
-
-      const setItemMock = AsyncStorage.setItem as jest.Mock;
-      const [, lastValue] = setItemMock.mock.calls[setItemMock.mock.calls.length - 1];
-      const persistedNewEntry = (await decryptPersistedEntry(lastValue)) as { text: string };
-      expect(persistedNewEntry.text).toBe('新しい日記');
     });
   });
 
@@ -4840,57 +3110,8 @@ describe('HomeScreen', () => {
       expect(StyleSheet.flatten(errorMessage.props.style).color).toBe(Colors.dark.error);
     });
 
-    it('shows the edit-failure error message in Colors.dark.error when in dark mode', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '編集前の日記', createdAt: isoAt(now, dayWithEntry) }]),
-      );
-      jest.clearAllMocks();
-      mockedUseColorScheme.mockReturnValue('dark');
-      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-      fireEvent.press(screen.getByText('編集'));
-      await screen.findByText('日記を編集');
-
-      const editInput = screen.getByDisplayValue('編集前の日記');
-      fireEvent.changeText(editInput, '失敗するはずの編集');
-      // 編集モーダルの保存ボタンは、メインの入力欄(composer)の保存ボタンと同じ文言「保存」を
-      // 使うため2件ヒットする。JSXの描画順(composerが先、編集モーダルが後)に依存して2件目を使う
-      const saveButtons = screen.getAllByText('保存');
-      expect(saveButtons).toHaveLength(2);
-      fireEvent.press(saveButtons[1]);
-
-      const editErrorMessage =
-        await screen.findByText('更新に失敗しました。もう一度お試しください。');
-      expect(StyleSheet.flatten(editErrorMessage.props.style).color).toBe(Colors.dark.error);
-    });
-
-    it('shows the delete link in Colors.dark.error when in dark mode', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([
-          { id: '1', text: '削除確認用の日記', createdAt: isoAt(now, dayWithEntry) },
-        ]),
-      );
-      jest.clearAllMocks();
-      mockedUseColorScheme.mockReturnValue('dark');
-
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      await screen.findByText(CLOSE_BUTTON_TEXT);
-
-      const deleteLink = screen.getByText('削除');
-      expect(StyleSheet.flatten(deleteLink.props.style).color).toBe(Colors.dark.error);
-    });
+    // 編集失敗時のエラーメッセージ・削除リンクのダークモード配色は、それぞれ専用画面へ移動したため
+    // tests/app/edit-entry/[id].test.tsx・tests/app/day-entries/[date].test.tsxで検証する(Issue #221)
   });
 
   describe('日記のキーワード検索', () => {
@@ -4981,7 +3202,7 @@ describe('HomeScreen', () => {
       expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
     });
 
-    it('opens the day-entry modal for the tapped search result, using the existing selectedDate modal', async () => {
+    it('navigates to the day-entries screen for the date of the tapped search result', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -4999,12 +3220,7 @@ describe('HomeScreen', () => {
       const resultItem = await screen.findByText(/公園/);
       fireEvent.press(resultItem);
 
-      // タップ後、その日付のエントリ一覧モーダルが開き、日付見出し・閉じるボタン・
-      // エントリの時刻表示(検索結果一覧には出ない書式)が表示される
-      expect(await screen.findByText(CLOSE_BUTTON_TEXT)).toBeTruthy();
-      expect(
-        screen.getByText(formatEntryDateTimeForTest(isoAt(now, dayWithEntry, 9, 0))),
-      ).toBeTruthy();
+      expect(mockPush).toHaveBeenCalledWith(`/day-entries/${toDateKeyForTest(now, dayWithEntry)}`);
     });
 
     it('excerpts the matched portion of the entry text (with surrounding context) rather than only the first line, unlike the calendar cell title', async () => {

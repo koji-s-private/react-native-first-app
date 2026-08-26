@@ -9,6 +9,7 @@ import {
   clearAllDiaryEntries,
   deleteDiaryEntry,
   getAllDiaryEntries,
+  getDiaryEntryById,
   saveDiaryEntry,
   type DiaryEntry,
 } from '@/utils/diary-storage';
@@ -225,6 +226,69 @@ describe('deleteDiaryEntry', () => {
 
   it('does not throw when the entry does not exist (境界値)', async () => {
     await expect(deleteDiaryEntry('does-not-exist')).resolves.toBeUndefined();
+  });
+});
+
+describe('getDiaryEntryById', () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    secureStoreMock.__reset();
+    jest.clearAllMocks();
+  });
+
+  it('returns the decrypted entry matching the given id (正常系)', async () => {
+    const entry: DiaryEntry = {
+      id: '1',
+      text: '編集画面から取得する日記',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    await seedDiaryEntry(entry);
+    await seedDiaryEntry({ id: '2', text: '別のエントリ', createdAt: '2026-01-02T00:00:00.000Z' });
+
+    await expect(getDiaryEntryById('1')).resolves.toEqual(entry);
+  });
+
+  it('reads a plain (unencrypted) entry saved before encryption was introduced, for backward compatibility (正常系: 後方互換)', async () => {
+    const entry: DiaryEntry = {
+      id: '1',
+      text: '暗号化対応前の日記',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    await AsyncStorage.setItem(buildDiaryEntryKey('1'), JSON.stringify(entry));
+
+    await expect(getDiaryEntryById('1')).resolves.toEqual(entry);
+  });
+
+  it('returns null when no entry exists for the given id (境界値)', async () => {
+    await expect(getDiaryEntryById('does-not-exist')).resolves.toBeNull();
+  });
+
+  it('returns null instead of throwing when the stored value fails to decrypt (異常系: 復号失敗)', async () => {
+    await AsyncStorage.setItem(buildDiaryEntryKey('1'), 'encrypted:v1:not-a-real-payload');
+
+    await expect(getDiaryEntryById('1')).resolves.toBeNull();
+  });
+
+  it('returns null instead of throwing when the decrypted payload does not match the DiaryEntry shape (異常系: スキーマ不整合)', async () => {
+    const key = await getOrCreateEncryptionKey();
+    await AsyncStorage.setItem(
+      buildDiaryEntryKey('1'),
+      encryptText(JSON.stringify({ foo: 'bar' }), key),
+    );
+
+    await expect(getDiaryEntryById('1')).resolves.toBeNull();
+  });
+
+  it('does not read or write any other AsyncStorage key (他のエントリに影響を与えないこと)', async () => {
+    await seedDiaryEntry({ id: '1', text: '対象', createdAt: '2026-01-01T00:00:00.000Z' });
+    await seedDiaryEntry({ id: '2', text: '無関係', createdAt: '2026-01-02T00:00:00.000Z' });
+    jest.clearAllMocks();
+
+    await getDiaryEntryById('1');
+
+    expect(AsyncStorage.getItem).toHaveBeenCalledTimes(1);
+    expect(AsyncStorage.getItem).toHaveBeenCalledWith(buildDiaryEntryKey('1'));
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   });
 });
 
