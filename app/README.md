@@ -10,6 +10,10 @@
 app/
   _layout.tsx          アプリ全体のレイアウト・初期化処理（テーマ、フォント読み込みなど）
   oss-licenses.tsx       OSSライセンス一覧画面
+  day-entries/
+    [date].tsx           指定した日付の日記一覧画面（動的ルート）
+  edit-entry/
+    [id].tsx             日記1件の編集画面（動的ルート）
   (tabs)/
     _layout.tsx          タブナビゲーションの定義
     index.tsx            日記画面（ホームタブ）
@@ -33,6 +37,12 @@ app/
 - `(tabs)/index.tsx` … タブの「Home」に対応する画面（日記の一覧・入力画面）
 
 タブを追加したい場合は、`(tabs)/` ディレクトリに新しい画面ファイルを追加し、`(tabs)/_layout.tsx` の `Tabs.Screen` に対応する設定（`name`、`title`、`tabBarIcon` など）を追記してください。
+
+## `day-entries/[date].tsx` ・ `edit-entry/[id].tsx` の役割（Issue #221）
+
+カレンダー画面（`(tabs)/index.tsx`）で日記のある日付をタップすると、`day-entries/[date].tsx`（`[date]` は `YYYY-MM-DD` 形式の動的パラメータ）へ遷移し、その日の日記一覧・コピー・削除を行えます。一覧の「編集」ボタンからは `edit-entry/[id].tsx`（`[id]` は日記エントリのid）へさらに遷移し、本文を編集できます。
+
+以前はどちらもカレンダー画面上にモーダル（ドロワー）として重ねて表示していましたが、削除時にモーダルのフェードアウトが途中で止まる不具合の温床になっていたことに加え、編集専用の画面へ遷移させたいという要望を受けて、通常の画面遷移（`router.push`）に置き換えています。編集画面から戻る際（ヘッダーの戻る操作・Android物理戻るボタン・スワイプ戻るジェスチャーいずれも含む）に未保存の変更がある場合は、[React Navigationの`beforeRemove`イベント](https://reactnavigation.org/docs/preventing-going-back/)を使って離脱確認ダイアログを表示します。
 
 ## 画面ファイルの命名規則
 

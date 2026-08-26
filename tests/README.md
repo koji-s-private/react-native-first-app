@@ -11,6 +11,10 @@ tests/
     index.test.tsx      app/(tabs)/index.tsx（日記画面）のテスト
     settings.test.tsx      app/(tabs)/settings.tsx（設定画面）のテスト
     oss-licenses.test.tsx など   app/oss-licenses.tsx（OSSライセンス画面）のテスト
+    day-entries/
+      [date].test.tsx   app/day-entries/[date].tsx（日付ごとの日記一覧画面）のテスト
+    edit-entry/
+      [id].test.tsx     app/edit-entry/[id].tsx（日記編集画面）のテスト
   components/
     onboarding.test.tsx    components/onboarding.tsx（初回起動時のオンボーディング画面）のテスト
     save-toast.test.tsx    components/save-toast.tsx（保存成功時に表示する一時的なトースト）のテスト
@@ -23,6 +27,8 @@ tests/
   utils/
     diary-encryption.test.ts   utils/diary-encryption.ts（日記データの暗号化・復号）のテスト
     diary-storage.test.ts      utils/diary-storage.ts（日記データの全件削除）のテスト
+    diary-date.test.ts         utils/diary-date.ts（日記の日付・時刻の整形/変換)のテスト
+    diary-text.test.ts         utils/diary-text.ts（日記本文の文字数上限・切り詰め)のテスト
     diary-reminder-notifications.test.ts   utils/diary-reminder-notifications.ts（expo-notificationsラッパー。許可リクエスト・日次スケジュール登録/キャンセル）のテスト
     onboarding-storage.test.ts   utils/onboarding-storage.ts（オンボーディング表示済みフラグの読み書き）のテスト
     app-lock-authentication.test.ts   utils/app-lock-authentication.ts（expo-local-authenticationラッパー。対応端末判定・生体認証/パスコード認証)のテスト

@@ -1,8 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Clipboard from 'expo-clipboard';
 import { randomUUID } from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import type { ComponentProps } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -29,12 +28,9 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import {
-  deleteDiaryEntry,
-  getAllDiaryEntries,
-  saveDiaryEntry,
-  type DiaryEntry,
-} from '@/utils/diary-storage';
+import { buildCreatedAtForDateKey, formatDateHeading, toDateKey } from '@/utils/diary-date';
+import { BODY_MAX_LENGTH, splitIntoGraphemes, truncateToBodyMaxLength } from '@/utils/diary-text';
+import { getAllDiaryEntries, saveDiaryEntry, type DiaryEntry } from '@/utils/diary-storage';
 
 // 保存前の下書き(draft)を自動保存するためのAsyncStorageキー。日記本文の保存キー(エントリ単位の
 // 個別キー、utils/diary-storage.ts参照)とは
@@ -51,14 +47,8 @@ const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
 // カレンダーの日付セルに表示するタイトルの最大文字数(超える場合は省略記号を付ける)
 const TITLE_MAX_LENGTH = 20;
 
-// 日記本文の最大文字数(AsyncStorageのサイズ制限に抵触しないよう、1件あたりの文字数を制限する)
-const BODY_MAX_LENGTH = 1000;
-
 // 保存成功時にトーストへ表示するメッセージ
 const SAVE_SUCCESS_MESSAGE = '保存しました';
-
-// コピー成功時にトーストへ表示するメッセージ
-const COPY_SUCCESS_MESSAGE = 'コピーしました';
 
 // 日付セルの高さのデフォルト最小値(外枠の実測高さがまだ取れていない初回レンダー用のフォールバック)
 const DEFAULT_DAY_CELL_HEIGHT = 48;
@@ -77,11 +67,6 @@ const CALENDAR_WEEK_ROW_MARGIN = 14;
 // react-native-calendarsが使うdayComponentのpropsの型(ライブラリ側から直接exportされていないため、
 // CalendarPropsから抽出して利用する)
 type DayComponentProps = ComponentProps<NonNullable<CalendarProps['dayComponent']>>;
-
-// enqueueDiaryWrite(永続化処理を直列化するキュー)に積む「今回行う1つの操作」を表す型。
-// エントリ単位のAsyncStorageキーへ移行したことで(Issue #83)、キュー内のタスクはもはや
-// 全件配列を読み直して編集する必要がなく、保存/削除どちらの操作かだけを持てばよい
-type DiaryWriteOperation = { type: 'save'; entry: DiaryEntry } | { type: 'delete'; id: string };
 
 // 日本語の月名。react-native-calendarsのロケール設定(月名・月省略名)と、
 // 年月ジャンプ用ピッカーの月ボタン表示の両方で共有する
@@ -110,53 +95,6 @@ LocaleConfig.locales.ja = {
 };
 LocaleConfig.defaultLocale = 'ja';
 
-// Dateをreact-native-calendarsが使う'YYYY-MM-DD'形式のキーに変換する(端末のローカル日時基準)
-function toDateKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-// 'YYYY-MM-DD'形式の日付キーから、その日の正午(端末のローカルタイム)を表すISO文字列を作る。
-// 過去日を選んで新規作成する際のcreatedAtに使う。0時付近の時刻だと、この後toDateKey()で
-// 日付キーへ逆算する際にタイムゾーンやサマータイムの影響で日付がずれるおそれがあるため、
-// 日付境界から離れた正午を採用している
-function buildCreatedAtForDateKey(dateKey: string): string {
-  const [year, month, day] = dateKey.split('-').map(Number);
-  return new Date(year, month - 1, day, 12, 0, 0, 0).toISOString();
-}
-
-// 文字列を「見た目上の1文字」(書記素クラスタ)単位の配列に分割する。
-// 絵文字の家族構成(ZWJで結合された複数コードポイント)やサロゲートペアで表現される
-// 文字を、単純なstring.slice()やArray.from()のコードポイント単位分割で行うと
-// クラスタの途中で分断されてしまうため、Intl.Segmenter(grapheme単位)を優先して使う。
-// Hermesエンジンのバージョンによっては Intl.Segmenter が未実装の場合があるため、
-// 実行時に利用可否をチェックし、非対応の環境ではサロゲートペアのみ考慮した
-// Array.from()によるコードポイント単位の分割にフォールバックする
-// (ZWJ結合までは救えないが、サロゲートペアの分断は避けられる)。
-function splitIntoGraphemes(text: string): string[] {
-  if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
-    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-    return Array.from(segmenter.segment(text), (segmentData) => segmentData.segment);
-  }
-  return Array.from(text);
-}
-
-// 日記本文をBODY_MAX_LENGTHを超えないよう、書記素クラスタ(grapheme)単位で切り詰める。
-// React NativeのTextInputが標準で提供するmaxLength propはUTF-16コードユニット単位でしか
-// 制限できず、サロゲートペアやZWJ結合絵文字(家族の絵文字など複数コードポイントが
-// 結合されたもの)の途中で入力を打ち切ってしまう可能性がある。そのためTextInput側の
-// maxLength propは使わず、onChangeTextハンドラでこの関数を使いgrapheme単位で
-// 切り詰める方針にしている
-function truncateToBodyMaxLength(text: string): string {
-  const graphemes = splitIntoGraphemes(text);
-  if (graphemes.length <= BODY_MAX_LENGTH) {
-    return text;
-  }
-  return graphemes.slice(0, BODY_MAX_LENGTH).join('');
-}
-
 // 日記本文からカレンダーセルに表示する短いタイトルを作る
 // (改行があれば最初の行のみを使い、さらに長ければ指定文字数で切り詰める)。
 // 文字数のカウント・切り詰めは書記素クラスタ単位で行い、絵文字などの
@@ -168,24 +106,6 @@ function getEntryTitle(text: string): string {
     return firstLine;
   }
   return `${graphemes.slice(0, TITLE_MAX_LENGTH).join('')}…`;
-}
-
-// 'YYYY-MM-DD'形式の日付キーをモーダルの見出し用に整形する
-function formatDateHeading(dateKey: string): string {
-  const [year, month, day] = dateKey.split('-');
-  return `${year}年${Number(month)}月${Number(day)}日`;
-}
-
-// 日記エントリの日時を'YYYY/MM/DD HH:mm'形式で整形する(端末のロケール設定に依存する
-// toLocaleString()は使わず、日本語UIで一貫した表記になるよう手動でフォーマットする)
-function formatEntryDateTime(isoString: string): string {
-  const date = new Date(isoString);
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  const hours = `${date.getHours()}`.padStart(2, '0');
-  const minutes = `${date.getMinutes()}`.padStart(2, '0');
-  return `${year}/${month}/${day} ${hours}:${minutes}`;
 }
 
 // 検索結果の抜粋で、マッチ箇所の前後何文字を表示するか
@@ -288,8 +208,8 @@ function getSearchExcerpt(text: string, query: string): string {
 }
 
 // モーダルの背景オーバーレイ(フェード)・コンテンツ(下端からのスライド)のアニメーション時間(ミリ秒)。
-// 4箇所のモーダル(日付一覧・編集・新規作成・年月ピッカー)すべてで同じ見た目・タイミングになるよう
-// 共通の定数として持つ
+// 2箇所のモーダル(新規作成・年月ピッカー)すべてで同じ見た目・タイミングになるよう
+// 共通の定数として持つ(日付一覧・編集は専用画面への遷移(Issue #221)に置き換えたため対象外)
 const MODAL_ANIMATION_DURATION_MS = 220;
 
 // コンテンツのスライドイン開始位置(画面外下端)。modalContentの高さは中身の量によって変わるため、
@@ -357,36 +277,19 @@ export default function HomeScreen() {
   const [saveError, setSaveError] = useState<string | null>(null);
   // 保存成功時に一時的に表示するトーストのメッセージ。nullの間は非表示
   const [saveToastMessage, setSaveToastMessage] = useState<string | null>(null);
-  // 一覧表示用にタップされた日付('YYYY-MM-DD')。nullの間はモーダルを閉じている
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  // コピー成功時に日付一覧モーダル内で一時的に表示するトーストのメッセージ。nullの間は非表示。
-  // 保存成功時のsaveToastMessageとは表示位置(モーダル内)が異なるため別のstateとして持つ
-  const [copyToastMessage, setCopyToastMessage] = useState<string | null>(null);
-  // 日記本文のキーワード検索用の入力値。既存の「今日の出来事を書く」入力欄(composer)や
-  // 編集用のeditDraftとは独立した、検索専用のstate
+  // 日記本文のキーワード検索用の入力値。既存の「今日の出来事を書く」入力欄(composer)とは
+  // 独立した、検索専用のstate
   const [searchQuery, setSearchQuery] = useState('');
   // handleSave(新規保存)の実行中かどうか。保存ボタンの連打(またはタップと同時に発生する
   // 複数のonPressイベント)によって、同じ内容の日記エントリが重複して保存されてしまうことを防ぐため、
   // 実行中は早期returnし、保存ボタンもdisabledにする
   const [isSaving, setIsSaving] = useState(false);
-  // 編集中のエントリのid。nullの間は編集モーダルを閉じている
-  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState('');
-  const [editError, setEditError] = useState<string | null>(null);
-  // 編集開始時点の本文(handleStartEditでeditDraftにセットした値と同じ)。handleCancelEdit実行時に
-  // editDraftと比較し、未編集(または編集後に元の内容へ戻した)場合は確認なしで閉じ、
-  // 変更がある場合のみ破棄確認ダイアログを挟むために保持する
-  const editOriginalTextRef = useRef('');
-  // handleSaveEdit(編集内容の保存)の実行中かどうか。isSavingと同様に、保存ボタンの連打(または
-  // タップと同時に発生する複数のonPressイベント)によって、同じ内容の更新処理が重複して
-  // 実行されてしまうことを防ぐため、実行中は早期returnし、保存ボタンもdisabledにする
-  const [isSavingEdit, setIsSavingEdit] = useState(false);
   // 新規作成モーダル(日記の無い日をタップした際に、その日付向けに新規作成する導線)の対象日付
   // ('YYYY-MM-DD')。nullの間はモーダルを閉じている
   const [newEntryDate, setNewEntryDate] = useState<string | null>(null);
   const [newEntryDraft, setNewEntryDraft] = useState('');
   const [newEntryError, setNewEntryError] = useState<string | null>(null);
-  // handleSaveNewEntryの実行中かどうか。isSaving/isSavingEditと同様、連打による重複保存を防ぐため、
+  // handleSaveNewEntryの実行中かどうか。isSavingと同様、連打による重複保存を防ぐため、
   // 実行中は早期returnし、保存ボタンもdisabledにする
   const [isSavingNewEntry, setIsSavingNewEntry] = useState(false);
   // handleSave内の保存処理(pending中)開始後に、ユーザーがdraft用TextInputへ入力操作を
@@ -414,24 +317,22 @@ export default function HomeScreen() {
   const [isMonthPickerVisible, setIsMonthPickerVisible] = useState(false);
   const [pickerYear, setPickerYear] = useState(displayedYear);
 
-  // 4つのモーダル(日付一覧・編集・新規作成・年月ピッカー)それぞれの、背景オーバーレイのフェードと
-  // コンテンツのスライドを分離したアニメーション制御(詳細はuseModalSlideTransitionのコメント参照)
-  const dateModalTransition = useModalSlideTransition(selectedDate !== null);
-  const editModalTransition = useModalSlideTransition(editingEntryId !== null);
+  // 2つのモーダル(新規作成・年月ピッカー)それぞれの、背景オーバーレイのフェードと
+  // コンテンツのスライドを分離したアニメーション制御(詳細はuseModalSlideTransitionのコメント参照)。
+  // 日付一覧・編集は専用画面への遷移(Issue #221)に置き換えたため、対象はこの2つのみになった
   const newEntryModalTransition = useModalSlideTransition(newEntryDate !== null);
   const monthPickerTransition = useModalSlideTransition(isMonthPickerVisible);
 
+  const router = useRouter();
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
   const backgroundColor = useThemeColor({}, 'background');
   const iconColor = useThemeColor({}, 'icon');
   const errorColor = useThemeColor({}, 'error');
 
-  // 新規保存・編集・削除の永続化処理を直列化するためのキュー。
-  // 各処理はReact stateのentries(古いレンダー時点のスナップショットの可能性がある)ではなく、
-  // 実行の順番が回ってきた時点でAsyncStorageから読み直した最新データをもとに次の内容を計算するため、
-  // 「Aの削除確定→保存処理中に、Bの編集保存が先に完了→Aの書き込みが後から古いスナップショットで
-  // 上書きしてBの編集が消える」といったレースコンディションを防ぐ。
+  // この画面内で行う保存処理(「今日」の入力欄からの新規保存・日付指定の新規作成)の
+  // 永続化を直列化するためのキュー。編集・削除は専用画面(day-entries/edit-entry)へ
+  // 移動しそちらで直接永続化するため、このキューの対象は「保存」のみになっている。
   // loadEntriesが下でこのrefを参照するため、宣言順をloadEntriesより前にしている
   const writeQueueRef = useRef<Promise<void>>(Promise.resolve());
   // 現在キューに積まれている(まだAsyncStorageへの書き込みが完了していない)タスクの件数。
@@ -440,7 +341,7 @@ export default function HomeScreen() {
   const pendingWriteCountRef = useRef(0);
 
   const loadEntries = useCallback(async () => {
-    // useFocusEffectでタブに再フォーカスした際、保存/編集/削除の書き込みがwriteQueueRef上で
+    // useFocusEffectでタブに再フォーカスした際、保存の書き込みがwriteQueueRef上で
     // まだpending中(AsyncStorageへの実際の書き込みが完了していない)ことがある。ここで待たずに
     // 読み込むと、キューの書き込みが完了する前の古い内容を一時的に読み込んでしまい、楽観的更新で
     // 表示していた内容から一瞬戻ってしまう(その後キューの書き込みが完了すればUIは正しい状態に
@@ -461,19 +362,15 @@ export default function HomeScreen() {
     setIsLoading(false);
   }, []);
 
-  // operationは「今回行う1つの操作」(新規保存・編集保存・削除のいずれか)を表す。
-  // エントリ単位の個別キーで保存するため、他のエントリの読み書きは発生しない
-  const enqueueDiaryWrite = useCallback((operation: DiaryWriteOperation): Promise<void> => {
+  // entryは今回保存する1件分のエントリ(新規作成)を表す。エントリ単位の個別キーで
+  // 保存するため、他のエントリの読み書きは発生しない
+  const enqueueDiaryWrite = useCallback((entry: DiaryEntry): Promise<void> => {
     // タスクをキューに積んだ時点(実行完了を待たず)で同期的にインクリメントする。
     // これにより、この関数の呼び出し直後にloadEntriesが走った場合でも、
     // まだ実行順が回ってきていないタスクの存在を正しく検知できる
     pendingWriteCountRef.current += 1;
     const task = writeQueueRef.current.then(async () => {
-      if (operation.type === 'save') {
-        await saveDiaryEntry(operation.entry);
-      } else {
-        await deleteDiaryEntry(operation.id);
-      }
+      await saveDiaryEntry(entry);
     });
     // キュー自体は個々のタスクの成否に関わらず先に進める(失敗はtask側のcatchで呼び出し元に伝える)。
     // 併せてpendingWriteCountRefも、成否に関わらずタスクが完了(=もはやpendingではなくなる)
@@ -581,9 +478,9 @@ export default function HomeScreen() {
 
     try {
       // 日記本文を平文のままAsyncStorageに保存しないよう、SecureStoreで保護した鍵で
-      // AES-256-GCM暗号化してから保存する。他の保存/編集/削除処理と競合しないよう、
+      // AES-256-GCM暗号化してから保存する。この画面内の他の保存処理と競合しないよう、
       // 書き込みはキュー経由で直列化する(このエントリ専用のキーへの書き込みのみで完結する)
-      await enqueueDiaryWrite({ type: 'save', entry: newEntry });
+      await enqueueDiaryWrite(newEntry);
       // 既に楽観的更新でReact stateは正しい内容になっているため、永続化された内容での
       // setEntriesによる再同期は不要
 
@@ -631,93 +528,7 @@ export default function HomeScreen() {
     setDraft(truncateToBodyMaxLength(text));
   }, []);
 
-  const handleStartEdit = useCallback((entry: DiaryEntry) => {
-    setEditingEntryId(entry.id);
-    setEditDraft(entry.text);
-    setEditError(null);
-    // 破棄確認の要否判定(handleCancelEdit)のため、編集開始時点の本文を控えておく
-    editOriginalTextRef.current = entry.text;
-  }, []);
-
-  // 編集用TextInputのonChangeText。draft用のhandleChangeDraftと同様の理由で
-  // truncateToBodyMaxLength(grapheme単位の切り詰め)を使う
-  const handleChangeEditDraft = useCallback((text: string) => {
-    setEditDraft(truncateToBodyMaxLength(text));
-  }, []);
-
-  // 編集モーダルを実際に閉じる処理本体(handleCancelEditから、確認不要な場合は直接、
-  // 確認が必要な場合はAlert.alertの「破棄」選択時に呼ばれる)
-  const closeEditModal = useCallback(() => {
-    setEditingEntryId(null);
-    setEditDraft('');
-    setEditError(null);
-  }, []);
-
-  // 編集モーダルを閉じる(背景タップ・「閉じる」ボタン・Android戻る操作の共通ハンドラ)。
-  // 編集開始時点の内容から変更されている場合のみ、誤って入力内容を失わないよう確認ダイアログを挟む
-  // (削除操作のhandleDeletePressと同じパターン)
-  const handleCancelEdit = useCallback(() => {
-    if (editDraft.trim() === editOriginalTextRef.current.trim()) {
-      closeEditModal();
-      return;
-    }
-
-    Alert.alert('変更を破棄しますか?', '編集中の内容は保存されません。', [
-      { text: 'キャンセル', style: 'cancel' },
-      { text: '破棄', style: 'destructive', onPress: closeEditModal },
-    ]);
-  }, [editDraft, closeEditModal]);
-
-  const handleSaveEdit = useCallback(async () => {
-    // 既に更新処理が進行中であれば、連打による重複更新を防ぐため何もしない
-    if (isSavingEdit) {
-      return;
-    }
-
-    const trimmed = editDraft.trim();
-    // 万が一上限を超えたテキストが渡ってきても保存しない(onChangeText側のgrapheme単位の
-    // 切り詰めが主な防御線)。上限チェック自体もsplitIntoGraphemesでgrapheme単位で行い、
-    // UTF-16コードユニット単位のlengthとのズレを防ぐ
-    if (!editingEntryId || !trimmed || splitIntoGraphemes(trimmed).length > BODY_MAX_LENGTH) {
-      return;
-    }
-
-    // 編集対象エントリのcreatedAtは変更せず引き継ぐ(存在しない場合は早期return。
-    // 通常はUIの導線上あり得ないが、念のための防御)
-    const targetEntry = entries.find((entry) => entry.id === editingEntryId);
-    if (!targetEntry) {
-      return;
-    }
-    const updatedEntry: DiaryEntry = { ...targetEntry, text: trimmed };
-
-    setIsSavingEdit(true);
-
-    const previousEntries = entries;
-    // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
-    // (実際にAsyncStorageへ書き込む内容はenqueueDiaryWriteに渡すupdatedEntryそのもの)
-    setEntries(entries.map((entry) => (entry.id === editingEntryId ? updatedEntry : entry)));
-    setEditError(null);
-
-    try {
-      // 他の保存/編集/削除処理と競合しないよう、書き込みはキュー経由で直列化する
-      // (このエントリ専用のキーへの書き込みのみで完結する)
-      await enqueueDiaryWrite({ type: 'save', entry: updatedEntry });
-      // 既に楽観的更新でReact stateは正しい内容になっているため、永続化された内容での
-      // setEntriesによる再同期は不要
-      // 永続化に成功した場合のみ編集モーダルを閉じる
-      setEditingEntryId(null);
-      setEditDraft('');
-    } catch {
-      // 永続化に失敗した場合は保存前の状態に戻し、編集モーダルは開いたままエラーを伝える
-      setEntries(previousEntries);
-      setEditError('更新に失敗しました。もう一度お試しください。');
-    } finally {
-      // 成功・失敗いずれの場合も、次の更新を行えるよう必ず実行中フラグを戻す
-      setIsSavingEdit(false);
-    }
-  }, [editDraft, editingEntryId, entries, enqueueDiaryWrite, isSavingEdit]);
-
-  // 新規作成用TextInputのonChangeText。draft/edit用と同様の理由でtruncateToBodyMaxLength
+  // 新規作成用TextInputのonChangeText。draft用と同様の理由でtruncateToBodyMaxLength
   // (grapheme単位の切り詰め)を使う
   const handleChangeNewEntryDraft = useCallback((text: string) => {
     setNewEntryDraft(truncateToBodyMaxLength(text));
@@ -733,7 +544,6 @@ export default function HomeScreen() {
 
   // 新規作成モーダルを閉じる(背景タップ・「閉じる」ボタン・Android戻る操作の共通ハンドラ)。
   // 入力途中の内容がある場合のみ、誤って入力内容を失わないよう確認ダイアログを挟む
-  // (handleCancelEditと同じパターン)
   const handleCancelNewEntry = useCallback(() => {
     if (!newEntryDraft.trim()) {
       closeNewEntryModal();
@@ -776,9 +586,9 @@ export default function HomeScreen() {
     setNewEntryError(null);
 
     try {
-      // 他の保存/編集/削除処理と競合しないよう、書き込みはキュー経由で直列化する
+      // この画面内の他の保存処理と競合しないよう、書き込みはキュー経由で直列化する
       // (このエントリ専用のキーへの書き込みのみで完結する)
-      await enqueueDiaryWrite({ type: 'save', entry: newEntry });
+      await enqueueDiaryWrite(newEntry);
       // 既に楽観的更新でReact stateは正しい内容になっているため、永続化された内容での
       // setEntriesによる再同期は不要。永続化に成功した場合のみモーダルを閉じる
       setNewEntryDate(null);
@@ -793,53 +603,6 @@ export default function HomeScreen() {
     }
   }, [entries, enqueueDiaryWrite, isSavingNewEntry, newEntryDate, newEntryDraft]);
 
-  // 日付一覧モーダルを実際に閉じる処理本体(handleCloseDateModalから、確認不要な場合は直接、
-  // 確認が必要な場合はAlert.alertの「破棄」選択時に呼ばれる)。開いていた編集モーダルがあれば合わせて閉じる
-  const closeDateModal = useCallback(() => {
-    setSelectedDate(null);
-    setEditingEntryId(null);
-    setEditDraft('');
-    setEditError(null);
-    // 次回モーダルを開いた際に前回のトーストが一瞬表示されてしまわないようリセットする
-    setCopyToastMessage(null);
-  }, []);
-
-  // 日付一覧モーダルを閉じる(背景タップ・「閉じる」ボタン・Android戻る操作の共通ハンドラ)。
-  // 編集モーダルを重ねて開いた状態で、編集開始時点の内容から変更されている場合のみ、
-  // 誤って編集内容を失わないよう確認ダイアログを挟む(handleCancelEditと同じパターン)
-  const handleCloseDateModal = useCallback(() => {
-    if (editingEntryId === null || editDraft.trim() === editOriginalTextRef.current.trim()) {
-      closeDateModal();
-      return;
-    }
-
-    Alert.alert('変更を破棄しますか?', '編集中の内容は保存されません。', [
-      { text: 'キャンセル', style: 'cancel' },
-      { text: '破棄', style: 'destructive', onPress: closeDateModal },
-    ]);
-  }, [editDraft, editingEntryId, closeDateModal]);
-
-  const handleDeleteEntry = useCallback(
-    async (entryId: string) => {
-      const previousEntries = entries;
-      // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
-      setEntries(entries.filter((entry) => entry.id !== entryId));
-
-      try {
-        // 他の保存/編集/削除処理と競合しないよう、書き込みはキュー経由で直列化する
-        // (このエントリ専用のキーの削除のみで完結する)
-        await enqueueDiaryWrite({ type: 'delete', id: entryId });
-        // 既に楽観的更新でReact stateは正しい内容になっているため、永続化された内容での
-        // setEntriesによる再同期は不要
-      } catch {
-        // 永続化に失敗した場合は削除前の状態に戻す
-        setEntries(previousEntries);
-        Alert.alert('削除に失敗しました', 'もう一度お試しください。');
-      }
-    },
-    [entries, enqueueDiaryWrite],
-  );
-
   // トーストを非表示にする(SaveToastのuseEffectの依存配列に含まれるため、毎レンダーで
   // 参照が変わらないようuseCallbackで安定化する。インライン関数のままだと、トースト表示中に
   // ユーザーが入力欄を編集し続けるたびにHomeScreenが再レンダーされてonHideの参照が変わり、
@@ -847,32 +610,6 @@ export default function HomeScreen() {
   const handleHideSaveToast = useCallback(() => {
     setSaveToastMessage(null);
   }, []);
-
-  // 日付一覧モーダル内のコピー用トーストを非表示にする(handleHideSaveToastと同じ理由でuseCallbackで安定化する)
-  const handleHideCopyToast = useCallback(() => {
-    setCopyToastMessage(null);
-  }, []);
-
-  // コピーボタン押下時、エントリ本文をクリップボードへコピーし、成功したらトーストで知らせる
-  const handleCopyEntry = useCallback(async (entry: DiaryEntry) => {
-    try {
-      await Clipboard.setStringAsync(entry.text);
-      setCopyToastMessage(COPY_SUCCESS_MESSAGE);
-    } catch {
-      Alert.alert('コピーに失敗しました', 'もう一度お試しください。');
-    }
-  }, []);
-
-  // 削除ボタン押下時、誤操作防止のため確認ダイアログを挟んでから削除を実行する
-  const handleDeletePress = useCallback(
-    (entry: DiaryEntry) => {
-      Alert.alert('日記を削除しますか?', 'この操作は取り消せません。', [
-        { text: 'キャンセル', style: 'cancel' },
-        { text: '削除', style: 'destructive', onPress: () => handleDeleteEntry(entry.id) },
-      ]);
-    },
-    [handleDeleteEntry],
-  );
 
   // 日付ごとに日記をまとめる(カレンダーセルへの表示・タップ時の一覧表示の両方で利用する)
   const entriesByDate = useMemo(() => {
@@ -911,10 +648,13 @@ export default function HomeScreen() {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [entries, trimmedSearchQuery]);
 
-  // 検索結果の項目がタップされたら、そのエントリが書かれた日付の一覧モーダルを開く
-  const handleSearchResultPress = useCallback((entry: DiaryEntry) => {
-    setSelectedDate(toDateKey(new Date(entry.createdAt)));
-  }, []);
+  // 検索結果の項目がタップされたら、そのエントリが書かれた日付の一覧画面へ遷移する
+  const handleSearchResultPress = useCallback(
+    (entry: DiaryEntry) => {
+      router.push(`/day-entries/${toDateKey(new Date(entry.createdAt))}`);
+    },
+    [router],
+  );
 
   // 検索欄の「クリア」ボタン押下時、検索キーワードを空にしてカレンダー表示へ戻す
   const handleClearSearch = useCallback(() => {
@@ -994,7 +734,9 @@ export default function HomeScreen() {
   const handleDayPress = useCallback(
     (date: DateData) => {
       if (entriesByDate[date.dateString]?.length) {
-        setSelectedDate(date.dateString);
+        // 月次・週次いずれの表示であっても、日付タップ時は専用の一覧画面へ遷移する
+        // (以前はモーダル(ドロワー)として重ねて表示していたが、Issue #221で画面遷移に置き換えた)
+        router.push(`/day-entries/${date.dateString}`);
         return;
       }
       // 日記の無い日は、未来日でなければその日付向けの新規作成モーダルを開く。
@@ -1005,7 +747,7 @@ export default function HomeScreen() {
       }
       setNewEntryDate(date.dateString);
     },
-    [entriesByDate],
+    [entriesByDate, router],
   );
 
   const renderDay = useCallback(
@@ -1084,11 +826,8 @@ export default function HomeScreen() {
     [entriesByDate, tintColor, backgroundColor, dayCellHeight],
   );
 
-  const selectedDateEntries = selectedDate ? (entriesByDate[selectedDate] ?? []) : [];
-
   // 文字数カウンター表示用に、grapheme単位で数え直す(絵文字などでUTF-16の.lengthとずれるため)
   const draftGraphemeCount = useMemo(() => splitIntoGraphemes(draft).length, [draft]);
-  const editDraftGraphemeCount = useMemo(() => splitIntoGraphemes(editDraft).length, [editDraft]);
   const newEntryDraftGraphemeCount = useMemo(
     () => splitIntoGraphemes(newEntryDraft).length,
     [newEntryDraft],
@@ -1289,202 +1028,6 @@ export default function HomeScreen() {
             </>
           )}
         </Pressable>
-
-        <Modal
-          visible={dateModalTransition.isMounted}
-          animationType="none"
-          transparent
-          onRequestClose={handleCloseDateModal}
-          statusBarTranslucent
-          navigationBarTranslucent
-        >
-          {/* 背景の半透明オーバーレイをタップした場合はモーダルを閉じる。
-              modalContent側は下でonStartShouldSetResponderによりタッチの伝播を止めているため、
-              一覧内の項目をタップしても意図せず閉じてしまうことはない */}
-          <Pressable
-            style={styles.modalOverlay}
-            onPress={handleCloseDateModal}
-            testID="modal-overlay-pressable"
-          >
-            {/* 背景の暗さのみをフェードさせる(Animated.timingによるopacity制御)。
-                コンテンツ側はスライドのみでフェードさせないよう、opacityの対象をこの
-                絶対配置レイヤーに限定している */}
-            <Animated.View
-              pointerEvents="none"
-              style={[
-                StyleSheet.absoluteFill,
-                styles.modalOverlayBackground,
-                { opacity: dateModalTransition.overlayOpacity },
-              ]}
-            />
-            <Animated.View
-              style={{ transform: [{ translateY: dateModalTransition.contentTranslateY }] }}
-            >
-              <ThemedView
-                style={[styles.modalContent, { borderColor: iconColor }]}
-                // オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
-                // modalContent内でのタッチ開始をこのViewがレスポンダーとして引き受け、伝播を止める
-                onStartShouldSetResponder={() => true}
-              >
-                <View style={styles.modalHeader}>
-                  <ThemedText type="subtitle">
-                    {selectedDate ? formatDateHeading(selectedDate) : ''}
-                  </ThemedText>
-                  <Pressable onPress={handleCloseDateModal}>
-                    <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
-                      閉じる
-                    </ThemedText>
-                  </Pressable>
-                </View>
-                {copyToastMessage ? (
-                  <SaveToast
-                    message={copyToastMessage}
-                    onHide={handleHideCopyToast}
-                    testID="copy-toast"
-                  />
-                ) : null}
-                <FlatList
-                  data={selectedDateEntries}
-                  keyExtractor={(item) => item.id}
-                  // 一覧をスクロールした際にもキーボードを閉じられるようにする
-                  keyboardDismissMode="on-drag"
-                  renderItem={({ item }) => (
-                    <ThemedView style={[styles.entry, { borderBottomColor: iconColor }]}>
-                      <View style={styles.entryHeader}>
-                        <ThemedText style={styles.entryDate}>
-                          {formatEntryDateTime(item.createdAt)}
-                        </ThemedText>
-                        <View style={styles.entryActions}>
-                          <Pressable
-                            onPress={() => handleCopyEntry(item)}
-                            hitSlop={8}
-                            accessibilityRole="button"
-                            accessibilityLabel="日記本文をコピー"
-                          >
-                            <ThemedText style={[styles.entryActionText, { color: tintColor }]}>
-                              コピー
-                            </ThemedText>
-                          </Pressable>
-                          <Pressable onPress={() => handleStartEdit(item)} hitSlop={8}>
-                            <ThemedText style={[styles.entryActionText, { color: tintColor }]}>
-                              編集
-                            </ThemedText>
-                          </Pressable>
-                          <Pressable onPress={() => handleDeletePress(item)} hitSlop={8}>
-                            <ThemedText
-                              style={[
-                                styles.entryActionText,
-                                styles.entryDeleteText,
-                                { color: errorColor },
-                              ]}
-                            >
-                              削除
-                            </ThemedText>
-                          </Pressable>
-                        </View>
-                      </View>
-                      <ThemedText>{item.text}</ThemedText>
-                    </ThemedView>
-                  )}
-                />
-              </ThemedView>
-            </Animated.View>
-          </Pressable>
-        </Modal>
-
-        <Modal
-          visible={editModalTransition.isMounted}
-          animationType="none"
-          transparent
-          onRequestClose={handleCancelEdit}
-          statusBarTranslucent
-          navigationBarTranslucent
-        >
-          {/* Modalは親のKeyboardAvoidingViewとは別のネイティブサーフェスに描画され効果を受けないため、
-              TextInput(本文編集欄)を含むこのモーダル内にも別途KeyboardAvoidingViewを配置する */}
-          <KeyboardAvoidingView
-            style={styles.flex}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          >
-            {/* 背景の半透明オーバーレイをタップした場合はモーダルを閉じる(一覧モーダルと同じパターン) */}
-            <Pressable
-              style={styles.modalOverlay}
-              onPress={handleCancelEdit}
-              testID="modal-overlay-pressable"
-            >
-              <Animated.View
-                pointerEvents="none"
-                style={[
-                  StyleSheet.absoluteFill,
-                  styles.modalOverlayBackground,
-                  { opacity: editModalTransition.overlayOpacity },
-                ]}
-              />
-              <Animated.View
-                style={{ transform: [{ translateY: editModalTransition.contentTranslateY }] }}
-              >
-                <ThemedView
-                  style={[styles.modalContent, { borderColor: iconColor }]}
-                  // オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
-                  // modalContent内でのタッチ開始をこのViewがレスポンダーとして引き受け、伝播を止める
-                  onStartShouldSetResponder={() => true}
-                >
-                  <View style={styles.modalHeader}>
-                    <ThemedText type="subtitle">日記を編集</ThemedText>
-                    <Pressable onPress={handleCancelEdit}>
-                      <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
-                        閉じる
-                      </ThemedText>
-                    </Pressable>
-                  </View>
-                  <TextInput
-                    style={[styles.input, { color: textColor, borderColor: tintColor }]}
-                    value={editDraft}
-                    onChangeText={handleChangeEditDraft}
-                    multiline
-                    // draft用TextInputと同様、スクリーンリーダー向けに明示的なラベルを付ける
-                    accessibilityLabel="日記本文"
-                    // draft用TextInputと同様の理由でmaxLength propはあえて指定しない
-                  />
-                  <View style={styles.composerFooter}>
-                    <ThemedText
-                      style={[
-                        styles.charCount,
-                        editDraftGraphemeCount >= BODY_MAX_LENGTH
-                          ? { color: errorColor }
-                          : { color: iconColor },
-                      ]}
-                    >
-                      {editDraftGraphemeCount}/{BODY_MAX_LENGTH}
-                    </ThemedText>
-                    <Pressable
-                      style={[
-                        styles.saveButton,
-                        { backgroundColor: tintColor },
-                        // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
-                        { opacity: !editDraft.trim() || isSavingEdit ? 0.5 : 1 },
-                      ]}
-                      onPress={handleSaveEdit}
-                      disabled={!editDraft.trim() || isSavingEdit}
-                      accessibilityRole="button"
-                      accessibilityLabel="保存"
-                      accessibilityState={{ disabled: !editDraft.trim() || isSavingEdit }}
-                    >
-                      <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
-                        保存
-                      </ThemedText>
-                    </Pressable>
-                  </View>
-                  {editError ? (
-                    <ThemedText style={[styles.errorText, { color: errorColor }]}>
-                      {editError}
-                    </ThemedText>
-                  ) : null}
-                </ThemedView>
-              </Animated.View>
-            </Pressable>
-          </KeyboardAvoidingView>
-        </Modal>
 
         <Modal
           visible={newEntryModalTransition.isMounted}
@@ -1880,30 +1423,5 @@ const styles = StyleSheet.create({
   },
   modalCloseText: {
     fontSize: 16,
-  },
-  entry: {
-    gap: 4,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  entryHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  entryDate: {
-    fontSize: 12,
-    opacity: 0.6,
-  },
-  entryActions: {
-    flexDirection: 'row',
-    gap: 16,
-  },
-  entryActionText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  entryDeleteText: {
-    // 色はJSX側でuseThemeColorの値を上書き適用する
   },
 });
