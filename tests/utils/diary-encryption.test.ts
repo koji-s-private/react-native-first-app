@@ -192,6 +192,29 @@ describe('utils/diary-encryption', () => {
       const second = await getOrCreateEncryptionKey();
       expect(Array.from(second)).not.toEqual(Array.from(first));
     });
+
+    it('generates and persists the key only once even when called concurrently before it exists (in-flight promise cache)', async () => {
+      const [first, second, third] = await Promise.all([
+        getOrCreateEncryptionKey(),
+        getOrCreateEncryptionKey(),
+        getOrCreateEncryptionKey(),
+      ]);
+
+      expect(Array.from(second)).toEqual(Array.from(first));
+      expect(Array.from(third)).toEqual(Array.from(first));
+      expect(SecureStore.setItemAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it('allows retrying after a failure instead of getting stuck (in-flight cache is cleared on error)', async () => {
+      const error = new Error('SecureStoreへの書き込みに失敗しました');
+      jest.mocked(SecureStore.setItemAsync).mockRejectedValueOnce(error);
+
+      await expect(getOrCreateEncryptionKey()).rejects.toThrow(error);
+
+      const key = await getOrCreateEncryptionKey();
+      expect(key).toBeInstanceOf(Uint8Array);
+      expect(key.length).toBe(32);
+    });
   });
 
   describe('getOrCreateEncryptionKey on Android (Platform.OS === "android", boundary)', () => {
