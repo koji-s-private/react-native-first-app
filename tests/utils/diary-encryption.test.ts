@@ -192,6 +192,63 @@ describe('utils/diary-encryption', () => {
       const second = await getOrCreateEncryptionKey();
       expect(Array.from(second)).not.toEqual(Array.from(first));
     });
+
+    it('generates and persists the key only once even when called concurrently before it exists (in-flight promise cache)', async () => {
+      const [first, second, third] = await Promise.all([
+        getOrCreateEncryptionKey(),
+        getOrCreateEncryptionKey(),
+        getOrCreateEncryptionKey(),
+      ]);
+
+      expect(Array.from(second)).toEqual(Array.from(first));
+      expect(Array.from(third)).toEqual(Array.from(first));
+      expect(SecureStore.setItemAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it('allows retrying after a failure instead of getting stuck (in-flight cache is cleared on error)', async () => {
+      const error = new Error('SecureStoreへの書き込みに失敗しました');
+      jest.mocked(SecureStore.setItemAsync).mockRejectedValueOnce(error);
+
+      await expect(getOrCreateEncryptionKey()).rejects.toThrow(error);
+
+      const key = await getOrCreateEncryptionKey();
+      expect(key).toBeInstanceOf(Uint8Array);
+      expect(key.length).toBe(32);
+    });
+
+    it('allows retrying after a read failure instead of getting stuck (in-flight cache is cleared on error)', async () => {
+      const error = new Error('SecureStoreからの読み込みに失敗しました');
+      jest.mocked(SecureStore.getItemAsync).mockRejectedValueOnce(error);
+
+      await expect(getOrCreateEncryptionKey()).rejects.toThrow(error);
+
+      // 前回のread失敗でin-flightキャッシュが残ったままだと、次回呼び出しが永久にブロックされる。
+      // キャッシュが正しくクリアされ、新規鍵生成・保存まで正常に完了することを確認する
+      const key = await getOrCreateEncryptionKey();
+      expect(key).toBeInstanceOf(Uint8Array);
+      expect(key.length).toBe(32);
+      expect(SecureStore.setItemAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it('reuses the already-created key and reads it only once when called concurrently after it already exists (boundary)', async () => {
+      // 事前に鍵を作成済みの状態にしておく(この呼び出し自体はsetItemAsyncを1回消費する)
+      const created = await getOrCreateEncryptionKey();
+      jest.clearAllMocks();
+
+      // 既に鍵が存在する状態での並行呼び出しでも、in-flightキャッシュによりreadは1回だけになり、
+      // 全呼び出しが同一の鍵を返す
+      const [first, second, third] = await Promise.all([
+        getOrCreateEncryptionKey(),
+        getOrCreateEncryptionKey(),
+        getOrCreateEncryptionKey(),
+      ]);
+
+      expect(Array.from(first)).toEqual(Array.from(created));
+      expect(Array.from(second)).toEqual(Array.from(created));
+      expect(Array.from(third)).toEqual(Array.from(created));
+      expect(SecureStore.getItemAsync).toHaveBeenCalledTimes(1);
+      expect(SecureStore.setItemAsync).not.toHaveBeenCalled();
+    });
   });
 
   describe('getOrCreateEncryptionKey on Android (Platform.OS === "android", boundary)', () => {

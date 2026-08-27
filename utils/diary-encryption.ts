@@ -105,17 +105,37 @@ async function writeStoredKey(value: string): Promise<void> {
   await SecureStore.setItemAsync(ENCRYPTION_KEY_STORAGE_KEY, value);
 }
 
+// 実行中の`getOrCreateEncryptionKey`呼び出しを保持するin-flightキャッシュ。
+// read→生成→writeの一連の処理はアトミックではないため、鍵が未生成の状態で複数箇所から
+// 並行に呼び出すと、それぞれが「鍵が無い」と判定して別々の鍵を生成し、最後に書き込んだ鍵だけが
+// 残ってしまう(他の鍵で暗号化したデータが復号不能になる)。呼び出し中は同じPromiseを共有させる
+// ことで、実際の生成・書き込み処理を1回だけに抑える。
+let inFlightPromise: Promise<Uint8Array> | null = null;
+
 // 暗号鍵を取得する。まだ存在しない場合は暗号学的に安全な乱数で新規生成し、保存してから返す。
 // 保存先はプラットフォームによって異なる(readStoredKey/writeStoredKeyのコメント参照)。
 export async function getOrCreateEncryptionKey(): Promise<Uint8Array> {
-  const stored = await readStoredKey();
-  if (stored) {
-    return base64ToBytes(stored);
+  if (inFlightPromise) {
+    return inFlightPromise;
   }
 
-  const newKey = getRandomBytes(KEY_LENGTH_BYTES);
-  await writeStoredKey(bytesToBase64(newKey));
-  return newKey;
+  inFlightPromise = (async () => {
+    const stored = await readStoredKey();
+    if (stored) {
+      return base64ToBytes(stored);
+    }
+
+    const newKey = getRandomBytes(KEY_LENGTH_BYTES);
+    await writeStoredKey(bytesToBase64(newKey));
+    return newKey;
+  })();
+
+  try {
+    return await inFlightPromise;
+  } finally {
+    // 成功・失敗いずれの場合もキャッシュをクリアし、次回呼び出しで再試行できるようにする
+    inFlightPromise = null;
+  }
 }
 
 // 保存対象の文字列(JSON.stringifyした日記エントリ一覧)が既に暗号化済みの形式かどうかを判定する。
