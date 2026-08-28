@@ -30,6 +30,13 @@ type AppLockContextValue = {
   /** 現在ロック画面を表示すべきでないか。enabledがfalseの間は常にtrue */
   isUnlocked: boolean;
   /**
+   * 'inactive'遷移(アプリスイッチャー表示等)の瞬間に機微なコンテンツを覆い隠すべきか。
+   * OSはこの遷移の直後に画面のスナップショットを撮影するため、'background'遷移でのみ
+   * 再ロックする`isUnlocked`(生体認証プロンプト表示中の一時的な'inactive'を除外するための設計)
+   * とは独立して管理する(#225)
+   */
+  isInactiveOverlayVisible: boolean;
+  /**
    * AsyncStorageからのロック設定(enabled)の読み込みが完了したか。falseの間はenabled/isUnlockedが
    * まだ暫定値であり、ONだったことを見落として日記データを描画してしまわないよう、呼び出し側
    * (app/_layout.tsx)はこの間コンテンツ全体を覆い隠す必要がある
@@ -55,6 +62,9 @@ export function AppLockProvider({ children }: PropsWithChildren) {
   // 描画されてしまう(#155)。読み込み完了を明示的なstateとして持ち、完了するまでは
   // app/_layout.tsx側でコンテンツ全体を覆い隠す
   const [isReady, setIsReady] = useState(false);
+  // 'inactive'遷移(アプリスイッチャー表示等)の瞬間だけコンテンツを覆い隠すためのフラグ(#225)。
+  // isUnlockedとは異なり、'active'に戻れば(enabledに関わらず)常にfalseへ戻す
+  const [isInactiveOverlayVisible, setIsInactiveOverlayVisible] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -110,6 +120,14 @@ export function AppLockProvider({ children }: PropsWithChildren) {
       if (nextAppState === 'background' && enabledRef.current) {
         setIsUnlocked(false);
       }
+      // 'inactive'はアプリスイッチャーを開いた瞬間にも発生し、OSがこの直後に画面の
+      // スナップショットを撮影するため、'background'を待たずここでコンテンツを覆い隠す(#225)
+      if (nextAppState === 'inactive' && enabledRef.current) {
+        setIsInactiveOverlayVisible(true);
+      }
+      if (nextAppState === 'active') {
+        setIsInactiveOverlayVisible(false);
+      }
     };
 
     const subscription = AppState.addEventListener('change', handleAppStateChange);
@@ -151,8 +169,16 @@ export function AppLockProvider({ children }: PropsWithChildren) {
   }, []);
 
   const value = useMemo<AppLockContextValue>(
-    () => ({ enabled, isSupported, isUnlocked, isReady, setEnabled, authenticate }),
-    [enabled, isSupported, isUnlocked, isReady, setEnabled, authenticate],
+    () => ({
+      enabled,
+      isSupported,
+      isUnlocked,
+      isInactiveOverlayVisible,
+      isReady,
+      setEnabled,
+      authenticate,
+    }),
+    [enabled, isSupported, isUnlocked, isInactiveOverlayVisible, isReady, setEnabled, authenticate],
   );
 
   return <AppLockContext.Provider value={value}>{children}</AppLockContext.Provider>;
@@ -175,6 +201,7 @@ export function useAppLock(): AppLockContextValue {
     enabled: false,
     isSupported: false,
     isUnlocked: true,
+    isInactiveOverlayVisible: false,
     isReady: true,
     setEnabled: async () => {},
     authenticate: async () => true,

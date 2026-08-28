@@ -292,6 +292,60 @@ describe('AppLockProvider / useAppLock', () => {
     });
   });
 
+  describe('inactive遷移時のプライバシーオーバーレイ(#225)', () => {
+    it('sets isInactiveOverlayVisible=true on an "inactive" transition while enabled (正常系: ONかつinactive遷移でオーバーレイ表示)', async () => {
+      const { result } = renderHook(() => useAppLock(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await result.current.setEnabled(true);
+      });
+      const handleAppStateChange = getAppStateChangeListener();
+
+      act(() => {
+        handleAppStateChange('inactive');
+      });
+
+      expect(result.current.isInactiveOverlayVisible).toBe(true);
+    });
+
+    it('resets isInactiveOverlayVisible to false once the app becomes "active" again (正常系: active復帰でオーバーレイ非表示)', async () => {
+      const { result } = renderHook(() => useAppLock(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await result.current.setEnabled(true);
+      });
+      const handleAppStateChange = getAppStateChangeListener();
+      act(() => {
+        handleAppStateChange('inactive');
+      });
+      expect(result.current.isInactiveOverlayVisible).toBe(true);
+
+      act(() => {
+        handleAppStateChange('active');
+      });
+
+      expect(result.current.isInactiveOverlayVisible).toBe(false);
+    });
+
+    it('does not show the overlay on an "inactive" transition while disabled (境界値: OFF時はinactive遷移してもオーバーレイを表示しない)', async () => {
+      const { result } = renderHook(() => useAppLock(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const handleAppStateChange = getAppStateChangeListener();
+
+      act(() => {
+        handleAppStateChange('inactive');
+      });
+
+      expect(result.current.isInactiveOverlayVisible).toBe(false);
+    });
+  });
+
   describe('authenticate', () => {
     async function lockScreen(result: { current: ReturnType<typeof useAppLock> }) {
       await act(async () => {

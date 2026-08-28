@@ -21,6 +21,11 @@ export const unstable_settings = {
 // テストからは`testID`で存在を検証する(components/tab-screen-container.tsxと同じ方針)。
 export const APP_LOCK_LOADING_OVERLAY_TEST_ID = 'app-lock-loading-overlay';
 
+// 'inactive'遷移(アプリスイッチャー表示等)の瞬間に日記本文などの機微な内容を覆い隠すための
+// オーバーレイ(#225)。iOSはこの遷移直後にアプリスイッチャー表示用のスナップショットを撮影するため、
+// 'background'遷移でのみ再ロックする既存のAppLockScreenとは別に、より早いタイミングで表示する
+export const APP_LOCK_PRIVACY_OVERLAY_TEST_ID = 'app-lock-privacy-overlay';
+
 function RootLayoutContent() {
   // OSの設定だけでなく、アプリ内(設定画面)で選択されたテーマ設定(#91)も反映した
   // 解決済みのカラースキームを使う
@@ -30,6 +35,7 @@ function RootLayoutContent() {
   const {
     enabled: isAppLockEnabled,
     isUnlocked,
+    isInactiveOverlayVisible,
     isReady: isAppLockReady,
     authenticate,
   } = useAppLock();
@@ -79,6 +85,15 @@ function RootLayoutContent() {
           一瞬でも見えてしまう(#155)。認証は発生させず、単に読み込み完了を待つだけの表示にする */}
       <Modal visible={!isAppLockReady} animationType="none">
         <ThemedView testID={APP_LOCK_LOADING_OVERLAY_TEST_ID} style={styles.loadingContainer} />
+      </Modal>
+      {/* 'inactive'遷移(アプリスイッチャーを開いた瞬間)にOSがシステムスナップショットを撮影する前に
+          コンテンツを覆い隠す(#225)。isUnlockedがfalse(既にAppLockScreenで覆われている)の場合は
+          二重に表示する必要がないため対象外とする */}
+      <Modal
+        visible={isAppLockEnabled && isUnlocked && isInactiveOverlayVisible}
+        animationType="none"
+      >
+        <ThemedView testID={APP_LOCK_PRIVACY_OVERLAY_TEST_ID} style={styles.loadingContainer} />
       </Modal>
     </ThemeProvider>
   );
