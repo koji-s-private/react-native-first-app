@@ -389,5 +389,38 @@ describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => 
         await Promise.resolve();
       });
     });
+
+    it('does not show the privacy overlay while the ON setting is still loading from AsyncStorage, even on an "inactive" transition (境界値: isReady=falseの読み込み中はinactive遷移してもオーバーレイを表示しない)', async () => {
+      await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
+      // 「起動直後のレースコンディション対策」のテストと同じ方針で、アプリロック設定の読み込みだけを
+      // 意図的に保留させ、isReady=falseの区間を作り出す
+      let resolveAppLockSetting: (value: string | null) => void = () => {};
+      jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key: string) => {
+        if (key === APP_LOCK_ENABLED_STORAGE_KEY) {
+          return new Promise((resolve) => {
+            resolveAppLockSetting = resolve;
+          });
+        }
+        return Promise.resolve('true');
+      });
+
+      render(<RootLayout />);
+      const handleAppStateChange = getAppStateChangeListener();
+
+      act(() => {
+        handleAppStateChange('inactive');
+      });
+
+      // 読み込み中は既存の遮蔽用オーバーレイのみが表示され、プライバシーオーバーレイやロック画面は
+      // 表示されない(enabledがまだ暫定値のfalseのため、isInactiveOverlayVisibleもfalseのまま)
+      expect(screen.getByTestId(APP_LOCK_LOADING_OVERLAY_TEST_ID)).toBeTruthy();
+      expect(screen.queryByTestId(APP_LOCK_PRIVACY_OVERLAY_TEST_ID)).toBeNull();
+      expect(screen.queryByText(LOCK_SCREEN_TITLE)).toBeNull();
+
+      await act(async () => {
+        resolveAppLockSetting('true');
+        await Promise.resolve();
+      });
+    });
   });
 });
