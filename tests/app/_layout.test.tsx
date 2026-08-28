@@ -4,7 +4,10 @@ import type { PropsWithChildren } from 'react';
 import React from 'react';
 import { AppState } from 'react-native';
 
-import RootLayout, { APP_LOCK_LOADING_OVERLAY_TEST_ID } from '@/app/_layout';
+import RootLayout, {
+  APP_LOCK_LOADING_OVERLAY_TEST_ID,
+  APP_LOCK_PRIVACY_OVERLAY_TEST_ID,
+} from '@/app/_layout';
 import { APP_LOCK_ENABLED_STORAGE_KEY } from '@/contexts/app-lock-context';
 import { ONBOARDING_SLIDES } from '@/constants/onboarding-slides';
 import { ONBOARDING_COMPLETED_STORAGE_KEY } from '@/utils/onboarding-storage';
@@ -47,6 +50,15 @@ const mockedAppLockAuthentication = require('@/utils/app-lock-authentication') a
   isAppLockSupportedAsync: jest.Mock;
   authenticateForAppLockAsync: jest.Mock;
 };
+
+// `AsyncStorage.getItem`は公式モックの時点で既に`jest.fn()`であるため、`jest.spyOn`はこの関数
+// 自体をそのまま返し(新しいラッパーは作らない)、`.mockImplementation(...)`はその関数オブジェクトの
+// 実装を直接書き換える。そのため`mockRestore()`/`jest.restoreAllMocks()`を呼んでも、内部ストレージを
+// 読む本来の実装には戻らず空実装のままになってしまう。差し替え前(モジュール読み込み時点)の
+// 実装を`getMockImplementation()`でスナップショットしておき、個別テストで
+// `jest.spyOn(AsyncStorage, 'getItem').mockImplementation(...)`のように永続的な差し替えを
+// 行った場合に、後続のテストへ影響が漏れないよう明示的に復元できるようにする
+const pristineAsyncStorageGetItemImpl = (AsyncStorage.getItem as jest.Mock).getMockImplementation();
 
 // `AppState.addEventListener`から'change'イベント用に登録されたリスナー関数を取り出し、
 // テスト側から直接呼び出すことでバックグラウンド遷移をシミュレートする
@@ -165,6 +177,10 @@ describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => 
   const AUTHENTICATE_BUTTON_TEXT = '認証する';
 
   beforeEach(async () => {
+    // 一部のテストが`jest.spyOn(AsyncStorage, 'getItem').mockImplementation(...)`で永続的に
+    // 差し替えるため、`jest.clearAllMocks()`(呼び出し履歴のリセットのみ)より前に
+    // 明示的に元の実装へ戻しておく(上のコメント参照)
+    (AsyncStorage.getItem as jest.Mock).mockImplementation(pristineAsyncStorageGetItemImpl);
     await AsyncStorage.clear();
     jest.clearAllMocks();
     mockedAppLockAuthentication.isAppLockSupportedAsync.mockResolvedValue(true);
@@ -293,5 +309,118 @@ describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => 
     // 読み込みが完了すると遮蔽用オーバーレイは消え、保存されていたON設定どおりロック画面へ切り替わる
     expect(screen.queryByTestId(APP_LOCK_LOADING_OVERLAY_TEST_ID)).toBeNull();
     await waitFor(() => expect(screen.getByText(LOCK_SCREEN_TITLE)).toBeTruthy());
+  });
+
+  describe('inactive遷移時のプライバシーオーバーレイ(Issue #225)', () => {
+    // ON設定の復元直後は起動時ロック(isUnlocked=false)が発生し、自動認証(既定でモックは成功)を
+    // 経て未ロックに戻るため、実際にその一連の遷移が完了するのを待ってから検証する
+    async function renderUnlockedWithAppLockEnabled() {
+      await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
+      render(<RootLayout />);
+      await waitFor(() =>
+        expect(mockedAppLockAuthentication.authenticateForAppLockAsync).toHaveBeenCalledTimes(1),
+      );
+      await waitFor(() => expect(screen.queryByText(LOCK_SCREEN_TITLE)).toBeNull());
+    }
+
+    it('shows the privacy overlay on an "inactive" transition while ON and unlocked (正常系: ONかつ未ロック中のinactive遷移でオーバーレイ表示)', async () => {
+      await renderUnlockedWithAppLockEnabled();
+      const handleAppStateChange = getAppStateChangeListener();
+
+      act(() => {
+        handleAppStateChange('inactive');
+      });
+
+      expect(screen.getByTestId(APP_LOCK_PRIVACY_OVERLAY_TEST_ID)).toBeTruthy();
+    });
+
+    it('hides the privacy overlay once the app becomes "active" again (正常系: active復帰でオーバーレイ非表示)', async () => {
+      await renderUnlockedWithAppLockEnabled();
+      const handleAppStateChange = getAppStateChangeListener();
+      act(() => {
+        handleAppStateChange('inactive');
+      });
+      expect(screen.getByTestId(APP_LOCK_PRIVACY_OVERLAY_TEST_ID)).toBeTruthy();
+
+      act(() => {
+        handleAppStateChange('active');
+      });
+
+      expect(screen.queryByTestId(APP_LOCK_PRIVACY_OVERLAY_TEST_ID)).toBeNull();
+    });
+
+    it('does not show the privacy overlay on an "inactive" transition while OFF (境界値: OFF時はinactive遷移してもオーバーレイを表示しない)', async () => {
+      render(<RootLayout />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      const handleAppStateChange = getAppStateChangeListener();
+
+      act(() => {
+        handleAppStateChange('inactive');
+      });
+
+      expect(screen.queryByTestId(APP_LOCK_PRIVACY_OVERLAY_TEST_ID)).toBeNull();
+    });
+
+    it('does not show the privacy overlay when the lock screen is already covering the content (境界値: background遷移でロック画面表示中は二重オーバーレイにならない)', async () => {
+      await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
+      let resolveAuthenticate: (success: boolean) => void = () => {};
+      mockedAppLockAuthentication.authenticateForAppLockAsync.mockReturnValue(
+        new Promise((resolve) => {
+          resolveAuthenticate = resolve;
+        }),
+      );
+      render(<RootLayout />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      const handleAppStateChange = getAppStateChangeListener();
+      act(() => {
+        handleAppStateChange('background');
+      });
+      expect(screen.getByText(LOCK_SCREEN_TITLE)).toBeTruthy();
+
+      act(() => {
+        handleAppStateChange('inactive');
+      });
+
+      expect(screen.queryByTestId(APP_LOCK_PRIVACY_OVERLAY_TEST_ID)).toBeNull();
+      expect(screen.getByText(LOCK_SCREEN_TITLE)).toBeTruthy();
+
+      await act(async () => {
+        resolveAuthenticate(true);
+        await Promise.resolve();
+      });
+    });
+
+    it('does not show the privacy overlay while the ON setting is still loading from AsyncStorage, even on an "inactive" transition (境界値: isReady=falseの読み込み中はinactive遷移してもオーバーレイを表示しない)', async () => {
+      await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
+      // 「起動直後のレースコンディション対策」のテストと同じ方針で、アプリロック設定の読み込みだけを
+      // 意図的に保留させ、isReady=falseの区間を作り出す
+      let resolveAppLockSetting: (value: string | null) => void = () => {};
+      jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key: string) => {
+        if (key === APP_LOCK_ENABLED_STORAGE_KEY) {
+          return new Promise((resolve) => {
+            resolveAppLockSetting = resolve;
+          });
+        }
+        return Promise.resolve('true');
+      });
+
+      render(<RootLayout />);
+      const handleAppStateChange = getAppStateChangeListener();
+
+      act(() => {
+        handleAppStateChange('inactive');
+      });
+
+      // 読み込み中は既存の遮蔽用オーバーレイのみが表示され、プライバシーオーバーレイやロック画面は
+      // 表示されない(enabledがまだ暫定値のfalseのため、isInactiveOverlayVisibleもfalseのまま)
+      expect(screen.getByTestId(APP_LOCK_LOADING_OVERLAY_TEST_ID)).toBeTruthy();
+      expect(screen.queryByTestId(APP_LOCK_PRIVACY_OVERLAY_TEST_ID)).toBeNull();
+      expect(screen.queryByText(LOCK_SCREEN_TITLE)).toBeNull();
+
+      await act(async () => {
+        resolveAppLockSetting('true');
+        await Promise.resolve();
+      });
+    });
   });
 });
