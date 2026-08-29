@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { Modal, Pressable, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -17,18 +16,13 @@ type AppLockScreenProps = {
  * アプリ起動時・バックグラウンドから復帰した際に表示するロック画面(#155)。
  * `components/onboarding.tsx`と同様、常にマウントしたまま`visible`propで表示/非表示を
  * 切り替えるModalとして実装し、認証成功までカレンダー・日記本文などのコンテンツを完全に覆い隠す。
+ * 自動での認証プロンプト起動は呼び出し側(contexts/app-lock-context.tsx)が「起動時に既に
+ * ロック済みだった場合」「バックグラウンドから復帰(active)した場合」にのみ行う(#226)。
+ * このコンポーネント自体は表示と手動での再試行ボタンの提供に専念する。
  */
 export function AppLockScreen({ visible, onAuthenticate }: AppLockScreenProps) {
   const tintColor = useThemeColor({}, 'tint');
   const backgroundColor = useThemeColor({}, 'background');
-
-  // 表示された直後に自動で認証プロンプトを起動し、毎回ボタンを押す手間を省く。
-  // 失敗・キャンセルされた場合は下のボタンから手動で再試行できる
-  useEffect(() => {
-    if (visible) {
-      onAuthenticate();
-    }
-  }, [visible, onAuthenticate]);
 
   return (
     <Modal visible={visible} animationType="none">

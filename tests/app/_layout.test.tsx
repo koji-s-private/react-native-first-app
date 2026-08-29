@@ -208,8 +208,17 @@ describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => 
     expect(screen.queryByText(LOCK_SCREEN_TITLE)).toBeNull();
   });
 
-  it('shows the lock screen and automatically triggers authentication when returning from the background while ON (正常系: ON時のbackground遷移でロック画面表示・自動認証)', async () => {
+  it('shows the lock screen without triggering authentication at the moment the app moves to the background, then automatically triggers it once the app becomes active again (正常系: background遷移ではロック画面表示のみ・active復帰で自動認証)', async () => {
     await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
+    render(<RootLayout />);
+    // 起動時に既にON(ロック済み)状態で復元されるため、まず起動時の自動認証(既定で成功する
+    // モック)が完了し、いったん未ロックの状態に戻るまで待つ(#226の2つ目の自動認証トリガー)
+    await waitFor(() =>
+      expect(mockedAppLockAuthentication.authenticateForAppLockAsync).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() => expect(screen.queryByText(LOCK_SCREEN_TITLE)).toBeNull());
+    mockedAppLockAuthentication.authenticateForAppLockAsync.mockClear();
+
     // 認証が自動で成功してロック画面が閉じてしまわないよう、手動での検証区間だけ保留にする
     let resolveAuthenticate: (success: boolean) => void = () => {};
     mockedAppLockAuthentication.authenticateForAppLockAsync.mockReturnValue(
@@ -217,8 +226,6 @@ describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => 
         resolveAuthenticate = resolve;
       }),
     );
-    render(<RootLayout />);
-    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
     const handleAppStateChange = getAppStateChangeListener();
 
     act(() => {
@@ -226,7 +233,15 @@ describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => 
     });
 
     expect(screen.getByText(LOCK_SCREEN_TITLE)).toBeTruthy();
-    // ロック画面が表示された直後、ユーザー操作を待たず自動で認証プロンプトが起動する
+    // 画面がOFFになっていく過程(background遷移の瞬間)ではOS標準パスコードへフォールバックして
+    // しまう不具合(#226)があったため、この時点ではまだ認証プロンプトを起動しない
+    expect(mockedAppLockAuthentication.authenticateForAppLockAsync).not.toHaveBeenCalled();
+
+    act(() => {
+      handleAppStateChange('active');
+    });
+
+    // フォアグラウンドに復帰した時点で、ユーザー操作を待たず自動で認証プロンプトが起動する
     await waitFor(() =>
       expect(mockedAppLockAuthentication.authenticateForAppLockAsync).toHaveBeenCalledTimes(1),
     );
