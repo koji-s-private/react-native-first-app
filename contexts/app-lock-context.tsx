@@ -107,34 +107,13 @@ export function AppLockProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
-  // AppStateのリスナー(マウント時に一度だけ登録する)から常に最新のenabledを参照したいが、
-  // リスナー自体を都度re-subscribeするのは避けたいため、依存配列に含めずrefで最新値を追う
+  // AppStateのリスナー(マウント時に一度だけ登録する)から常に最新のenabled/isUnlockedを
+  // 参照したいが、リスナー自体を都度re-subscribeするのは避けたいため、依存配列に含めず
+  // refで最新値を追う
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
-
-  // バックグラウンドへ完全に遷移したタイミングでロックし直す。'inactive'は生体認証プロンプトの
-  // 表示中にも一時的に発生する状態のため、これを含めると認証ダイアログを開いた瞬間に
-  // 再ロックされてしまう。完全にバックグラウンドへ退避した('background')場合のみロックする
-  useEffect(() => {
-    const handleAppStateChange = (nextAppState: AppStateStatus) => {
-      if (nextAppState === 'background' && enabledRef.current) {
-        setIsUnlocked(false);
-      }
-      // 'inactive'はアプリスイッチャーを開いた瞬間にも発生し、OSがこの直後に画面の
-      // スナップショットを撮影するため、'background'を待たずここでコンテンツを覆い隠す(#225)
-      if (nextAppState === 'inactive' && enabledRef.current) {
-        setIsInactiveOverlayVisible(true);
-      }
-      if (nextAppState === 'active') {
-        setIsInactiveOverlayVisible(false);
-      }
-    };
-
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => {
-      subscription.remove();
-    };
-  }, []);
+  const isUnlockedRef = useRef(isUnlocked);
+  isUnlockedRef.current = isUnlocked;
 
   const setEnabled = useCallback(async (nextEnabled: boolean) => {
     setEnabledState(nextEnabled);
@@ -145,9 +124,8 @@ export function AppLockProvider({ children }: PropsWithChildren) {
     await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, nextEnabled ? 'true' : 'false');
   }, []);
 
-  // authenticateAsyncを多重に呼び出すと(例: ロック画面表示時の自動起動とユーザーによる
-  // 再試行ボタン押下が重なった場合)ネイティブ側で意図しない挙動になり得るため、
-  // 実行中は追加の呼び出しを無視する
+  // authenticateAsyncを多重に呼び出すと(例: 自動起動とユーザーによる再試行ボタン押下が
+  // 重なった場合)ネイティブ側で意図しない挙動になり得るため、実行中は追加の呼び出しを無視する
   const isAuthenticatingRef = useRef(false);
 
   const authenticate = useCallback(async () => {
@@ -167,6 +145,47 @@ export function AppLockProvider({ children }: PropsWithChildren) {
       isAuthenticatingRef.current = false;
     }
   }, []);
+
+  // 起動時に読み込んだ設定が既にON(ロック済み)状態だった場合、AppLockScreenの手動ボタンを
+  // 待たずに自動で認証プロンプトを起動する(#226。従来AppLockScreen側のマウント時visible=true
+  // 効果で担保していたUXを、読み込み完了のタイミングへ付け替えたもの)。isReadyがfalse→trueに
+  // 変化した瞬間だけ判定したいため、依存配列はisReadyのみとし、enabled/isUnlockedは
+  // refから読む(値そのものを依存配列に含めるとbackground遷移等の後続の変化でも再実行されてしまう)
+  useEffect(() => {
+    if (isReady && enabledRef.current && !isUnlockedRef.current) {
+      authenticate();
+    }
+  }, [isReady, authenticate]);
+
+  // バックグラウンドへ完全に遷移したタイミングでロックし直す。'inactive'は生体認証プロンプトの
+  // 表示中にも一時的に発生する状態のため、これを含めると認証ダイアログを開いた瞬間に
+  // 再ロックされてしまう。完全にバックグラウンドへ退避した('background')場合のみロックする
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'background' && enabledRef.current) {
+        setIsUnlocked(false);
+      }
+      // 'inactive'はアプリスイッチャーを開いた瞬間にも発生し、OSがこの直後に画面の
+      // スナップショットを撮影するため、'background'を待たずここでコンテンツを覆い隠す(#225)
+      if (nextAppState === 'inactive' && enabledRef.current) {
+        setIsInactiveOverlayVisible(true);
+      }
+      if (nextAppState === 'active') {
+        setIsInactiveOverlayVisible(false);
+        // フォアグラウンド復帰時のみ自動で認証プロンプトを起動する(#226)。'background'遷移の
+        // 瞬間(画面が暗転していく過程)に起動すると、OS標準パスコード入力へフォールバックして
+        // しまう不具合があったため、必ず'active'に戻った時点で判定する
+        if (enabledRef.current && !isUnlockedRef.current) {
+          authenticate();
+        }
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => {
+      subscription.remove();
+    };
+  }, [authenticate]);
 
   const value = useMemo<AppLockContextValue>(
     () => ({

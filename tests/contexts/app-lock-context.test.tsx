@@ -80,6 +80,10 @@ describe('AppLockProvider / useAppLock', () => {
 
   it('keeps isReady=false immediately after a previously saved ON setting is restored, and enabled/isUnlocked settle correctly once isReady becomes true (正常系: 起動時のisReadyとisUnlockedの整合性・レースコンディション対策)', async () => {
     await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
+    // isReadyがtrueになった瞬間に起動時の自動認証(#226)が発火し、既定のモックのまま即座に
+    // 成功してisUnlockedがtrueへ戻ってしまうと、ここで検証したいisReady/isUnlockedの
+    // レースコンディションを確認できなくなるため、このテストの間だけ認証を保留状態にする
+    mockedAuthenticationUtil.authenticateForAppLockAsync.mockReturnValue(new Promise(() => {}));
 
     const { result } = renderHook(() => useAppLock(), { wrapper });
 
@@ -137,6 +141,9 @@ describe('AppLockProvider / useAppLock', () => {
 
   it('loads enabled=true and locks the screen when a previously saved setting is restored (正常系: 起動時の復元・ON)', async () => {
     await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
+    // 起動時の自動認証(#226)が既定のモックのまま即座に成功してしまわないよう保留にし、
+    // 復元直後の「ロックされた」状態そのものを検証できるようにする
+    mockedAuthenticationUtil.authenticateForAppLockAsync.mockReturnValue(new Promise(() => {}));
 
     const { result } = renderHook(() => useAppLock(), { wrapper });
     await act(async () => {
@@ -220,6 +227,89 @@ describe('AppLockProvider / useAppLock', () => {
       expect(result.current.enabled).toBe(false);
       expect(result.current.isUnlocked).toBe(true);
       expect(AsyncStorage.setItem).toHaveBeenLastCalledWith(APP_LOCK_ENABLED_STORAGE_KEY, 'false');
+    });
+  });
+
+  describe('自動認証のトリガー(#226)', () => {
+    it('does not call authenticateForAppLockAsync at the moment the app moves to the background (正常系: background遷移では自動認証を呼ばない)', async () => {
+      const { result } = renderHook(() => useAppLock(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await result.current.setEnabled(true);
+      });
+      const handleAppStateChange = getAppStateChangeListener();
+
+      act(() => {
+        handleAppStateChange('background');
+      });
+
+      // 画面がOFFになっていく過程でOS標準パスコードへフォールバックしてしまう不具合(#226)の
+      // 原因だったため、background遷移の瞬間には認証プロンプトを起動してはいけない
+      expect(mockedAuthenticationUtil.authenticateForAppLockAsync).not.toHaveBeenCalled();
+    });
+
+    it('automatically calls authenticateForAppLockAsync when the app returns to active while locked (正常系: active復帰で自動認証)', async () => {
+      const { result } = renderHook(() => useAppLock(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await result.current.setEnabled(true);
+      });
+      const handleAppStateChange = getAppStateChangeListener();
+      act(() => {
+        handleAppStateChange('background');
+      });
+      expect(result.current.isUnlocked).toBe(false);
+
+      act(() => {
+        handleAppStateChange('active');
+      });
+
+      await waitFor(() =>
+        expect(mockedAuthenticationUtil.authenticateForAppLockAsync).toHaveBeenCalledTimes(1),
+      );
+    });
+
+    it('automatically calls authenticateForAppLockAsync once when a previously saved ON setting is restored as already locked on launch (正常系: 起動時ロック済み状態の復元で自動認証)', async () => {
+      await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
+
+      const { result } = renderHook(() => useAppLock(), { wrapper });
+
+      await waitFor(() => expect(result.current.isReady).toBe(true));
+      await waitFor(() =>
+        expect(mockedAuthenticationUtil.authenticateForAppLockAsync).toHaveBeenCalledTimes(1),
+      );
+    });
+
+    it('does not call authenticateForAppLockAsync on launch when the restored setting is OFF (境界値: 起動時OFF復元では自動認証を呼ばない)', async () => {
+      await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'false');
+
+      const { result } = renderHook(() => useAppLock(), { wrapper });
+
+      await waitFor(() => expect(result.current.isReady).toBe(true));
+      expect(mockedAuthenticationUtil.authenticateForAppLockAsync).not.toHaveBeenCalled();
+    });
+
+    it('does not call authenticateForAppLockAsync again when returning to active while already unlocked (境界値: 既にunlocked状態でのactive復帰では二重に呼ばない)', async () => {
+      const { result } = renderHook(() => useAppLock(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await result.current.setEnabled(true);
+      });
+      const handleAppStateChange = getAppStateChangeListener();
+
+      // ONにしただけではまだロックされていない(isUnlocked=true)状態でactiveへ戻っても、
+      // 認証プロンプトを起動する必要はない
+      act(() => {
+        handleAppStateChange('active');
+      });
+
+      expect(mockedAuthenticationUtil.authenticateForAppLockAsync).not.toHaveBeenCalled();
     });
   });
 
