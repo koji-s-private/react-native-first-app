@@ -68,6 +68,31 @@ function getMonthIndex(year: number, month: number): number {
   return year * 12 + month;
 }
 
+function getPickerMaxMonthIndex(today: Date): number {
+  return getMonthIndex(today.getFullYear(), today.getMonth() + 1);
+}
+
+function getPickerMinMonthIndex(entries: DiaryEntry[], pickerMaxMonthIndex: number): number {
+  const entryMonthIndexes = entries
+    .map((entry) => {
+      const createdAt = new Date(entry.createdAt);
+      if (Number.isNaN(createdAt.getTime())) {
+        return null;
+      }
+      return getMonthIndex(createdAt.getFullYear(), createdAt.getMonth() + 1);
+    })
+    .filter((monthIndex): monthIndex is number => monthIndex !== null);
+
+  if (entryMonthIndexes.length === 0) {
+    return pickerMaxMonthIndex;
+  }
+  return Math.min(Math.min(...entryMonthIndexes), pickerMaxMonthIndex);
+}
+
+function getYearFromMonthIndex(monthIndex: number): number {
+  return Math.floor((monthIndex - 1) / 12);
+}
+
 // react-native-calendarsが使うdayComponentのpropsの型(ライブラリ側から直接exportされていないため、
 // CalendarPropsから抽出して利用する)
 type DayComponentProps = ComponentProps<NonNullable<CalendarProps['dayComponent']>>;
@@ -682,27 +707,13 @@ export default function HomeScreen() {
 
   const [pickerToday, setPickerToday] = useState(() => new Date());
   const pickerMaxYear = pickerToday.getFullYear();
-  const pickerMaxMonth = pickerToday.getMonth() + 1;
-  const pickerMaxMonthIndex = getMonthIndex(pickerMaxYear, pickerMaxMonth);
+  const pickerMaxMonthIndex = getPickerMaxMonthIndex(pickerToday);
 
   const pickerMinMonthIndex = useMemo(() => {
-    const entryMonthIndexes = entries
-      .map((entry) => {
-        const createdAt = new Date(entry.createdAt);
-        if (Number.isNaN(createdAt.getTime())) {
-          return null;
-        }
-        return getMonthIndex(createdAt.getFullYear(), createdAt.getMonth() + 1);
-      })
-      .filter((monthIndex): monthIndex is number => monthIndex !== null);
-
-    if (entryMonthIndexes.length === 0) {
-      return pickerMaxMonthIndex;
-    }
-    return Math.min(Math.min(...entryMonthIndexes), pickerMaxMonthIndex);
+    return getPickerMinMonthIndex(entries, pickerMaxMonthIndex);
   }, [entries, pickerMaxMonthIndex]);
 
-  const pickerMinYear = Math.floor((pickerMinMonthIndex - 1) / 12);
+  const pickerMinYear = getYearFromMonthIndex(pickerMinMonthIndex);
 
   const isPickerMonthInRange = useCallback(
     (year: number, month: number) => {
@@ -725,10 +736,16 @@ export default function HomeScreen() {
   // ヘッダーの年月表示をタップすると、現在表示中の年を初期選択状態にしてピッカーを開く
   const handleOpenMonthPicker = useCallback(() => {
     const currentToday = new Date();
+    const currentPickerMaxMonthIndex = getPickerMaxMonthIndex(currentToday);
+    const currentPickerMinYear = getYearFromMonthIndex(
+      getPickerMinMonthIndex(entries, currentPickerMaxMonthIndex),
+    );
     setPickerToday(currentToday);
-    setPickerYear(Math.min(Math.max(displayedYear, pickerMinYear), currentToday.getFullYear()));
+    setPickerYear(
+      Math.min(Math.max(displayedYear, currentPickerMinYear), currentToday.getFullYear()),
+    );
     setIsMonthPickerVisible(true);
-  }, [displayedYear, pickerMinYear]);
+  }, [displayedYear, entries]);
 
   const handleCloseMonthPicker = useCallback(() => {
     setIsMonthPickerVisible(false);

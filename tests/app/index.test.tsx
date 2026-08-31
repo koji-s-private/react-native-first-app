@@ -2178,6 +2178,30 @@ describe('HomeScreen', () => {
       }
     });
 
+    it('refreshes both picker bounds when opening it after the app stays mounted across a year boundary with no diary entries (境界値: 年またぎ)', async () => {
+      jest.useFakeTimers();
+      try {
+        const beforeYearBoundary = new Date(2026, 11, 31, 23, 59, 0);
+        const afterYearBoundary = new Date(2027, 0, 1, 0, 1, 0);
+        jest.setSystemTime(beforeYearBoundary);
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        jest.setSystemTime(afterYearBoundary);
+        await openMonthPicker(beforeYearBoundary);
+
+        expect(screen.getByText('2027年')).toBeTruthy();
+        expect(screen.queryByText('2026年')).toBeNull();
+        expect(screen.getByLabelText('前の年').props.accessibilityState?.disabled).toBe(true);
+        expect(screen.getByLabelText('2027年1月へ移動').props.accessibilityState?.disabled).toBe(
+          false,
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('renders the year stepper buttons as chevron-left/chevron-right IconSymbols, not text glyphs', async () => {
       const now = new Date();
       render(<HomeScreen />);
