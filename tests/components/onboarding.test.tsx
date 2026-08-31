@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import React from 'react';
-import { Modal } from 'react-native';
+import { Modal, StyleSheet } from 'react-native';
 
 import { Onboarding } from '@/components/onboarding';
 import { ONBOARDING_SLIDES } from '@/constants/onboarding-slides';
@@ -23,6 +23,7 @@ describe('Onboarding', () => {
     expect(screen.getByText(ONBOARDING_SLIDES[0].description)).toBeTruthy();
     expect(screen.getByText('スキップ')).toBeTruthy();
     expect(screen.getByText('次へ')).toBeTruthy();
+    expect(screen.queryByLabelText('前のスライドに戻る')).toBeNull();
   });
 
   it('has at least 1 slide to show (境界値: スライド定義が空でないこと)', () => {
@@ -51,6 +52,39 @@ describe('Onboarding', () => {
     expect(onFinish).not.toHaveBeenCalled();
     expect(screen.getByText(ONBOARDING_SLIDES[1].title)).toBeTruthy();
     expect(screen.queryByText(ONBOARDING_SLIDES[0].title)).toBeNull();
+  });
+
+  it('shows a back action after the first slide and returns to the previous slide (正常系: 戻る導線)', () => {
+    render(<Onboarding visible={true} onFinish={jest.fn()} />);
+
+    fireEvent.press(screen.getByText('次へ'));
+    expect(screen.getByText(ONBOARDING_SLIDES[1].title)).toBeTruthy();
+
+    fireEvent.press(screen.getByLabelText('前のスライドに戻る'));
+
+    expect(screen.getByText(ONBOARDING_SLIDES[0].title)).toBeTruthy();
+    expect(screen.queryByLabelText('前のスライドに戻る')).toBeNull();
+  });
+
+  it('keeps the header actions above the slide body so the back action remains clickable (回帰防止: ヒットテスト)', () => {
+    render(<Onboarding visible={true} onFinish={jest.fn()} />);
+
+    fireEvent.press(screen.getByText('次へ'));
+
+    const headerStyle = StyleSheet.flatten(screen.getByTestId('onboarding-header').props.style);
+    expect(headerStyle.zIndex).toBeGreaterThan(0);
+    expect(headerStyle.elevation).toBeGreaterThan(0);
+  });
+
+  it('moves to the selected slide when a pagination dot is pressed (正常系: ドットから直接移動)', () => {
+    render(<Onboarding visible={true} onFinish={jest.fn()} />);
+
+    fireEvent.press(screen.getByLabelText('3枚目のスライドへ移動'));
+
+    expect(screen.getByText(ONBOARDING_SLIDES[2].title)).toBeTruthy();
+    expect(screen.getByLabelText('3枚目のスライドへ移動').props.accessibilityState).toEqual({
+      selected: true,
+    });
   });
 
   it('walks through every slide in order as "次へ" is pressed repeatedly, and switches the button label to "はじめる" on the last slide (正常系: 全スライド遷移・境界値: 最終ページのボタン切り替え)', () => {

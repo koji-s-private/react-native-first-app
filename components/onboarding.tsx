@@ -29,6 +29,10 @@ export function Onboarding({ visible, onFinish }: OnboardingProps) {
   const isLastStep = stepIndex === ONBOARDING_SLIDES.length - 1;
   const currentSlide = ONBOARDING_SLIDES[stepIndex];
 
+  const handleBack = useCallback(() => {
+    setStepIndex((current) => Math.max(current - 1, 0));
+  }, []);
+
   const handleNext = useCallback(() => {
     if (isLastStep) {
       onFinish();
@@ -36,6 +40,10 @@ export function Onboarding({ visible, onFinish }: OnboardingProps) {
     }
     setStepIndex((current) => current + 1);
   }, [isLastStep, onFinish]);
+
+  const handleSelectStep = useCallback((index: number) => {
+    setStepIndex(index);
+  }, []);
 
   // モーダルが閉じてから次に表示される時(基本的には起こらないが念のため)に、
   // 前回の続きのスライドから始まらないようリセットする
@@ -51,8 +59,24 @@ export function Onboarding({ visible, onFinish }: OnboardingProps) {
       onDismiss={handleDismiss}
     >
       <ThemedView style={styles.container}>
-        <View style={styles.header}>
-          <Pressable onPress={onFinish} accessibilityRole="button">
+        <View style={styles.header} testID="onboarding-header">
+          {stepIndex > 0 ? (
+            <Pressable
+              onPress={handleBack}
+              accessibilityRole="button"
+              accessibilityLabel="前のスライドに戻る"
+              hitSlop={8}
+            >
+              <ThemedText style={[styles.headerActionText, { color: iconColor }]}>戻る</ThemedText>
+            </Pressable>
+          ) : null}
+          <Pressable
+            style={styles.skipButton}
+            onPress={onFinish}
+            accessibilityRole="button"
+            accessibilityLabel="オンボーディングをスキップ"
+            hitSlop={8}
+          >
             <ThemedText style={[styles.skipText, { color: iconColor }]}>スキップ</ThemedText>
           </Pressable>
         </View>
@@ -66,10 +90,21 @@ export function Onboarding({ visible, onFinish }: OnboardingProps) {
 
         <View style={styles.pagination}>
           {ONBOARDING_SLIDES.map((slide, index) => (
-            <View
+            <Pressable
               key={slide.key}
-              style={[styles.dot, { backgroundColor: index === stepIndex ? tintColor : iconColor }]}
-            />
+              style={styles.dotButton}
+              onPress={() => handleSelectStep(index)}
+              accessibilityRole="button"
+              accessibilityLabel={`${index + 1}枚目のスライドへ移動`}
+              accessibilityState={{ selected: index === stepIndex }}
+            >
+              <View
+                style={[
+                  styles.dot,
+                  { backgroundColor: index === stepIndex ? tintColor : iconColor },
+                ]}
+              />
+            </Pressable>
           ))}
         </View>
 
@@ -96,7 +131,19 @@ const styles = StyleSheet.create({
   header: {
     position: 'absolute',
     top: 16,
+    left: 16,
     right: 16,
+    zIndex: 1,
+    elevation: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  headerActionText: {
+    fontSize: 16,
+  },
+  skipButton: {
+    marginLeft: 'auto',
   },
   skipText: {
     fontSize: 16,
@@ -119,6 +166,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     marginBottom: 24,
+  },
+  dotButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   dot: {
     width: 8,
