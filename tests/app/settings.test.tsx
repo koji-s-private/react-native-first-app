@@ -1837,4 +1837,32 @@ describe('アプリロックセクション(生体認証によるアプリロッ
       expect(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL).props.value).toBe(true),
     );
   });
+
+  // Issue #230: 永続化失敗時にスイッチの表示がONのまま(実際には保存されていない)になり、
+  // かつ未処理のPromise rejectionが発生していた不具合の回帰テスト。
+  // リマインダーセクションの同種テスト(異常系: 通知登録失敗時のフィードバック)と
+  // 同じパターン・粒度で検証する。
+  it('shows a failure alert and reverts the toggle to OFF when AsyncStorage.setItem fails (異常系: 永続化失敗時のロールバック・フィードバック)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('storage write error'));
+    renderSettingsScreen();
+    await waitFor(() =>
+      expect(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL).props.disabled).toBe(false),
+    );
+
+    await act(async () => {
+      fireEvent(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL), 'valueChange', true);
+    });
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'アプリロックの設定に失敗しました',
+        '設定を保存できませんでした。もう一度お試しください。',
+      ),
+    );
+    // 永続化に失敗しているため、見た目上もONに確定させず呼び出し前のOFFへ戻す
+    expect(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL).props.value).toBe(false);
+    // 連続タップ防止用の無効化状態も、失敗を経て正しく解除されている
+    expect(screen.getByLabelText(APP_LOCK_TOGGLE_LABEL).props.disabled).toBe(false);
+  });
 });

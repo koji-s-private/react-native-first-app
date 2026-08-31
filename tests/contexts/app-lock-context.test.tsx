@@ -228,6 +228,35 @@ describe('AppLockProvider / useAppLock', () => {
       expect(result.current.isUnlocked).toBe(true);
       expect(AsyncStorage.setItem).toHaveBeenLastCalledWith(APP_LOCK_ENABLED_STORAGE_KEY, 'false');
     });
+
+    // Issue #230: AsyncStorage.setItemが失敗した場合、enabled/isUnlockedの表示状態が
+    // 呼び出し前の値へロールバックされず、かつ例外が呼び出し元へ伝播しない
+    // (未処理のPromise rejectionになる)不具合の回帰テスト。
+    it('rolls back enabled/isUnlocked to their previous values and rethrows when AsyncStorage.setItem rejects (異常系: 永続化失敗時のロールバック)', async () => {
+      const { result } = renderHook(() => useAppLock(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      // background遷移でisUnlocked=falseにしておき、ロールバック対象がisReadyの初期値
+      // (true)ではなく「呼び出し直前の値」であることを検証できるようにする
+      await act(async () => {
+        await result.current.setEnabled(true);
+      });
+      const handleAppStateChange = getAppStateChangeListener();
+      act(() => {
+        handleAppStateChange('background');
+      });
+      expect(result.current.enabled).toBe(true);
+      expect(result.current.isUnlocked).toBe(false);
+      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('storage write error'));
+
+      await act(async () => {
+        await expect(result.current.setEnabled(false)).rejects.toThrow('storage write error');
+      });
+
+      expect(result.current.enabled).toBe(true);
+      expect(result.current.isUnlocked).toBe(false);
+    });
   });
 
   describe('自動認証のトリガー(#226)', () => {
