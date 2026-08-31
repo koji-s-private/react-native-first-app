@@ -94,6 +94,11 @@ function getYearFromMonthIndex(monthIndex: number): number {
   return Math.floor((monthIndex - 1) / 12);
 }
 
+// 指定した年月の1日を表す'YYYY-MM-DD'キーを組み立てる(calendarInitialDateの更新箇所で共通利用する)
+function getFirstDayOfMonthKey(year: number, month: number): string {
+  return `${year}-${`${month}`.padStart(2, '0')}-01`;
+}
+
 // react-native-calendarsが使うdayComponentのpropsの型(ライブラリ側から直接exportされていないため、
 // CalendarPropsから抽出して利用する)
 type DayComponentProps = ComponentProps<NonNullable<CalendarProps['dayComponent']>>;
@@ -340,7 +345,9 @@ export default function HomeScreen() {
   // Calendarへ渡す'YYYY-MM-DD'形式の日付。react-native-calendars内部の実装上、`current`propは
   // 初回マウント時の初期値としてしか使われず、マウント後に値を変えても表示月は追従しない一方、
   // `initialDate`propは値が変わるたびにその月へ強制的にジャンプする挙動になっているため、
-  // 年月ピッカーで選択された年月へジャンプさせる用途にはこちらを使う
+  // 年月ピッカーで選択された年月へジャンプさせる用途にはこちらを使う。加えて、テーマ切替時の
+  // `key={colorScheme}`強制再マウント(下のCalendar参照)後もスワイプ・矢印操作で移動した月を
+  // 復元できるよう、handleMonthChangeでも常にその月の1日に同期させている
   const [calendarInitialDate, setCalendarInitialDate] = useState(() => toDateKey(new Date()));
   // 年月ジャンプ用ピッカーモーダルの表示状態と、ピッカー内で選択中の年
   // (月は上のdisplayedMonthをそのまま参照する)
@@ -729,10 +736,17 @@ export default function HomeScreen() {
   const isNextYearDisabled = pickerYear >= pickerMaxYear;
 
   // スワイプ・矢印操作でカレンダーの表示月が変わった際、ヘッダー表示と年月ピッカーの
-  // ハイライトをその月に追従させる(ピッカー経由のジャンプ以外の全ての月変更手段をカバーする)
+  // ハイライトをその月に追従させる(ピッカー経由のジャンプ以外の全ての月変更手段をカバーする)。
+  // 併せてcalendarInitialDateもその月の1日へ同期させる。react-native-calendarsの
+  // Calendarは`theme` propをuseRefで初回計算した値のままキャッシュし続けるため、テーマ切替時に
+  // `key={colorScheme}`で強制再マウントしているが(下のCalendar参照)、再マウント後の新しい
+  // Calendarインスタンスは`initialDate`から表示月を再構築する。ここを同期させておかないと、
+  // 月ピッカーを使わずスワイプ・矢印だけで移動した状態でテーマを切り替えた際、ヘッダー表示は
+  // 移動後の月のままなのに実際の日付グリッドだけ古いinitialDate(=今日の月)へ巻き戻ってしまう
   const handleMonthChange = useCallback((date: DateData) => {
     setDisplayedYear(date.year);
     setDisplayedMonth(date.month);
+    setCalendarInitialDate(getFirstDayOfMonthKey(date.year, date.month));
   }, []);
 
   // ヘッダーの年月表示をタップすると、現在表示中の年を初期選択状態にしてピッカーを開く
@@ -768,7 +782,7 @@ export default function HomeScreen() {
       }
       setDisplayedYear(pickerYear);
       setDisplayedMonth(month);
-      setCalendarInitialDate(`${pickerYear}-${`${month}`.padStart(2, '0')}-01`);
+      setCalendarInitialDate(getFirstDayOfMonthKey(pickerYear, month));
       setIsMonthPickerVisible(false);
     },
     [isPickerMonthInRange, pickerYear],
@@ -1088,7 +1102,7 @@ export default function HomeScreen() {
                   enableSwipeMonths
                   // ピッカーから任意の年月へジャンプするための制御用prop(詳細は
                   // calendarInitialDate stateのコメント参照)。スワイプ・矢印操作による
-                  // 表示月の変化はonMonthChangeでstate側に反映する
+                  // 表示月の変化もhandleMonthChange(onMonthChange)でstate側に反映する
                   initialDate={calendarInitialDate}
                   onMonthChange={handleMonthChange}
                   // 未来日を新規作成の対象外にするため、今日より後の日付をタップ不可(state: 'disabled')にする

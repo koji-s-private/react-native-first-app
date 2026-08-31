@@ -3292,6 +3292,57 @@ describe('HomeScreen', () => {
       const dayHeader = screen.getByText('日', { includeHiddenElements: true });
       expect(StyleSheet.flatten(dayHeader.props.style).color).toBe(Colors.dark.text);
     });
+
+    // PR #288のレビュー指摘に対する回帰テスト。月ピッカーを使わずスワイプ・矢印操作(ここでは
+    // それらと同じ経路であるCalendarのonMonthChangeを直接呼び出して再現する)で表示月を進めた後に
+    // テーマを切り替えると、key={colorScheme}によるCalendarの強制再マウントが発生する。
+    // react-native-calendarsのCalendarは`useDidUpdate`(初回マウント時はスキップされるフック)
+    // 経由でしかonMonthChangeを呼ばないため、再マウント時(新規インスタンスの初回マウント扱い)には
+    // onMonthChangeが発火せず、calendarInitialDateを同期していないとヘッダー表示(進めた月のまま)と
+    // 実際の日付グリッド(calendarInitialDateが古いままなら今日の月へ巻き戻る)が食い違ってしまう
+    it('keeps the actually rendered day grid in sync with the month reached via swipe/arrow navigation (not the month picker) after a theme-driven remount (回帰: PR #288 レビュー指摘)', async () => {
+      const now = new Date();
+      mockedUseColorScheme.mockReturnValue('light');
+      const { rerender } = render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      // 月ピッカーを使わず、カレンダー本体のスワイプ・矢印操作と同じ経路(onMonthChange)で
+      // 表示月を翌月へ進める
+      const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const nextMonthYear = nextMonthDate.getFullYear();
+      const nextMonthMonth = nextMonthDate.getMonth() + 1;
+      const [calendar] = screen.UNSAFE_getAllByType(Calendar);
+      act(() => {
+        calendar.props.onMonthChange({
+          year: nextMonthYear,
+          month: nextMonthMonth,
+          day: 1,
+          timestamp: nextMonthDate.getTime(),
+          dateString: `${nextMonthYear}-${`${nextMonthMonth}`.padStart(2, '0')}-01`,
+        });
+      });
+      expect(
+        await screen.findByText(`${nextMonthYear}年${nextMonthMonth}月`, {
+          includeHiddenElements: true,
+        }),
+      ).toBeTruthy();
+
+      // 月ピッカーを開かないままテーマをダークへ切り替える(key={colorScheme}によりCalendarが
+      // 強制的に再マウントされる)
+      mockedUseColorScheme.mockReturnValue('dark');
+      rerender(<HomeScreen />);
+
+      // ヘッダーは進めた月のままで、かつ実際に描画される日付グリッドも同じ月の日付セルを含んでいる
+      // (元の今日の月へ静かに巻き戻っていない)ことを確認する
+      expect(
+        await screen.findByText(`${nextMonthYear}年${nextMonthMonth}月`, {
+          includeHiddenElements: true,
+        }),
+      ).toBeTruthy();
+      expect(
+        screen.queryAllByLabelText(new RegExp(`^${nextMonthYear}年${nextMonthMonth}月15日`)),
+      ).not.toHaveLength(0);
+    });
   });
 
   describe('日記のキーワード検索', () => {
