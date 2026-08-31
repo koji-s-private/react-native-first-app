@@ -3274,6 +3274,24 @@ describe('HomeScreen', () => {
 
     // 編集失敗時のエラーメッセージ・削除リンクのダークモード配色は、それぞれ専用画面へ移動したため
     // tests/app/edit-entry/[id].test.tsx・tests/app/day-entries/[date].test.tsxで検証する(Issue #221)
+
+    // Issue #232の回帰テスト。react-native-calendarsの`Calendar`はtheme由来のスタイル
+    // (曜日ヘッダー行の色など、dayComponentで差し替えていない部分)をマウント時に一度だけ
+    // `useRef`で計算してキャッシュし、マウント後にtheme propが変わっても再計算しない実装のため、
+    // マウント後に配色設定(ダークモード)が変わってもカレンダー本体だけ元の配色のまま
+    // 取り残されてしまう。`Calendar`にcolorSchemeをkeyとして渡し強制的に再マウントさせることで
+    // 追従させる対策(app/(tabs)/index.tsxのkey={colorScheme})が効いていることを確認する
+    it('re-applies the current color scheme to react-native-calendars-managed styling (e.g. the weekday header row) after the color scheme changes post-mount', async () => {
+      mockedUseColorScheme.mockReturnValue('light');
+      const { rerender } = render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      mockedUseColorScheme.mockReturnValue('dark');
+      rerender(<HomeScreen />);
+
+      const dayHeader = screen.getByText('日', { includeHiddenElements: true });
+      expect(StyleSheet.flatten(dayHeader.props.style).color).toBe(Colors.dark.text);
+    });
   });
 
   describe('日記のキーワード検索', () => {

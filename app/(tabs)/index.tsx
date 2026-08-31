@@ -27,6 +27,7 @@ import { TabScreenContainer } from '@/components/tab-screen-container';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useThemePreference } from '@/contexts/theme-preference-context';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { buildCreatedAtForDateKey, formatDateHeading, toDateKey } from '@/utils/diary-date';
 import { BODY_MAX_LENGTH, splitIntoGraphemes, truncateToBodyMaxLength } from '@/utils/diary-text';
@@ -353,6 +354,7 @@ export default function HomeScreen() {
   const monthPickerTransition = useModalSlideTransition(isMonthPickerVisible);
 
   const router = useRouter();
+  const { colorScheme } = useThemePreference();
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
   const backgroundColor = useThemeColor({}, 'background');
@@ -1062,6 +1064,12 @@ export default function HomeScreen() {
                 onLayout={(event) => setWrapperHeight(event.nativeEvent.layout.height)}
               >
                 <Calendar
+                  // react-native-calendars内部はtheme propに応じたスタイルをuseRefで初回計算した
+                  // ものをキャッシュし続け、マウント後のtheme変更(Web版のハイドレーション後の
+                  // colorScheme確定や、設定画面でのテーマ切り替え)に追従しない。colorSchemeを
+                  // keyに含めて配色が変わるたびに強制的に再マウントさせ、常に現在のテーマで
+                  // スタイルを計算させる
+                  key={colorScheme}
                   theme={{
                     backgroundColor,
                     calendarBackground: backgroundColor,
