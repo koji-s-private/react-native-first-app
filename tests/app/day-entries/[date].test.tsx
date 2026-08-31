@@ -128,6 +128,7 @@ const secureStoreMock = SecureStore as unknown as { __reset: () => void };
 
 const DATE_KEY = '2026-08-15';
 const CLIPBOARD_COPY_LABEL = '日記本文をコピー';
+const EMPTY_STATE_MESSAGE = 'この日の日記はまだありません';
 
 // テストの事前状態として、指定したエントリ群をエントリ単位の個別キーへ暗号化して直接書き込むヘルパー
 // (tests/app/index.test.tsxのseedDiaryEntriesと同じ方式)
@@ -184,13 +185,26 @@ describe('DayEntriesScreen', () => {
     expect(flattened.indexOf('朝の出来事')).toBeLessThan(flattened.indexOf('夜の出来事'));
   });
 
-  it('renders an empty list without crashing when no entries exist for the given date (異常系/境界値: 空の日)', async () => {
+  it('shows an explicit empty state message when no entries exist for the given date (異常系/境界値: 空の日)', async () => {
     render(<DayEntriesScreen />);
 
     await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+    expect(await screen.findByText(EMPTY_STATE_MESSAGE)).toBeTruthy();
     expect(screen.queryByText('コピー')).toBeNull();
     expect(screen.queryByText('編集')).toBeNull();
     expect(screen.queryByText('削除')).toBeNull();
+  });
+
+  it('does not show the empty state before stored entries finish loading (境界値: 初回読み込み中)', async () => {
+    await seedDiaryEntries([
+      { id: '1', text: '読み込み後の日記', createdAt: localIso(DATE_KEY, 9, 0) },
+    ]);
+
+    render(<DayEntriesScreen />);
+
+    expect(screen.queryByText(EMPTY_STATE_MESSAGE)).toBeNull();
+    expect(await screen.findByText('読み込み後の日記')).toBeTruthy();
+    expect(screen.queryByText(EMPTY_STATE_MESSAGE)).toBeNull();
   });
 
   it("shows each entry's date/time in a 'YYYY/MM/DD HH:mm' format", async () => {
@@ -344,7 +358,7 @@ describe('DayEntriesScreen', () => {
       expect(await AsyncStorage.getItem(buildDiaryEntryKey('1'))).not.toBeNull();
     });
 
-    it('leaves an empty list (without crashing) after deleting the only entry for the date (境界値: 最後の1件を削除)', async () => {
+    it('shows the empty state message after deleting the only entry for the date (境界値: 最後の1件を削除)', async () => {
       await seedDiaryEntries([{ id: '1', text: '最後の1件', createdAt: localIso(DATE_KEY, 9, 0) }]);
       jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
@@ -359,6 +373,7 @@ describe('DayEntriesScreen', () => {
       });
 
       await waitFor(() => expect(screen.queryByText('最後の1件')).toBeNull());
+      expect(await screen.findByText(EMPTY_STATE_MESSAGE)).toBeTruthy();
       expect(screen.queryByText('削除')).toBeNull();
       expect(await AsyncStorage.getItem(buildDiaryEntryKey('1'))).toBeNull();
     });

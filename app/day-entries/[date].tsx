@@ -12,6 +12,7 @@ import { deleteDiaryEntry, getAllDiaryEntries, type DiaryEntry } from '@/utils/d
 
 // コピー成功時に一時的に表示するトーストのメッセージ
 const COPY_SUCCESS_MESSAGE = 'コピーしました';
+const EMPTY_STATE_MESSAGE = 'この日の日記はまだありません';
 
 // 指定した日付('YYYY-MM-DD')の日記一覧を表示する専用画面(Issue #221)。
 // 従来はカレンダー画面(`app/(tabs)/index.tsx`)にモーダル(ドロワー)として重ねて
@@ -22,6 +23,7 @@ export default function DayEntriesScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
+  const [hasLoadedEntries, setHasLoadedEntries] = useState(false);
   // コピー成功時に一時的に表示するトーストのメッセージ。nullの間は非表示
   const [copyToastMessage, setCopyToastMessage] = useState<string | null>(null);
 
@@ -38,6 +40,8 @@ export default function DayEntriesScreen() {
 
   const loadEntries = useCallback(async () => {
     if (!date) {
+      setEntries([]);
+      setHasLoadedEntries(true);
       return;
     }
     const allEntries = await getAllDiaryEntries();
@@ -47,6 +51,7 @@ export default function DayEntriesScreen() {
         // 各日付内は書かれた時刻の昇順に揃える(カレンダー画面の一覧表示と同じ並び順)
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
     );
+    setHasLoadedEntries(true);
   }, [date]);
 
   // 編集画面から戻ってきた際にも最新の内容を反映できるよう、フォーカスが戻るたびに読み直す
@@ -101,6 +106,16 @@ export default function DayEntriesScreen() {
     [handleDeleteEntry],
   );
 
+  const renderEmptyEntries = useCallback(
+    () =>
+      hasLoadedEntries ? (
+        <ThemedView style={styles.emptyState}>
+          <ThemedText style={styles.emptyStateText}>{EMPTY_STATE_MESSAGE}</ThemedText>
+        </ThemedView>
+      ) : null,
+    [hasLoadedEntries],
+  );
+
   return (
     <ThemedView style={styles.container}>
       {copyToastMessage ? (
@@ -110,6 +125,7 @@ export default function DayEntriesScreen() {
         data={entries}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        ListEmptyComponent={renderEmptyEntries}
         // 一覧をスクロールした際にもキーボードを閉じられるようにする(他画面のFlatListと同じ方針)
         keyboardDismissMode="on-drag"
         renderItem={({ item }) => (
@@ -154,7 +170,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   listContent: {
+    flexGrow: 1,
     padding: 16,
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    fontWeight: '600',
+    opacity: 0.7,
+    textAlign: 'center',
   },
   entry: {
     gap: 4,
