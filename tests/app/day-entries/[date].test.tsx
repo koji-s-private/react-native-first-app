@@ -195,6 +195,18 @@ describe('DayEntriesScreen', () => {
     expect(screen.queryByText('削除')).toBeNull();
   });
 
+  it('does not show the empty state before stored entries finish loading (境界値: 初回読み込み中)', async () => {
+    await seedDiaryEntries([
+      { id: '1', text: '読み込み後の日記', createdAt: localIso(DATE_KEY, 9, 0) },
+    ]);
+
+    render(<DayEntriesScreen />);
+
+    expect(screen.queryByText(EMPTY_STATE_MESSAGE)).toBeNull();
+    expect(await screen.findByText('読み込み後の日記')).toBeTruthy();
+    expect(screen.queryByText(EMPTY_STATE_MESSAGE)).toBeNull();
+  });
+
   it("shows each entry's date/time in a 'YYYY/MM/DD HH:mm' format", async () => {
     await seedDiaryEntries([{ id: '1', text: '日記本文', createdAt: localIso(DATE_KEY, 9, 5) }]);
 

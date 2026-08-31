@@ -23,6 +23,7 @@ export default function DayEntriesScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
+  const [hasLoadedEntries, setHasLoadedEntries] = useState(false);
   // コピー成功時に一時的に表示するトーストのメッセージ。nullの間は非表示
   const [copyToastMessage, setCopyToastMessage] = useState<string | null>(null);
 
@@ -39,6 +40,8 @@ export default function DayEntriesScreen() {
 
   const loadEntries = useCallback(async () => {
     if (!date) {
+      setEntries([]);
+      setHasLoadedEntries(true);
       return;
     }
     const allEntries = await getAllDiaryEntries();
@@ -48,6 +51,7 @@ export default function DayEntriesScreen() {
         // 各日付内は書かれた時刻の昇順に揃える(カレンダー画面の一覧表示と同じ並び順)
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
     );
+    setHasLoadedEntries(true);
   }, [date]);
 
   // 編集画面から戻ってきた際にも最新の内容を反映できるよう、フォーカスが戻るたびに読み直す
@@ -103,12 +107,13 @@ export default function DayEntriesScreen() {
   );
 
   const renderEmptyEntries = useCallback(
-    () => (
-      <ThemedView style={styles.emptyState}>
-        <ThemedText style={styles.emptyStateText}>{EMPTY_STATE_MESSAGE}</ThemedText>
-      </ThemedView>
-    ),
-    [],
+    () =>
+      hasLoadedEntries ? (
+        <ThemedView style={styles.emptyState}>
+          <ThemedText style={styles.emptyStateText}>{EMPTY_STATE_MESSAGE}</ThemedText>
+        </ThemedView>
+      ) : null,
+    [hasLoadedEntries],
   );
 
   return (
