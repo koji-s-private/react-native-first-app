@@ -680,9 +680,9 @@ export default function HomeScreen() {
     return Math.max(DEFAULT_DAY_CELL_HEIGHT, perRowHeight);
   }, [wrapperHeight]);
 
-  const today = useMemo(() => new Date(), []);
-  const pickerMaxYear = today.getFullYear();
-  const pickerMaxMonth = today.getMonth() + 1;
+  const [pickerToday, setPickerToday] = useState(() => new Date());
+  const pickerMaxYear = pickerToday.getFullYear();
+  const pickerMaxMonth = pickerToday.getMonth() + 1;
   const pickerMaxMonthIndex = getMonthIndex(pickerMaxYear, pickerMaxMonth);
 
   const pickerMinMonthIndex = useMemo(() => {
@@ -724,9 +724,11 @@ export default function HomeScreen() {
 
   // ヘッダーの年月表示をタップすると、現在表示中の年を初期選択状態にしてピッカーを開く
   const handleOpenMonthPicker = useCallback(() => {
-    setPickerYear(Math.min(Math.max(displayedYear, pickerMinYear), pickerMaxYear));
+    const currentToday = new Date();
+    setPickerToday(currentToday);
+    setPickerYear(Math.min(Math.max(displayedYear, pickerMinYear), currentToday.getFullYear()));
     setIsMonthPickerVisible(true);
-  }, [displayedYear, pickerMinYear, pickerMaxYear]);
+  }, [displayedYear, pickerMinYear]);
 
   const handleCloseMonthPicker = useCallback(() => {
     setIsMonthPickerVisible(false);

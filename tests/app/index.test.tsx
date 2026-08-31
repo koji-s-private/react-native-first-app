@@ -2153,6 +2153,31 @@ describe('HomeScreen', () => {
       expect(await findCalendarHeaderText(now.getFullYear(), now.getMonth() + 1)).toBeTruthy();
     });
 
+    it('refreshes the picker upper bound when opening it after the app stays mounted across a month boundary (境界値: 月またぎ)', async () => {
+      jest.useFakeTimers();
+      try {
+        const beforeMonthBoundary = new Date(2026, 0, 31, 23, 59, 0);
+        const afterMonthBoundary = new Date(2026, 1, 1, 0, 1, 0);
+        jest.setSystemTime(beforeMonthBoundary);
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        jest.setSystemTime(afterMonthBoundary);
+        await openMonthPicker(beforeMonthBoundary);
+
+        const februaryButton = screen.getByLabelText('2026年2月へ移動');
+        expect(februaryButton.props.accessibilityState?.disabled).toBe(false);
+
+        fireEvent.press(februaryButton);
+
+        await waitFor(() => expect(screen.queryByText('年月を選択')).toBeNull());
+        expect(await findCalendarHeaderText(2026, 2)).toBeTruthy();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('renders the year stepper buttons as chevron-left/chevron-right IconSymbols, not text glyphs', async () => {
       const now = new Date();
       render(<HomeScreen />);
