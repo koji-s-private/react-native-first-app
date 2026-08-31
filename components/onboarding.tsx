@@ -59,7 +59,7 @@ export function Onboarding({ visible, onFinish }: OnboardingProps) {
       onDismiss={handleDismiss}
     >
       <ThemedView style={styles.container}>
-        <View style={styles.header}>
+        <View style={styles.header} testID="onboarding-header">
           {stepIndex > 0 ? (
             <Pressable
               onPress={handleBack}
@@ -133,6 +133,8 @@ const styles = StyleSheet.create({
     top: 16,
     left: 16,
     right: 16,
+    zIndex: 1,
+    elevation: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',

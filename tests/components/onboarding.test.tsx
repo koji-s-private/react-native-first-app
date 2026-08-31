@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import React from 'react';
-import { Modal } from 'react-native';
+import { Modal, StyleSheet } from 'react-native';
 
 import { Onboarding } from '@/components/onboarding';
 import { ONBOARDING_SLIDES } from '@/constants/onboarding-slides';
@@ -64,6 +64,16 @@ describe('Onboarding', () => {
 
     expect(screen.getByText(ONBOARDING_SLIDES[0].title)).toBeTruthy();
     expect(screen.queryByLabelText('前のスライドに戻る')).toBeNull();
+  });
+
+  it('keeps the header actions above the slide body so the back action remains clickable (回帰防止: ヒットテスト)', () => {
+    render(<Onboarding visible={true} onFinish={jest.fn()} />);
+
+    fireEvent.press(screen.getByText('次へ'));
+
+    const headerStyle = StyleSheet.flatten(screen.getByTestId('onboarding-header').props.style);
+    expect(headerStyle.zIndex).toBeGreaterThan(0);
+    expect(headerStyle.elevation).toBeGreaterThan(0);
   });
 
   it('moves to the selected slide when a pagination dot is pressed (正常系: ドットから直接移動)', () => {
