@@ -12,6 +12,7 @@ import { deleteDiaryEntry, getAllDiaryEntries, type DiaryEntry } from '@/utils/d
 
 // コピー成功時に一時的に表示するトーストのメッセージ
 const COPY_SUCCESS_MESSAGE = 'コピーしました';
+const EMPTY_STATE_MESSAGE = 'この日の日記はまだありません';
 
 // 指定した日付('YYYY-MM-DD')の日記一覧を表示する専用画面(Issue #221)。
 // 従来はカレンダー画面(`app/(tabs)/index.tsx`)にモーダル(ドロワー)として重ねて
@@ -101,6 +102,15 @@ export default function DayEntriesScreen() {
     [handleDeleteEntry],
   );
 
+  const renderEmptyEntries = useCallback(
+    () => (
+      <ThemedView style={styles.emptyState}>
+        <ThemedText style={styles.emptyStateText}>{EMPTY_STATE_MESSAGE}</ThemedText>
+      </ThemedView>
+    ),
+    [],
+  );
+
   return (
     <ThemedView style={styles.container}>
       {copyToastMessage ? (
@@ -110,6 +120,7 @@ export default function DayEntriesScreen() {
         data={entries}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        ListEmptyComponent={renderEmptyEntries}
         // 一覧をスクロールした際にもキーボードを閉じられるようにする(他画面のFlatListと同じ方針)
         keyboardDismissMode="on-drag"
         renderItem={({ item }) => (
@@ -154,7 +165,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   listContent: {
+    flexGrow: 1,
     padding: 16,
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    fontWeight: '600',
+    opacity: 0.7,
+    textAlign: 'center',
   },
   entry: {
     gap: 4,
