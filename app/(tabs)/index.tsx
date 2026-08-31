@@ -64,6 +64,35 @@ const CALENDAR_WEEK_ROWS = 6;
 const CALENDAR_CHROME_HEIGHT = 90;
 const CALENDAR_WEEK_ROW_MARGIN = 14;
 
+function getMonthIndex(year: number, month: number): number {
+  return year * 12 + month;
+}
+
+function getPickerMaxMonthIndex(today: Date): number {
+  return getMonthIndex(today.getFullYear(), today.getMonth() + 1);
+}
+
+function getPickerMinMonthIndex(entries: DiaryEntry[], pickerMaxMonthIndex: number): number {
+  const entryMonthIndexes = entries
+    .map((entry) => {
+      const createdAt = new Date(entry.createdAt);
+      if (Number.isNaN(createdAt.getTime())) {
+        return null;
+      }
+      return getMonthIndex(createdAt.getFullYear(), createdAt.getMonth() + 1);
+    })
+    .filter((monthIndex): monthIndex is number => monthIndex !== null);
+
+  if (entryMonthIndexes.length === 0) {
+    return pickerMaxMonthIndex;
+  }
+  return Math.min(Math.min(...entryMonthIndexes), pickerMaxMonthIndex);
+}
+
+function getYearFromMonthIndex(monthIndex: number): number {
+  return Math.floor((monthIndex - 1) / 12);
+}
+
 // react-native-calendarsが使うdayComponentのpropsの型(ライブラリ側から直接exportされていないため、
 // CalendarPropsから抽出して利用する)
 type DayComponentProps = ComponentProps<NonNullable<CalendarProps['dayComponent']>>;
@@ -676,6 +705,27 @@ export default function HomeScreen() {
     return Math.max(DEFAULT_DAY_CELL_HEIGHT, perRowHeight);
   }, [wrapperHeight]);
 
+  const [pickerToday, setPickerToday] = useState(() => new Date());
+  const pickerMaxYear = pickerToday.getFullYear();
+  const pickerMaxMonthIndex = getPickerMaxMonthIndex(pickerToday);
+
+  const pickerMinMonthIndex = useMemo(() => {
+    return getPickerMinMonthIndex(entries, pickerMaxMonthIndex);
+  }, [entries, pickerMaxMonthIndex]);
+
+  const pickerMinYear = getYearFromMonthIndex(pickerMinMonthIndex);
+
+  const isPickerMonthInRange = useCallback(
+    (year: number, month: number) => {
+      const monthIndex = getMonthIndex(year, month);
+      return monthIndex >= pickerMinMonthIndex && monthIndex <= pickerMaxMonthIndex;
+    },
+    [pickerMinMonthIndex, pickerMaxMonthIndex],
+  );
+
+  const isPreviousYearDisabled = pickerYear <= pickerMinYear;
+  const isNextYearDisabled = pickerYear >= pickerMaxYear;
+
   // スワイプ・矢印操作でカレンダーの表示月が変わった際、ヘッダー表示と年月ピッカーの
   // ハイライトをその月に追従させる(ピッカー経由のジャンプ以外の全ての月変更手段をカバーする)
   const handleMonthChange = useCallback((date: DateData) => {
@@ -685,27 +735,41 @@ export default function HomeScreen() {
 
   // ヘッダーの年月表示をタップすると、現在表示中の年を初期選択状態にしてピッカーを開く
   const handleOpenMonthPicker = useCallback(() => {
-    setPickerYear(displayedYear);
+    const currentToday = new Date();
+    const currentPickerMaxMonthIndex = getPickerMaxMonthIndex(currentToday);
+    const currentPickerMinYear = getYearFromMonthIndex(
+      getPickerMinMonthIndex(entries, currentPickerMaxMonthIndex),
+    );
+    setPickerToday(currentToday);
+    setPickerYear(
+      Math.min(Math.max(displayedYear, currentPickerMinYear), currentToday.getFullYear()),
+    );
     setIsMonthPickerVisible(true);
-  }, [displayedYear]);
+  }, [displayedYear, entries]);
 
   const handleCloseMonthPicker = useCallback(() => {
     setIsMonthPickerVisible(false);
   }, []);
 
-  const handlePickerYearStep = useCallback((delta: number) => {
-    setPickerYear((year) => year + delta);
-  }, []);
+  const handlePickerYearStep = useCallback(
+    (delta: number) => {
+      setPickerYear((year) => Math.min(Math.max(year + delta, pickerMinYear), pickerMaxYear));
+    },
+    [pickerMinYear, pickerMaxYear],
+  );
 
   // 月ボタンが選択されたら、その年月の1日をcalendarInitialDateへセットしてカレンダーをジャンプさせる
   const handleSelectMonth = useCallback(
     (month: number) => {
+      if (!isPickerMonthInRange(pickerYear, month)) {
+        return;
+      }
       setDisplayedYear(pickerYear);
       setDisplayedMonth(month);
       setCalendarInitialDate(`${pickerYear}-${`${month}`.padStart(2, '0')}-01`);
       setIsMonthPickerVisible(false);
     },
-    [pickerYear],
+    [isPickerMonthInRange, pickerYear],
   );
 
   // react-native-calendarsのrenderHeaderは矢印・曜日行はそのまま維持しつつ、中央の見出し部分のみを
@@ -1171,26 +1235,47 @@ export default function HomeScreen() {
                 <View style={styles.yearStepperRow}>
                   <Pressable
                     onPress={() => handlePickerYearStep(-1)}
+                    disabled={isPreviousYearDisabled}
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel="前の年"
+                    accessibilityState={{ disabled: isPreviousYearDisabled }}
+                    style={[
+                      styles.yearStepperButton,
+                      isPreviousYearDisabled ? styles.disabledButton : null,
+                    ]}
                   >
-                    <IconSymbol name="chevron.left" size={24} color={tintColor} />
+                    <IconSymbol
+                      name="chevron.left"
+                      size={24}
+                      color={isPreviousYearDisabled ? iconColor : tintColor}
+                    />
                   </Pressable>
                   <ThemedText type="subtitle">{pickerYear}年</ThemedText>
                   <Pressable
                     onPress={() => handlePickerYearStep(1)}
+                    disabled={isNextYearDisabled}
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel="次の年"
+                    accessibilityState={{ disabled: isNextYearDisabled }}
+                    style={[
+                      styles.yearStepperButton,
+                      isNextYearDisabled ? styles.disabledButton : null,
+                    ]}
                   >
-                    <IconSymbol name="chevron.right" size={24} color={tintColor} />
+                    <IconSymbol
+                      name="chevron.right"
+                      size={24}
+                      color={isNextYearDisabled ? iconColor : tintColor}
+                    />
                   </Pressable>
                 </View>
                 <View style={styles.monthGrid}>
                   {JA_MONTH_NAMES.map((monthName, index) => {
                     const month = index + 1;
                     const isSelected = pickerYear === displayedYear && month === displayedMonth;
+                    const isDisabled = !isPickerMonthInRange(pickerYear, month);
                     return (
                       <Pressable
                         key={monthName}
@@ -1200,11 +1285,13 @@ export default function HomeScreen() {
                           isSelected
                             ? { backgroundColor: tintColor, borderColor: tintColor }
                             : null,
+                          isDisabled ? styles.disabledButton : null,
                         ]}
                         onPress={() => handleSelectMonth(month)}
+                        disabled={isDisabled}
                         accessibilityRole="button"
                         accessibilityLabel={`${pickerYear}年${monthName}へ移動`}
-                        accessibilityState={{ selected: isSelected }}
+                        accessibilityState={{ selected: isSelected, disabled: isDisabled }}
                       >
                         <ThemedText
                           style={isSelected ? { color: backgroundColor } : { color: textColor }}
@@ -1347,6 +1434,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 24,
   },
+  yearStepperButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   monthGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1360,6 +1451,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 10,
     alignItems: 'center',
+  },
+  disabledButton: {
+    opacity: 0.35,
   },
   dayCell: {
     alignItems: 'center',

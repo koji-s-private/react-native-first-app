@@ -2099,22 +2099,107 @@ describe('HomeScreen', () => {
       expect(headerButton.props.accessibilityRole).toBe('button');
     });
 
-    it('increments/decrements the picker year via the chevron-left/chevron-right year stepper buttons, without jumping the calendar until a month button is pressed (正常系)', async () => {
+    it('increments/decrements the picker year within the diary-backed year range, without jumping the calendar until a month button is pressed (正常系)', async () => {
+      const now = new Date();
+      const storedEntries = [
+        {
+          id: 'old',
+          text: '前年の日記',
+          createdAt: new Date(now.getFullYear() - 1, 0, 15, 9, 0, 0).toISOString(),
+        },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+
+      fireEvent.press(screen.getByLabelText('前の年'));
+      expect(screen.getByText(`${now.getFullYear() - 1}年`)).toBeTruthy();
+
+      fireEvent.press(screen.getByLabelText('次の年'));
+      expect(screen.getByText(`${now.getFullYear()}年`)).toBeTruthy();
+
+      // 年ステッパーの操作だけではカレンダー本体の表示月はまだジャンプしていない
+      expect(await findCalendarHeaderText(now.getFullYear(), now.getMonth() + 1)).toBeTruthy();
+    });
+
+    it('disables the next-year stepper and future month buttons at the current year/month upper bound, so the picker cannot jump to an all-future calendar (境界値)', async () => {
       const now = new Date();
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       await openMonthPicker(now);
 
-      fireEvent.press(screen.getByLabelText('次の年'));
-      expect(screen.getByText(`${now.getFullYear() + 1}年`)).toBeTruthy();
+      const nextYearButton = screen.getByLabelText('次の年');
+      expect(nextYearButton.props.accessibilityState?.disabled).toBe(true);
 
-      fireEvent.press(screen.getByLabelText('前の年'));
-      fireEvent.press(screen.getByLabelText('前の年'));
-      expect(screen.getByText(`${now.getFullYear() - 1}年`)).toBeTruthy();
+      const nextMonth = now.getMonth() + 2;
+      if (nextMonth <= 12) {
+        const [futureMonthButton] = screen.UNSAFE_getAllByProps({
+          accessibilityLabel: `${now.getFullYear()}年${nextMonth}月へ移動`,
+        });
+        expect(futureMonthButton.props.accessibilityState?.disabled).toBe(true);
 
-      // 年ステッパーの操作だけではカレンダー本体の表示月はまだジャンプしていない
+        fireEvent.press(futureMonthButton);
+        expect(screen.getByText('年月を選択')).toBeTruthy();
+        expect(await findCalendarHeaderText(now.getFullYear(), now.getMonth() + 1)).toBeTruthy();
+      }
+
+      fireEvent.press(nextYearButton);
+      expect(screen.queryByText(`${now.getFullYear() + 1}年`)).toBeNull();
       expect(await findCalendarHeaderText(now.getFullYear(), now.getMonth() + 1)).toBeTruthy();
+    });
+
+    it('refreshes the picker upper bound when opening it after the app stays mounted across a month boundary (境界値: 月またぎ)', async () => {
+      jest.useFakeTimers();
+      try {
+        const beforeMonthBoundary = new Date(2026, 0, 31, 23, 59, 0);
+        const afterMonthBoundary = new Date(2026, 1, 1, 0, 1, 0);
+        jest.setSystemTime(beforeMonthBoundary);
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        jest.setSystemTime(afterMonthBoundary);
+        await openMonthPicker(beforeMonthBoundary);
+
+        const februaryButton = screen.getByLabelText('2026年2月へ移動');
+        expect(februaryButton.props.accessibilityState?.disabled).toBe(false);
+
+        fireEvent.press(februaryButton);
+
+        await waitFor(() => expect(screen.queryByText('年月を選択')).toBeNull());
+        expect(await findCalendarHeaderText(2026, 2)).toBeTruthy();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('refreshes both picker bounds when opening it after the app stays mounted across a year boundary with no diary entries (境界値: 年またぎ)', async () => {
+      jest.useFakeTimers();
+      try {
+        const beforeYearBoundary = new Date(2026, 11, 31, 23, 59, 0);
+        const afterYearBoundary = new Date(2027, 0, 1, 0, 1, 0);
+        jest.setSystemTime(beforeYearBoundary);
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        jest.setSystemTime(afterYearBoundary);
+        await openMonthPicker(beforeYearBoundary);
+
+        expect(screen.getByText('2027年')).toBeTruthy();
+        expect(screen.queryByText('2026年')).toBeNull();
+        expect(screen.getByLabelText('前の年').props.accessibilityState?.disabled).toBe(true);
+        expect(screen.getByLabelText('2027年1月へ移動').props.accessibilityState?.disabled).toBe(
+          false,
+        );
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('renders the year stepper buttons as chevron-left/chevron-right IconSymbols, not text glyphs', async () => {
@@ -2135,13 +2220,23 @@ describe('HomeScreen', () => {
 
     it('jumps the calendar to the selected year/month and closes the modal when a month button is tapped (正常系)', async () => {
       const now = new Date();
+      const targetYear = now.getFullYear() - 1;
+      const storedEntries = [
+        {
+          id: 'old',
+          text: '前年の日記',
+          createdAt: new Date(targetYear, 0, 15, 9, 0, 0).toISOString(),
+        },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      jest.clearAllMocks();
+
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       await openMonthPicker(now);
 
-      fireEvent.press(screen.getByLabelText('次の年'));
-      const targetYear = now.getFullYear() + 1;
+      fireEvent.press(screen.getByLabelText('前の年'));
       fireEvent.press(screen.getByLabelText(`${targetYear}年3月へ移動`));
 
       // モーダルが閉じる
@@ -2157,11 +2252,21 @@ describe('HomeScreen', () => {
 
     it('closes the month picker modal without jumping when the semi-transparent background overlay is tapped, discarding unselected year-stepper changes (正常系: モーダルを閉じる操作)', async () => {
       const now = new Date();
+      const storedEntries = [
+        {
+          id: 'old',
+          text: '前年の日記',
+          createdAt: new Date(now.getFullYear() - 1, 0, 15, 9, 0, 0).toISOString(),
+        },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      jest.clearAllMocks();
+
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       await openMonthPicker(now);
-      fireEvent.press(screen.getByLabelText('次の年'));
+      fireEvent.press(screen.getByLabelText('前の年'));
 
       const overlay = getModalOverlayPressable(getMonthPickerModal());
       fireEvent.press(overlay);
@@ -2184,23 +2289,33 @@ describe('HomeScreen', () => {
 
     it('resets the picker to the currently displayed year each time it is reopened, discarding any unselected year-stepper changes from a previous open (境界値)', async () => {
       const now = new Date();
+      const storedEntries = [
+        {
+          id: 'old',
+          text: '一昨年の日記',
+          createdAt: new Date(now.getFullYear() - 2, 0, 15, 9, 0, 0).toISOString(),
+        },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      jest.clearAllMocks();
+
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       await openMonthPicker(now);
-      fireEvent.press(screen.getByLabelText('次の年'));
-      fireEvent.press(screen.getByLabelText('次の年'));
-      expect(screen.getByText(`${now.getFullYear() + 2}年`)).toBeTruthy();
+      fireEvent.press(screen.getByLabelText('前の年'));
+      fireEvent.press(screen.getByLabelText('前の年'));
+      expect(screen.getByText(`${now.getFullYear() - 2}年`)).toBeTruthy();
 
       fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
       await waitFor(() => expect(screen.queryByText('年月を選択')).toBeNull());
 
       await openMonthPicker(now);
       expect(screen.getByText(`${now.getFullYear()}年`)).toBeTruthy();
-      expect(screen.queryByText(`${now.getFullYear() + 2}年`)).toBeNull();
+      expect(screen.queryByText(`${now.getFullYear() - 2}年`)).toBeNull();
     });
 
-    it("syncs the header heading and the picker's initial year to the new month when the calendar reports a month change via swipe/arrow navigation, crossing a year boundary forward (境界値: 12月→翌年1月)", async () => {
+    it("clamps the picker's initial year to the current year when the calendar reports a future year via swipe/arrow navigation (境界値: 未来年)", async () => {
       const now = new Date();
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
@@ -2219,11 +2334,10 @@ describe('HomeScreen', () => {
 
       expect(await findCalendarHeaderText(nextYear, 1)).toBeTruthy();
 
-      // ピッカーを開くと、スワイプ後の新しい年が初期選択された状態になる
+      // ピッカーを開くと、未来年ではなく現在年を上限として初期選択する
       fireEvent.press(await findCalendarHeaderText(nextYear, 1));
-      expect(await screen.findByText(`${nextYear}年`)).toBeTruthy();
-      const januaryButton = screen.getByLabelText(`${nextYear}年1月へ移動`);
-      expect(januaryButton.props.accessibilityState?.selected).toBe(true);
+      expect(await screen.findByText(`${now.getFullYear()}年`)).toBeTruthy();
+      expect(screen.getByLabelText('次の年').props.accessibilityState?.disabled).toBe(true);
     });
 
     it('syncs the header heading to the new month when the calendar reports a month change crossing a year boundary backward (境界値: 1月→前年12月)', async () => {
@@ -2265,16 +2379,64 @@ describe('HomeScreen', () => {
 
     it("does not mark any month button as selected once the picker year has been stepped away from the currently displayed year, since none of that year's months match the display (境界値/異常系)", async () => {
       const now = new Date();
+      const previousYear = now.getFullYear() - 1;
+      const storedEntries = [
+        {
+          id: 'old',
+          text: '前年の日記',
+          createdAt: new Date(previousYear, 0, 15, 9, 0, 0).toISOString(),
+        },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      jest.clearAllMocks();
+
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       await openMonthPicker(now);
-      fireEvent.press(screen.getByLabelText('次の年'));
+      fireEvent.press(screen.getByLabelText('前の年'));
 
       for (const monthName of MONTH_NAMES_JA) {
-        const button = screen.getByLabelText(`${now.getFullYear() + 1}年${monthName}へ移動`);
+        const button = screen.getByLabelText(`${previousYear}年${monthName}へ移動`);
         expect(button.props.accessibilityState?.selected).toBe(false);
       }
+    });
+
+    it('uses the oldest diary month as the lower bound and disables earlier years/months in the picker (境界値)', async () => {
+      const now = new Date();
+      const minYear = now.getFullYear() - 2;
+      const minMonth = 4;
+      const storedEntries = [
+        {
+          id: 'oldest',
+          text: '最古の日記',
+          createdAt: new Date(minYear, minMonth - 1, 15, 9, 0, 0).toISOString(),
+        },
+        {
+          id: 'newer',
+          text: '新しい日記',
+          createdAt: new Date(now.getFullYear(), now.getMonth(), 15, 9, 0, 0).toISOString(),
+        },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+      fireEvent.press(screen.getByLabelText('前の年'));
+      fireEvent.press(screen.getByLabelText('前の年'));
+      expect(screen.getByText(`${minYear}年`)).toBeTruthy();
+
+      const prevYearButton = screen.getByLabelText('前の年');
+      expect(prevYearButton.props.accessibilityState?.disabled).toBe(true);
+
+      const beforeMinMonthButton = screen.getByLabelText(`${minYear}年${minMonth - 1}月へ移動`);
+      expect(beforeMinMonthButton.props.accessibilityState?.disabled).toBe(true);
+
+      const minMonthButton = screen.getByLabelText(`${minYear}年${minMonth}月へ移動`);
+      expect(minMonthButton.props.accessibilityState?.disabled).toBe(false);
     });
   });
 
