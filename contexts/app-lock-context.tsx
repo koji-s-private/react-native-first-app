@@ -116,12 +116,24 @@ export function AppLockProvider({ children }: PropsWithChildren) {
   isUnlockedRef.current = isUnlocked;
 
   const setEnabled = useCallback(async (nextEnabled: boolean) => {
+    const previousEnabled = enabledRef.current;
+    const previousIsUnlocked = isUnlockedRef.current;
     setEnabledState(nextEnabled);
     if (!nextEnabled) {
       // OFFにした場合、以降ロック画面を表示する必要はない
       setIsUnlocked(true);
     }
-    await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, nextEnabled ? 'true' : 'false');
+    try {
+      await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, nextEnabled ? 'true' : 'false');
+    } catch (error) {
+      // 永続化に失敗したまま画面上はONと表示され続けると、実際には保存されておらず
+      // 次回起動時にOFFへ戻ることにユーザーが気づけない(ロックされていると誤認する)ため、
+      // 呼び出し前の状態へロールバックしたうえで、呼び出し元(app/(tabs)/settings.tsx)が
+      // ユーザーへエラーを案内できるよう例外を伝播させる
+      setEnabledState(previousEnabled);
+      setIsUnlocked(previousIsUnlocked);
+      throw error;
+    }
   }, []);
 
   // authenticateAsyncを多重に呼び出すと(例: 自動起動とユーザーによる再試行ボタン押下が

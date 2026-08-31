@@ -223,7 +223,17 @@ function AppLockSection() {
   const handleToggle = useCallback(
     (value: boolean) => {
       setIsTogglePending(true);
-      setEnabled(value).finally(() => setIsTogglePending(false));
+      setEnabled(value)
+        .catch(() => {
+          // setEnabledが永続化失敗時に例外を投げ直す(enabled自体は変更前の状態へ戻される)
+          // ため、ここで必ず捕捉してユーザーへ失敗を案内する。
+          // 捕捉しないと未処理のPromise rejectionになってしまう
+          Alert.alert(
+            'アプリロックの設定に失敗しました',
+            '設定を保存できませんでした。もう一度お試しください。',
+          );
+        })
+        .finally(() => setIsTogglePending(false));
     },
     [setEnabled],
   );
