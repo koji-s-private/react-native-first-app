@@ -22,6 +22,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import HomeScreen from '@/app/(tabs)/index';
 import { TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID } from '@/components/tab-screen-container';
+import { ThemedText } from '@/components/themed-text';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { decryptText, encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
@@ -263,30 +264,31 @@ function toDateKeyForTest(now: Date, day: number): string {
   return `${year}-${month}-${paddedDay}`;
 }
 
-// レンダリング結果(`screen.toJSON()`)から、画面に出現するテキストを出現順に一次元配列へ展開する。
-// FlatListの描画順(=配列順)を検証するために使う。
-function flattenTexts(node: unknown, acc: string[] = []): string[] {
-  if (node === null || node === undefined) {
-    return acc;
-  }
-  if (Array.isArray(node)) {
-    node.forEach((child) => flattenTexts(child, acc));
-    return acc;
-  }
-  if (typeof node === 'string') {
-    acc.push(node);
-    return acc;
-  }
-  const maybeChildren = (node as { children?: unknown }).children;
-  if (maybeChildren) {
-    flattenTexts(maybeChildren, acc);
-  }
-  return acc;
-}
-
 // `@types/react-test-renderer`が無く`screen.UNSAFE_getAllByType`等の戻り値は事実上`any`になるため、
 // コールバック引数にも同じ`any`を明示注釈し`noImplicitAny`を回避する(実行時の挙動には影響しない)。
 type TestNode = any;
+
+// 検索結果一覧の抜粋(prefix・ハイライト対象のmatch・suffixの3分割)を、実際に描画された
+// ThemedTextツリーから取り出すヘルパー。実装側は抜粋表示用のThemedTextにだけ
+// numberOfLines={2}を固定で付けており(検索結果一覧内で他に使われていない)、これを目印に
+// 対象を絞り込む。マッチが見つからずハイライト要素がレンダリングされないフォールバック時は
+// match: nullを返す。FlatListの描画順のまま配列で返すため、検索結果の並び順の検証にも使える
+type RenderedSearchExcerpt = { prefix: string; match: string | null; suffix: string };
+
+function getRenderedSearchExcerpts(): RenderedSearchExcerpt[] {
+  return screen
+    .UNSAFE_getAllByType(ThemedText)
+    .filter((node: TestNode) => node.props.numberOfLines === 2)
+    .map((node: TestNode) => {
+      const [prefix, highlightElement, suffix] = node.props.children as [
+        string,
+        TestNode | null,
+        string,
+      ];
+      const match = highlightElement ? (highlightElement.props.children as string) : null;
+      return { prefix, match, suffix };
+    });
+}
 
 // 各モーダルの背景オーバーレイPressableを特定するヘルパー。実装側は
 // `testID="modal-overlay-pressable"`を目印として付けている。
@@ -3662,11 +3664,13 @@ describe('HomeScreen', () => {
       await screen.findByText(/新しい日の公園散歩/);
       expect(screen.getByText(/古い日の公園散歩/)).toBeTruthy();
 
-      // 新しい日付のエントリ(dayWithoutEntry)が、古い日付のエントリ(dayWithEntry)より先に表示される
-      const texts = flattenTexts(screen.toJSON());
-      expect(texts.indexOf('新しい日の公園散歩の記録')).toBeLessThan(
-        texts.indexOf('古い日の公園散歩の記録'),
-      );
+      // 新しい日付のエントリ(dayWithoutEntry)が、古い日付のエントリ(dayWithEntry)より先に表示される。
+      // getSearchExcerptの戻り値が3分割オブジェクトになったことで、抜粋全体が単一のテキストノードとして
+      // 現れなくなったため、実際に描画されたThemedText(prefix/match/suffix)の並び順で検証する
+      const excerpts = getRenderedSearchExcerpts();
+      expect(excerpts).toHaveLength(2);
+      expect(excerpts[0].prefix).toBe('新しい日の');
+      expect(excerpts[1].prefix).toBe('古い日の');
     });
 
     it('truncates the excerpt with an ellipsis (…) on both sides when the match is surrounded by more than the context length on each side (boundary)', async () => {
@@ -3686,12 +3690,15 @@ describe('HomeScreen', () => {
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'りんご');
 
-      const resultText = await screen.findByText(/りんご/);
-      const excerpt = resultText.props.children as string;
-      expect(excerpt.startsWith('…')).toBe(true);
-      expect(excerpt.endsWith('…')).toBe(true);
+      await screen.findByText(/りんご/);
+      const [excerpt] = getRenderedSearchExcerpts();
+      expect(excerpt.match).toBe('りんご');
+      expect(excerpt.prefix.startsWith('…')).toBe(true);
+      expect(excerpt.suffix.endsWith('…')).toBe(true);
       // マッチ全体(前後の文脈込み)は元の本文よりも短く切り詰められている
-      expect(excerpt.length).toBeLessThan(longEntryText.length);
+      const totalExcerptLength =
+        excerpt.prefix.length + (excerpt.match?.length ?? 0) + excerpt.suffix.length;
+      expect(totalExcerptLength).toBeLessThan(longEntryText.length);
     });
 
     it('sets maxLength={1000} (BODY_MAX_LENGTH) on the search input, so it cannot exceed the diary body max length itself', async () => {
@@ -3702,6 +3709,214 @@ describe('HomeScreen', () => {
       // composer/edit用のTextInputとは異なりgrapheme単位の切り詰めロジックは持たないため、
       // ネイティブのmaxLength propがBODY_MAX_LENGTH(1000)に設定されていることを直接確認する
       expect(searchInput.props.maxLength).toBe(1000);
+    });
+
+    describe('検索結果のマッチ箇所ハイライト表示(Issue #237)', () => {
+      // ダークモードをシミュレートするためのuseColorSchemeモック(「テーマに応じたエラー色」describe内と
+      // 同様の理由・同様の使い方)。このdescribe専用に局所的に上書き・復元する
+      const mockedUseColorScheme = useColorScheme as jest.Mock;
+
+      afterEach(() => {
+        mockedUseColorScheme.mockReturnValue('light');
+      });
+
+      it('splits the excerpt into prefix/match/suffix so that only the matched portion is separated out for highlighting (正常系)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '今日は公園でランチを食べた', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
+        await screen.findByText(/公園/);
+
+        const [excerpt] = getRenderedSearchExcerpts();
+        expect(excerpt.prefix).toBe('今日は');
+        expect(excerpt.match).toBe('公園');
+        expect(excerpt.suffix).toBe('でランチを食べた');
+      });
+
+      it('renders only the matched portion with the theme searchHighlightBackground color and a bold font weight, in light mode (正常系)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '今日は公園でランチを食べた', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
+        await screen.findByText(/公園/);
+
+        // ハイライト対象(マッチ箇所)の背景色を目印に、実際に描画されたホストのTextノードを特定する
+        const [highlightText] = screen.UNSAFE_getAllByType(Text).filter((node) => {
+          const flattened = StyleSheet.flatten(node.props.style ?? {});
+          return flattened.backgroundColor === Colors.light.searchHighlightBackground;
+        });
+
+        expect(highlightText).toBeTruthy();
+        expect(highlightText.props.children).toBe('公園');
+        expect(StyleSheet.flatten(highlightText.props.style).fontWeight).toBe('bold');
+        // 抜粋の前後(prefix/suffix)にはハイライト背景色が付いていないことも確認する
+        expect(
+          screen.UNSAFE_getAllByType(Text).some((node) => {
+            const flattened = StyleSheet.flatten(node.props.style ?? {});
+            return (
+              flattened.backgroundColor === Colors.light.searchHighlightBackground &&
+              node.props.children !== '公園'
+            );
+          }),
+        ).toBe(false);
+      });
+
+      it('uses Colors.dark.searchHighlightBackground (a different color from light mode) for the highlighted portion in dark mode (異常系/回帰防止: テーマ色の取り違え防止)', async () => {
+        // ライト/ダークで同じ値だと、以下のテストが誤って"たまたま"パスしてしまうことを防ぐための前提確認
+        expect(Colors.dark.searchHighlightBackground).not.toBe(
+          Colors.light.searchHighlightBackground,
+        );
+
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '今日は公園でランチを食べた', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+        mockedUseColorScheme.mockReturnValue('dark');
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
+        await screen.findByText(/公園/);
+
+        const [highlightText] = screen.UNSAFE_getAllByType(Text).filter((node) => {
+          const flattened = StyleSheet.flatten(node.props.style ?? {});
+          return flattened.backgroundColor === Colors.dark.searchHighlightBackground;
+        });
+        expect(highlightText).toBeTruthy();
+        expect(highlightText.props.children).toBe('公園');
+      });
+
+      it('leaves prefix empty when the match is located at the very beginning of the entry text (境界値)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([{ id: '1', text: '公園に行った', createdAt: isoAt(now, dayWithEntry) }]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
+        await screen.findByText(/公園/);
+
+        const [excerpt] = getRenderedSearchExcerpts();
+        expect(excerpt.prefix).toBe('');
+        expect(excerpt.match).toBe('公園');
+        expect(excerpt.suffix).toBe('に行った');
+      });
+
+      it('leaves suffix empty when the match is located at the very end of the entry text (境界値)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([{ id: '1', text: '今日は公園', createdAt: isoAt(now, dayWithEntry) }]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
+        await screen.findByText(/公園/);
+
+        const [excerpt] = getRenderedSearchExcerpts();
+        expect(excerpt.prefix).toBe('今日は');
+        expect(excerpt.match).toBe('公園');
+        expect(excerpt.suffix).toBe('');
+      });
+
+      it('highlights the original script (katakana) found in the entry text, not the hiragana form typed in the query (表記ゆれ吸収との組み合わせ)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '今日はラーメンを食べた', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        // ひらがなの「らーめん」で検索しても、本文中のカタカナ表記「ラーメン」がそのまま
+        // ハイライト対象になる(検索キーワードの表記に置き換わらない)ことを確認する
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'らーめん');
+        await screen.findByText(/ラーメン/);
+
+        const [excerpt] = getRenderedSearchExcerpts();
+        expect(excerpt.prefix).toBe('今日は');
+        expect(excerpt.match).toBe('ラーメン');
+        expect(excerpt.suffix).toBe('を食べた');
+      });
+
+      it('shows the entry title without any highlighted element when getSearchExcerpt falls back to no match (異常系: フォールバック)', async () => {
+        // getSearchExcerptは、呼び出し元の一覧フィルタ(entries.filter)とは正規化の仕方がわずかに異なる
+        // (フィルタ側は改行をそのまま比較するが、抜粋側は連続する改行を半角スペース1つに畳んでから
+        // マッチ位置を探す)。クエリ自体に改行を含めると、フィルタは通過するが抜粋側では
+        // 見つからないという、実装コメントに書かれた「通常は到達しないはず」のフォールバック経路を
+        // 意図的に再現できる。フォールバック時はgetEntryTitle(1行目相当)がハイライト無しで
+        // そのまま表示される
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: 'メモa\n\nb残り', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'a\n\nb');
+
+        await screen.findByText('メモa b残り');
+        const [excerpt] = getRenderedSearchExcerpts();
+        expect(excerpt.match).toBeNull();
+        expect(excerpt.prefix).toBe('メモa b残り');
+        expect(excerpt.suffix).toBe('');
+        // ハイライト背景色を持つノードが1つも描画されていないことも確認する
+        expect(
+          screen.UNSAFE_getAllByType(Text).some((node) => {
+            const flattened = StyleSheet.flatten(node.props.style ?? {});
+            return (
+              flattened.backgroundColor === Colors.light.searchHighlightBackground ||
+              flattened.backgroundColor === Colors.dark.searchHighlightBackground
+            );
+          }),
+        ).toBe(false);
+      });
     });
 
     describe('検索欄のクリアボタン', () => {
@@ -3941,11 +4156,15 @@ describe('HomeScreen', () => {
         // 半角の"123"で検索するが、抜粋には元の本文にある全角の"１２３"がそのまま現れるはず
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '123');
 
-        const resultText = await screen.findByText(/１２３/);
-        const excerpt = resultText.props.children as string;
+        await screen.findByText(/１２３/);
+        const [excerpt] = getRenderedSearchExcerpts();
         // マッチ位置(matchStart=25, matchEnd=28)から前後20文字ずつ、両端は省略記号付きで
-        // 切り詰められた、元の文字列上の正しい範囲がそのまま抜粋されていることを厳密に検証する
-        expect(excerpt).toBe(`…${'あ'.repeat(20)}１２３${'い'.repeat(20)}…`);
+        // 切り詰められた、元の文字列上の正しい範囲がそのままprefix/match/suffixに分かれて
+        // 抜粋されていることを厳密に検証する。ハイライト対象のmatchには正規化前の
+        // 全角"１２３"がそのまま入る(検索クエリの半角"123"ではない)
+        expect(excerpt.prefix).toBe(`…${'あ'.repeat(20)}`);
+        expect(excerpt.match).toBe('１２３');
+        expect(excerpt.suffix).toBe(`${'い'.repeat(20)}…`);
       });
 
       it('excerpts the original text at the correct position even when the body contains surrogate-pair emoji before the match (regression)', async () => {
@@ -3965,10 +4184,12 @@ describe('HomeScreen', () => {
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '123');
 
-        const resultText = await screen.findByText(/123/);
-        const excerpt = resultText.props.children as string;
+        await screen.findByText(/123/);
+        const [excerpt] = getRenderedSearchExcerpts();
         // 絵文字によるズレが無ければ、マッチ箇所の前後はちょうど20文字ずつになるはず
-        expect(excerpt).toBe(`…${'あ'.repeat(20)}123${'い'.repeat(20)}…`);
+        expect(excerpt.prefix).toBe(`…${'あ'.repeat(20)}`);
+        expect(excerpt.match).toBe('123');
+        expect(excerpt.suffix).toBe(`${'い'.repeat(20)}…`);
       });
     });
   });
