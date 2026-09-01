@@ -20,6 +20,9 @@ export const Colors = {
     error: '#d32f2f',
     // 白背景(#fff)に対してコントラスト比が十分高いため、tintColorLightをそのまま使う
     link: tintColorLight,
+    // 検索結果の抜粋内でマッチ箇所をハイライトする背景色(黄系)。
+    // 通常のtext色(#11181C)との組み合わせでコントラスト比は約16:1でWCAG AAAを満たす
+    searchHighlightBackground: '#fff59d',
   },
   dark: {
     text: '#ECEDEE',
@@ -34,6 +37,9 @@ export const Colors = {
     // 背景(#151718)に対するコントラスト比は約9.5:1でWCAG AA(4.5:1)を満たす。
     // 本文テキスト色(#ECEDEE)と区別できるよう、リンクらしい明るめの青系を採用する
     link: '#5AC8FA',
+    // 検索結果の抜粋内でマッチ箇所をハイライトする背景色(暗めの黄系)。
+    // 通常のtext色(#ECEDEE)との組み合わせでコントラスト比は約5.9:1でWCAG AA(4.5:1)を満たす
+    searchHighlightBackground: '#6b5900',
   },
 };
 
