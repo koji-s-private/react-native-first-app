@@ -5,7 +5,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useThemeColor } from '@/hooks/use-theme-color';
 
-// 認証失敗が続いた場合にフォールバック案内を表示するまでの連続失敗回数(#243)。
+// 認証失敗が続いた場合にフォールバック案内を表示するまでの連続失敗回数。
 // 生体認証の一時的な読み取りミス程度ではノイズにならないよう、複数回失敗した場合にのみ表示する
 const CONSECUTIVE_FAILURE_GUIDANCE_THRESHOLD = 3;
 
@@ -14,13 +14,13 @@ type AppLockScreenProps = {
   visible: boolean;
   // この端末で生体認証・パスコードのいずれかが利用可能か。falseの場合は
   // authenticateAsyncを呼んでも常に失敗するため、認証ボタンの代わりにアプリロックをOFFにする
-  // 脱出導線を表示する(#243: ONにした後で端末側の認証手段が全て削除されるケースの対策)
+  // 脱出導線を表示する(ONにした後で端末側の認証手段が全て削除されるケースの対策)
   isSupported: boolean;
   // 生体認証(またはOS標準パスコード)を実行する。呼び出し側(contexts/app-lock-context.tsx)が
   // 成功時にvisible=falseへ戻す。連続失敗回数の判定に使うため、成否をPromiseで返す
   onAuthenticate: () => Promise<boolean>;
   // 認証手段を失った状態から抜け出すための脱出導線。contexts/app-lock-context.tsxの
-  // setEnabled(false)を呼び出し、アプリロックをOFFにすることを想定している(#243)
+  // setEnabled(false)を呼び出し、アプリロックをOFFにすることを想定している
   onDisableAppLock: () => void;
 };
 
