@@ -270,9 +270,7 @@ describe('scripts/generate-licenses.js', () => {
     runScript();
 
     const licenses = getWrittenLicenses(writeFileSyncMock);
-    const dupLibEntries = licenses.filter(
-      (entry: { name: string }) => entry.name === 'dup-lib',
-    );
+    const dupLibEntries = licenses.filter((entry: { name: string }) => entry.name === 'dup-lib');
     expect(dupLibEntries).toHaveLength(1);
     expect(dupLibEntries[0]).toMatchObject({ name: 'dup-lib', version: '1.0.0' });
   });
