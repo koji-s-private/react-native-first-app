@@ -65,7 +65,7 @@ function RootLayoutContent() {
     markOnboardingCompleted().catch(() => {});
   }, []);
 
-  // 端末側の生体認証・パスコード設定が全て削除された場合の脱出導線(#243)。ロック画面自体には
+  // 端末側の生体認証・パスコード設定が全て削除された場合の脱出導線。ロック画面自体には
   // 設定画面への遷移手段が無いため、AppLockScreenから直接setEnabled(false)を呼び出せるようにする
   const handleDisableAppLock = useCallback(() => {
     setAppLockEnabled(false).catch(() => {
