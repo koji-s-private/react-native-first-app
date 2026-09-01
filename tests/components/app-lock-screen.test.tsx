@@ -43,9 +43,9 @@ describe('AppLockScreen', () => {
     expect(onAuthenticate).toHaveBeenCalledTimes(1);
   });
 
-  // Issue #243: 端末側の生体認証・パスコード設定が全て削除されると、
+  // 端末側の生体認証・パスコード設定が全て削除されると、
   // isSupportedがfalseになり、ロック画面からアプリロックをOFFにできる脱出導線が必要になる
-  describe('端末側の認証手段が失われた場合の脱出導線(#243)', () => {
+  describe('端末側の認証手段が失われた場合の脱出導線', () => {
     it('shows the "アプリロックを解除" escape button instead of the retry button when isSupported is false (異常系: 非対応端末)', () => {
       render(
         <AppLockScreen
@@ -78,7 +78,7 @@ describe('AppLockScreen', () => {
     });
   });
 
-  describe('連続認証失敗時のフォールバック案内(#243)', () => {
+  describe('連続認証失敗時のフォールバック案内', () => {
     it('does not show the guidance text before repeated failures accumulate (境界値: 失敗回数がしきい値未満)', async () => {
       const onAuthenticate = jest.fn().mockResolvedValue(false);
       render(
