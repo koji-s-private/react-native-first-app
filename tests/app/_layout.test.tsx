@@ -291,7 +291,7 @@ describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => 
     expect(screen.getByText(LOCK_SCREEN_TITLE)).toBeTruthy();
   });
 
-  // Issue #243: アプリロックON状態のまま端末側の生体認証・パスコード設定が全て削除されると、
+  // アプリロックON状態のまま端末側の生体認証・パスコード設定が全て削除されると、
   // ロック画面から二度と抜け出せなくなる不具合の回帰テスト
   it('lets the user escape the lock screen by disabling app lock once the device authentication is no longer available (正常系: 認証手段消失時の脱出導線)', async () => {
     const DISABLE_BUTTON_TEXT = 'アプリロックを解除';
@@ -328,7 +328,7 @@ describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => 
     expect(AsyncStorage.setItem).toHaveBeenLastCalledWith(APP_LOCK_ENABLED_STORAGE_KEY, 'false');
   });
 
-  // Issue #243: 脱出導線のsetEnabled(false)がAsyncStorageへの永続化に失敗した場合、
+  // 脱出導線のsetEnabled(false)がAsyncStorageへの永続化に失敗した場合、
   // ロック画面が閉じないまま何も案内されない(ユーザーが手詰まりになる)ことを防ぐための回帰テスト
   it('keeps the lock screen visible and alerts the user when disabling app lock fails to persist (異常系: 脱出導線での永続化失敗)', async () => {
     const DISABLE_BUTTON_TEXT = 'アプリロックを解除';
@@ -435,7 +435,7 @@ describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => 
 
       await act(async () => {
         handleAppStateChange('active');
-        // isSupportedの再チェック(#243)による非同期の状態更新を待ってからテストを終える
+        // isSupportedの再チェックによる非同期の状態更新を待ってからテストを終える
         await Promise.resolve();
       });
 
