@@ -208,12 +208,20 @@ function normalizeForSearch(text: string): NormalizedForSearch {
   return { normalized, startMap, endMap };
 }
 
+// 検索結果一覧での抜粋表示用に、マッチ箇所の前後(prefix/suffix)とマッチ箇所自体(match)を
+// 分割して保持する。呼び出し側はmatchのみハイライト表示できる
+type SearchExcerpt = {
+  prefix: string;
+  match: string;
+  suffix: string;
+};
+
 // 検索キーワードにマッチした日記本文から、マッチ箇所を中心とした抜粋を作る。
 // 改行を挟むと一覧上で見づらくなるため空白に置き換え、前後を切り詰めた場合は省略記号を付ける。
 // (タイトル表示用のgetEntryTitle/splitIntoGraphemesとは異なり、抜粋位置の計算は
 // 単純な文字列操作で行っている。サロゲートペア境界で万一ズレても表示が多少前後するだけで、
 // 機能上の実害は無いため、既存のタイトル省略ロジックほど厳密なgrapheme単位分割はしていない)
-function getSearchExcerpt(text: string, query: string): string {
+function getSearchExcerpt(text: string, query: string): SearchExcerpt {
   const normalizedText = text.replace(/\n+/g, ' ');
   const {
     normalized: lowerText,
@@ -224,9 +232,9 @@ function getSearchExcerpt(text: string, query: string): string {
   const matchIndex = lowerText.indexOf(lowerQuery);
 
   // 通常は呼び出し元でマッチ済みのエントリのみ渡されるため到達しないはずだが、
-  // 念のためフォールバックとして先頭部分を返す
+  // 念のためフォールバックとして先頭部分を返す(ハイライト対象は無いためmatchは空文字列)
   if (matchIndex === -1 || lowerQuery.length === 0) {
-    return getEntryTitle(normalizedText);
+    return { prefix: getEntryTitle(normalizedText), match: '', suffix: '' };
   }
 
   // 正規化後の文字列上でのマッチ位置(matchIndex)を、startMap/endMap経由で
@@ -236,10 +244,13 @@ function getSearchExcerpt(text: string, query: string): string {
 
   const start = Math.max(0, matchStart - SEARCH_EXCERPT_CONTEXT_LENGTH);
   const end = Math.min(normalizedText.length, matchEnd + SEARCH_EXCERPT_CONTEXT_LENGTH);
-  const excerpt = normalizedText.slice(start, end);
-  const prefix = start > 0 ? '…' : '';
-  const suffix = end < normalizedText.length ? '…' : '';
-  return `${prefix}${excerpt}${suffix}`;
+  const prefixEllipsis = start > 0 ? '…' : '';
+  const suffixEllipsis = end < normalizedText.length ? '…' : '';
+  return {
+    prefix: prefixEllipsis + normalizedText.slice(start, matchStart),
+    match: normalizedText.slice(matchStart, matchEnd),
+    suffix: normalizedText.slice(matchEnd, end) + suffixEllipsis,
+  };
 }
 
 // モーダルの背景オーバーレイ(フェード)・コンテンツ(下端からのスライド)のアニメーション時間(ミリ秒)。
@@ -367,6 +378,7 @@ export default function HomeScreen() {
   const backgroundColor = useThemeColor({}, 'background');
   const iconColor = useThemeColor({}, 'icon');
   const errorColor = useThemeColor({}, 'error');
+  const searchHighlightBackgroundColor = useThemeColor({}, 'searchHighlightBackground');
 
   // この画面内で行う保存処理(「今日」の入力欄からの新規保存・日付指定の新規作成)の
   // 永続化を直列化するためのキュー。編集・削除は専用画面(day-entries/edit-entry)へ
@@ -1034,19 +1046,33 @@ export default function HomeScreen() {
               keyboardDismissMode="on-drag"
               // キーボード表示中でも1回のタップで検索結果を選択できるようにする
               keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => (
-                <Pressable
-                  style={[styles.searchResultItem, { borderBottomColor: iconColor }]}
-                  onPress={() => handleSearchResultPress(item)}
-                >
-                  <ThemedText style={[styles.searchResultDate, { color: iconColor }]}>
-                    {formatDateHeading(toDateKey(new Date(item.createdAt)))}
-                  </ThemedText>
-                  <ThemedText numberOfLines={2}>
-                    {getSearchExcerpt(item.text, trimmedSearchQuery)}
-                  </ThemedText>
-                </Pressable>
-              )}
+              renderItem={({ item }) => {
+                const excerpt = getSearchExcerpt(item.text, trimmedSearchQuery);
+                return (
+                  <Pressable
+                    style={[styles.searchResultItem, { borderBottomColor: iconColor }]}
+                    onPress={() => handleSearchResultPress(item)}
+                  >
+                    <ThemedText style={[styles.searchResultDate, { color: iconColor }]}>
+                      {formatDateHeading(toDateKey(new Date(item.createdAt)))}
+                    </ThemedText>
+                    <ThemedText numberOfLines={2}>
+                      {excerpt.prefix}
+                      {excerpt.match ? (
+                        <ThemedText
+                          style={[
+                            styles.searchResultHighlight,
+                            { backgroundColor: searchHighlightBackgroundColor },
+                          ]}
+                        >
+                          {excerpt.match}
+                        </ThemedText>
+                      ) : null}
+                      {excerpt.suffix}
+                    </ThemedText>
+                  </Pressable>
+                );
+              }}
               ListEmptyComponent={
                 // 検索結果が0件のときは、カレンダーが何も表示されず戸惑わないよう明示的に案内する
                 <ThemedView style={styles.emptyState}>
@@ -1407,6 +1433,9 @@ const styles = StyleSheet.create({
   },
   searchResultDate: {
     fontSize: 12,
+  },
+  searchResultHighlight: {
+    fontWeight: 'bold',
   },
   charCount: {
     fontSize: 12,
