@@ -139,8 +139,8 @@ describe('AppLockProvider / useAppLock', () => {
     expect(result.current.isSupported).toBe(false);
   });
 
-  describe('isSupportedの再チェック(#243)', () => {
-    // Issue #243: アプリロックがONの状態で端末側の生体認証・パスコード設定が全て削除されると、
+  describe('isSupportedの再チェック', () => {
+    // アプリロックがONの状態で端末側の生体認証・パスコード設定が全て削除されると、
     // isSupportedがマウント時の値のまま更新されず、AppLockScreenから二度と抜け出せなくなる不具合の
     // 回帰テスト。バックグラウンド復帰('active'遷移)のたびに再チェックすることを検証する
     it('re-checks isAppLockSupportedAsync every time the app returns to active (正常系: active復帰の度に再チェック)', async () => {
@@ -382,7 +382,7 @@ describe('AppLockProvider / useAppLock', () => {
       // 認証プロンプトを起動する必要はない
       await act(async () => {
         handleAppStateChange('active');
-        // isSupportedの再チェック(#243)による非同期の状態更新を待ってからテストを終える
+        // isSupportedの再チェックによる非同期の状態更新を待ってからテストを終える
         await Promise.resolve();
       });
 
@@ -493,7 +493,7 @@ describe('AppLockProvider / useAppLock', () => {
 
       await act(async () => {
         handleAppStateChange('active');
-        // isSupportedの再チェック(#243)による非同期の状態更新を待ってからテストを終える
+        // isSupportedの再チェックによる非同期の状態更新を待ってからテストを終える
         await Promise.resolve();
       });
 
