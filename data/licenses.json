@@ -570,12 +570,6 @@
     "repository": "https://github.com/babel/babel"
   },
   {
-    "name": "@bcoe/v8-coverage",
-    "version": "0.2.3",
-    "license": "MIT",
-    "repository": "https://github.com/demurgos/v8-coverage"
-  },
-  {
     "name": "@egjs/hammerjs",
     "version": "2.0.17",
     "license": "MIT",
@@ -778,43 +772,13 @@
     "repository": "https://github.com/istanbuljs/schema"
   },
   {
-    "name": "@jest/console",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "@jest/core",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
     "name": "@jest/create-cache-key-function",
     "version": "29.7.0",
     "license": "MIT",
     "repository": "https://github.com/jestjs/jest"
   },
   {
-    "name": "@jest/diff-sequences",
-    "version": "30.4.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
     "name": "@jest/environment",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "@jest/expect",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "@jest/expect-utils",
     "version": "29.7.0",
     "license": "MIT",
     "repository": "https://github.com/jestjs/jest"
@@ -826,50 +790,8 @@
     "repository": "https://github.com/jestjs/jest"
   },
   {
-    "name": "@jest/get-type",
-    "version": "30.1.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "@jest/globals",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "@jest/reporters",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
     "name": "@jest/schemas",
     "version": "29.6.3",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "@jest/schemas",
-    "version": "30.4.1",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "@jest/source-map",
-    "version": "29.6.3",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "@jest/test-result",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "@jest/test-sequencer",
-    "version": "29.7.0",
     "license": "MIT",
     "repository": "https://github.com/jestjs/jest"
   },
@@ -1186,12 +1108,6 @@
     "repository": "https://github.com/sinclairzx81/sinclair-typebox"
   },
   {
-    "name": "@sinclair/typebox",
-    "version": "0.34.52",
-    "license": "MIT",
-    "repository": "https://github.com/sinclairzx81/sinclair-typebox"
-  },
-  {
     "name": "@sinonjs/commons",
     "version": "3.0.1",
     "license": "BSD-3-Clause",
@@ -1202,12 +1118,6 @@
     "version": "10.3.0",
     "license": "BSD-3-Clause",
     "repository": "https://github.com/sinonjs/fake-timers"
-  },
-  {
-    "name": "@testing-library/react-native",
-    "version": "13.3.3",
-    "license": "MIT",
-    "repository": "https://www.github.com/callstack/react-native-testing-library"
   },
   {
     "name": "@types/babel__core",
@@ -1266,12 +1176,6 @@
   {
     "name": "@types/node",
     "version": "26.1.2",
-    "license": "MIT",
-    "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped"
-  },
-  {
-    "name": "@types/react",
-    "version": "19.1.17",
     "license": "MIT",
     "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped"
   },
@@ -1529,6 +1433,12 @@
   },
   {
     "name": "balanced-match",
+    "version": "1.0.2",
+    "license": "MIT",
+    "repository": "https://github.com/juliangruber/balanced-match"
+  },
+  {
+    "name": "balanced-match",
     "version": "4.0.4",
     "license": "MIT",
     "repository": "https://github.com/juliangruber/balanced-match"
@@ -1568,6 +1478,18 @@
     "version": "0.3.1",
     "license": "MIT",
     "repository": "https://github.com/nearinfinity/node-bplist-parser"
+  },
+  {
+    "name": "brace-expansion",
+    "version": "1.1.18",
+    "license": "MIT",
+    "repository": "https://github.com/juliangruber/brace-expansion"
+  },
+  {
+    "name": "brace-expansion",
+    "version": "2.1.4",
+    "license": "MIT",
+    "repository": "https://github.com/juliangruber/brace-expansion"
   },
   {
     "name": "brace-expansion",
@@ -1630,12 +1552,6 @@
     "repository": "https://github.com/ljharb/call-bound"
   },
   {
-    "name": "callsites",
-    "version": "3.1.0",
-    "license": "MIT",
-    "repository": "sindresorhus/callsites"
-  },
-  {
     "name": "camelcase",
     "version": "5.3.1",
     "license": "MIT",
@@ -1664,12 +1580,6 @@
     "version": "4.1.2",
     "license": "MIT",
     "repository": "chalk/chalk"
-  },
-  {
-    "name": "char-regex",
-    "version": "1.0.2",
-    "license": "MIT",
-    "repository": "https://github.com/Richienb/char-regex"
   },
   {
     "name": "chownr",
@@ -1702,12 +1612,6 @@
     "repository": "https://github.com/watson/ci-info"
   },
   {
-    "name": "cjs-module-lexer",
-    "version": "1.4.3",
-    "license": "MIT",
-    "repository": "https://github.com/nodejs/cjs-module-lexer"
-  },
-  {
     "name": "cli-cursor",
     "version": "2.1.0",
     "license": "MIT",
@@ -1735,18 +1639,6 @@
     "version": "1.0.4",
     "license": "MIT",
     "repository": "https://github.com/pvorb/node-clone"
-  },
-  {
-    "name": "co",
-    "version": "4.6.0",
-    "license": "MIT",
-    "repository": "tj/co"
-  },
-  {
-    "name": "collect-v8-coverage",
-    "version": "1.0.3",
-    "license": "MIT",
-    "repository": "SimenB/collect-v8-coverage"
   },
   {
     "name": "color",
@@ -1821,6 +1713,12 @@
     "repository": "expressjs/compression"
   },
   {
+    "name": "concat-map",
+    "version": "0.0.1",
+    "license": "MIT",
+    "repository": "https://github.com/substack/node-concat-map"
+  },
+  {
     "name": "connect",
     "version": "3.7.0",
     "license": "MIT",
@@ -1839,12 +1737,6 @@
     "repository": "https://github.com/zloirock/core-js"
   },
   {
-    "name": "create-jest",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
     "name": "cross-fetch",
     "version": "3.2.0",
     "license": "MIT",
@@ -1861,12 +1753,6 @@
     "version": "3.1.0",
     "license": "MIT",
     "repository": "https://github.com/robinweser/css-in-js-utils"
-  },
-  {
-    "name": "csstype",
-    "version": "3.2.3",
-    "license": "MIT",
-    "repository": "https://github.com/frenic/csstype"
   },
   {
     "name": "debug",
@@ -1891,12 +1777,6 @@
     "version": "0.2.2",
     "license": "MIT",
     "repository": "SamVerschueren/decode-uri-component"
-  },
-  {
-    "name": "dedent",
-    "version": "1.7.2",
-    "license": "MIT",
-    "repository": "https://github.com/dmnd/dedent"
   },
   {
     "name": "deep-extend",
@@ -1953,22 +1833,10 @@
     "repository": "https://github.com/lovell/detect-libc"
   },
   {
-    "name": "detect-newline",
-    "version": "3.1.0",
-    "license": "MIT",
-    "repository": "sindresorhus/detect-newline"
-  },
-  {
     "name": "detect-node-es",
     "version": "1.1.0",
     "license": "MIT",
     "repository": "https://github.com/thekashey/detect-node"
-  },
-  {
-    "name": "diff-sequences",
-    "version": "29.6.3",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
   },
   {
     "name": "dotenv",
@@ -2001,12 +1869,6 @@
     "repository": "https://github.com/Kilian/electron-to-chromium"
   },
   {
-    "name": "emittery",
-    "version": "0.13.1",
-    "license": "MIT",
-    "repository": "sindresorhus/emittery"
-  },
-  {
     "name": "emoji-regex",
     "version": "8.0.0",
     "license": "MIT",
@@ -2029,12 +1891,6 @@
     "version": "0.4.2",
     "license": "MIT",
     "repository": "sindresorhus/env-editor"
-  },
-  {
-    "name": "error-ex",
-    "version": "1.3.4",
-    "license": "MIT",
-    "repository": "qix-/node-error-ex"
   },
   {
     "name": "error-stack-parser",
@@ -2101,24 +1957,6 @@
     "version": "5.0.1",
     "license": "MIT",
     "repository": "https://github.com/mysticatea/event-target-shim"
-  },
-  {
-    "name": "execa",
-    "version": "5.1.1",
-    "license": "MIT",
-    "repository": "sindresorhus/execa"
-  },
-  {
-    "name": "exit",
-    "version": "0.1.2",
-    "license": "MIT",
-    "repository": "https://github.com/cowboy/node-exit"
-  },
-  {
-    "name": "expect",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
   },
   {
     "name": "expo",
@@ -2427,12 +2265,6 @@
     "repository": "https://github.com/ljharb/get-proto"
   },
   {
-    "name": "get-stream",
-    "version": "6.0.1",
-    "license": "MIT",
-    "repository": "sindresorhus/get-stream"
-  },
-  {
     "name": "getenv",
     "version": "2.0.0",
     "license": "MIT",
@@ -2535,12 +2367,6 @@
     "repository": "https://github.com/npm/hosted-git-info"
   },
   {
-    "name": "html-escaper",
-    "version": "2.0.2",
-    "license": "MIT",
-    "repository": "https://github.com/WebReflection/html-escaper"
-  },
-  {
     "name": "http-errors",
     "version": "2.0.1",
     "license": "MIT",
@@ -2551,12 +2377,6 @@
     "version": "7.0.6",
     "license": "MIT",
     "repository": "https://github.com/TooTallNate/proxy-agents"
-  },
-  {
-    "name": "human-signals",
-    "version": "2.1.0",
-    "license": "Apache-2.0",
-    "repository": "ehmicky/human-signals"
   },
   {
     "name": "hyphenate-style-name",
@@ -2583,22 +2403,10 @@
     "repository": "https://github.com/image-size/image-size"
   },
   {
-    "name": "import-local",
-    "version": "3.2.0",
-    "license": "MIT",
-    "repository": "sindresorhus/import-local"
-  },
-  {
     "name": "imurmurhash",
     "version": "0.1.4",
     "license": "MIT",
     "repository": "https://github.com/jensyt/imurmurhash-js"
-  },
-  {
-    "name": "indent-string",
-    "version": "4.0.0",
-    "license": "MIT",
-    "repository": "sindresorhus/indent-string"
   },
   {
     "name": "inflight",
@@ -2638,12 +2446,6 @@
   },
   {
     "name": "is-arrayish",
-    "version": "0.2.1",
-    "license": "MIT",
-    "repository": "https://github.com/qix-/node-is-arrayish"
-  },
-  {
-    "name": "is-arrayish",
     "version": "0.3.4",
     "license": "MIT",
     "repository": "https://github.com/qix-/node-is-arrayish"
@@ -2671,12 +2473,6 @@
     "version": "3.0.0",
     "license": "MIT",
     "repository": "sindresorhus/is-fullwidth-code-point"
-  },
-  {
-    "name": "is-generator-fn",
-    "version": "2.1.0",
-    "license": "MIT",
-    "repository": "sindresorhus/is-generator-fn"
   },
   {
     "name": "is-generator-function",
@@ -2709,12 +2505,6 @@
     "repository": "https://github.com/inspect-js/is-regex"
   },
   {
-    "name": "is-stream",
-    "version": "2.0.1",
-    "license": "MIT",
-    "repository": "sindresorhus/is-stream"
-  },
-  {
     "name": "is-typed-array",
     "version": "1.1.15",
     "license": "MIT",
@@ -2745,84 +2535,6 @@
     "repository": "ssh://git@github.com/istanbuljs/istanbuljs"
   },
   {
-    "name": "istanbul-lib-instrument",
-    "version": "6.0.3",
-    "license": "BSD-3-Clause",
-    "repository": "ssh://git@github.com/istanbuljs/istanbuljs"
-  },
-  {
-    "name": "istanbul-lib-report",
-    "version": "3.0.1",
-    "license": "BSD-3-Clause",
-    "repository": "ssh://git@github.com/istanbuljs/istanbuljs"
-  },
-  {
-    "name": "istanbul-lib-source-maps",
-    "version": "4.0.1",
-    "license": "BSD-3-Clause",
-    "repository": "ssh://git@github.com/istanbuljs/istanbuljs"
-  },
-  {
-    "name": "istanbul-reports",
-    "version": "3.2.0",
-    "license": "BSD-3-Clause",
-    "repository": "ssh://git@github.com/istanbuljs/istanbuljs"
-  },
-  {
-    "name": "jest",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-changed-files",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-circus",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-cli",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-config",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-diff",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-diff",
-    "version": "30.4.1",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-docblock",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-each",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
     "name": "jest-environment-node",
     "version": "29.7.0",
     "license": "MIT",
@@ -2841,24 +2553,6 @@
     "repository": "https://github.com/jestjs/jest"
   },
   {
-    "name": "jest-leak-detector",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-matcher-utils",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-matcher-utils",
-    "version": "30.4.1",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
     "name": "jest-message-util",
     "version": "29.7.0",
     "license": "MIT",
@@ -2871,44 +2565,8 @@
     "repository": "https://github.com/jestjs/jest"
   },
   {
-    "name": "jest-pnp-resolver",
-    "version": "1.2.3",
-    "license": "MIT",
-    "repository": "https://github.com/arcanis/jest-pnp-resolver"
-  },
-  {
     "name": "jest-regex-util",
     "version": "29.6.3",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-resolve",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-resolve-dependencies",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-runner",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-runtime",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-snapshot",
-    "version": "29.7.0",
     "license": "MIT",
     "repository": "https://github.com/jestjs/jest"
   },
@@ -2920,12 +2578,6 @@
   },
   {
     "name": "jest-validate",
-    "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "jest-watcher",
     "version": "29.7.0",
     "license": "MIT",
     "repository": "https://github.com/jestjs/jest"
@@ -2967,12 +2619,6 @@
     "repository": "https://github.com/mathiasbynens/jsesc"
   },
   {
-    "name": "json-parse-even-better-errors",
-    "version": "2.3.1",
-    "license": "MIT",
-    "repository": "https://github.com/npm/json-parse-even-better-errors"
-  },
-  {
     "name": "json5",
     "version": "2.2.3",
     "license": "MIT",
@@ -3003,18 +2649,6 @@
   },
   {
     "name": "lightningcss",
-    "version": "1.33.0",
-    "license": "MPL-2.0",
-    "repository": "https://github.com/parcel-bundler/lightningcss"
-  },
-  {
-    "name": "lightningcss-linux-x64-gnu",
-    "version": "1.33.0",
-    "license": "MPL-2.0",
-    "repository": "https://github.com/parcel-bundler/lightningcss"
-  },
-  {
-    "name": "lightningcss-linux-x64-musl",
     "version": "1.33.0",
     "license": "MPL-2.0",
     "repository": "https://github.com/parcel-bundler/lightningcss"
@@ -3078,12 +2712,6 @@
     "version": "5.1.1",
     "license": "ISC",
     "repository": "https://github.com/isaacs/node-lru-cache"
-  },
-  {
-    "name": "make-dir",
-    "version": "4.0.0",
-    "license": "MIT",
-    "repository": "sindresorhus/make-dir"
   },
   {
     "name": "makeerror",
@@ -3242,18 +2870,6 @@
     "repository": "sindresorhus/mimic-fn"
   },
   {
-    "name": "mimic-fn",
-    "version": "2.1.0",
-    "license": "MIT",
-    "repository": "sindresorhus/mimic-fn"
-  },
-  {
-    "name": "min-indent",
-    "version": "1.0.1",
-    "license": "MIT",
-    "repository": "https://github.com/thejameskyle/min-indent"
-  },
-  {
     "name": "minimatch",
     "version": "10.2.6",
     "license": "BlueOak-1.0.0",
@@ -3296,12 +2912,6 @@
     "repository": "https://github.com/isaacs/node-mkdirp"
   },
   {
-    "name": "moment",
-    "version": "2.30.1",
-    "license": "MIT",
-    "repository": "https://github.com/moment/moment"
-  },
-  {
     "name": "ms",
     "version": "2.0.0",
     "license": "MIT",
@@ -3324,12 +2934,6 @@
     "version": "3.3.18",
     "license": "MIT",
     "repository": "ai/nanoid"
-  },
-  {
-    "name": "natural-compare",
-    "version": "1.4.0",
-    "license": "MIT",
-    "repository": "https://github.com/litejs/natural-compare-lite"
   },
   {
     "name": "negotiator",
@@ -3384,12 +2988,6 @@
     "version": "11.0.3",
     "license": "ISC",
     "repository": "https://github.com/npm/npm-package-arg"
-  },
-  {
-    "name": "npm-run-path",
-    "version": "4.0.1",
-    "license": "MIT",
-    "repository": "sindresorhus/npm-run-path"
   },
   {
     "name": "nullthrows",
@@ -3458,12 +3056,6 @@
     "repository": "sindresorhus/onetime"
   },
   {
-    "name": "onetime",
-    "version": "5.1.2",
-    "license": "MIT",
-    "repository": "sindresorhus/onetime"
-  },
-  {
     "name": "open",
     "version": "7.4.2",
     "license": "MIT",
@@ -3504,12 +3096,6 @@
     "version": "2.2.0",
     "license": "MIT",
     "repository": "sindresorhus/p-try"
-  },
-  {
-    "name": "parse-json",
-    "version": "5.2.0",
-    "license": "MIT",
-    "repository": "sindresorhus/parse-json"
   },
   {
     "name": "parse-png",
@@ -3578,12 +3164,6 @@
     "repository": "https://github.com/danez/pirates"
   },
   {
-    "name": "pkg-dir",
-    "version": "4.2.0",
-    "license": "MIT",
-    "repository": "sindresorhus/pkg-dir"
-  },
-  {
     "name": "plist",
     "version": "3.1.1",
     "license": "MIT",
@@ -3622,12 +3202,6 @@
   {
     "name": "pretty-format",
     "version": "29.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/jestjs/jest"
-  },
-  {
-    "name": "pretty-format",
-    "version": "30.4.1",
     "license": "MIT",
     "repository": "https://github.com/jestjs/jest"
   },
@@ -3672,12 +3246,6 @@
     "version": "2.3.1",
     "license": "MIT",
     "repository": "https://github.com/mathiasbynens/punycode.js"
-  },
-  {
-    "name": "pure-rand",
-    "version": "6.1.0",
-    "license": "MIT",
-    "repository": "https://github.com/dubzzz/pure-rand"
   },
   {
     "name": "qrcode-terminal",
@@ -3842,22 +3410,10 @@
     "repository": "https://github.com/theKashey/react-style-singleton"
   },
   {
-    "name": "react-test-renderer",
-    "version": "19.1.0",
-    "license": "MIT",
-    "repository": "https://github.com/facebook/react"
-  },
-  {
     "name": "recyclerlistview",
     "version": "4.2.3",
     "license": "Apache-2.0",
     "repository": "https://github.com/Flipkart/recyclerlistview"
-  },
-  {
-    "name": "redent",
-    "version": "3.0.0",
-    "license": "MIT",
-    "repository": "sindresorhus/redent"
   },
   {
     "name": "regenerate",
@@ -3924,12 +3480,6 @@
     "version": "1.7.1",
     "license": "MIT",
     "repository": "https://github.com/browserify/resolve"
-  },
-  {
-    "name": "resolve-cwd",
-    "version": "3.0.0",
-    "license": "MIT",
-    "repository": "sindresorhus/resolve-cwd"
   },
   {
     "name": "resolve-from",
@@ -4136,12 +3686,6 @@
   },
   {
     "name": "source-map-support",
-    "version": "0.5.13",
-    "license": "MIT",
-    "repository": "https://github.com/evanw/node-source-map-support"
-  },
-  {
-    "name": "source-map-support",
     "version": "0.5.21",
     "license": "MIT",
     "repository": "https://github.com/evanw/node-source-map-support"
@@ -4201,12 +3745,6 @@
     "repository": "kevva/strict-uri-encode"
   },
   {
-    "name": "string-length",
-    "version": "4.0.2",
-    "license": "MIT",
-    "repository": "sindresorhus/string-length"
-  },
-  {
     "name": "string-width",
     "version": "4.2.3",
     "license": "MIT",
@@ -4225,32 +3763,8 @@
     "repository": "chalk/strip-ansi"
   },
   {
-    "name": "strip-bom",
-    "version": "4.0.0",
-    "license": "MIT",
-    "repository": "sindresorhus/strip-bom"
-  },
-  {
-    "name": "strip-final-newline",
-    "version": "2.0.0",
-    "license": "MIT",
-    "repository": "sindresorhus/strip-final-newline"
-  },
-  {
-    "name": "strip-indent",
-    "version": "3.0.0",
-    "license": "MIT",
-    "repository": "sindresorhus/strip-indent"
-  },
-  {
     "name": "strip-json-comments",
     "version": "2.0.1",
-    "license": "MIT",
-    "repository": "sindresorhus/strip-json-comments"
-  },
-  {
-    "name": "strip-json-comments",
-    "version": "3.1.1",
     "license": "MIT",
     "repository": "sindresorhus/strip-json-comments"
   },
@@ -4411,12 +3925,6 @@
     "repository": "sindresorhus/type-fest"
   },
   {
-    "name": "typescript",
-    "version": "5.9.3",
-    "license": "Apache-2.0",
-    "repository": "https://github.com/microsoft/TypeScript"
-  },
-  {
     "name": "ua-parser-js",
     "version": "1.0.41",
     "license": "MIT",
@@ -4511,12 +4019,6 @@
     "version": "11.1.1",
     "license": "MIT",
     "repository": "https://github.com/uuidjs/uuid"
-  },
-  {
-    "name": "v8-to-istanbul",
-    "version": "9.3.0",
-    "license": "ISC",
-    "repository": "istanbuljs/v8-to-istanbul"
   },
   {
     "name": "validate-npm-package-name",
