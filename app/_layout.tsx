@@ -2,7 +2,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useState } from 'react';
-import { Modal, StyleSheet } from 'react-native';
+import { Alert, Modal, StyleSheet } from 'react-native';
 import 'react-native-reanimated';
 
 import { AppLockScreen } from '@/components/app-lock-screen';
@@ -34,9 +34,11 @@ function RootLayoutContent() {
   // isUnlockedが常にtrueになるため、オプトインしていないユーザーの体験には影響しない
   const {
     enabled: isAppLockEnabled,
+    isSupported: isAppLockSupported,
     isUnlocked,
     isInactiveOverlayVisible,
     isReady: isAppLockReady,
+    setEnabled: setAppLockEnabled,
     authenticate,
   } = useAppLock();
   // アプリ初回起動時のみオンボーディングを表示するためのフラグ。
@@ -63,6 +65,19 @@ function RootLayoutContent() {
     markOnboardingCompleted().catch(() => {});
   }, []);
 
+  // 端末側の生体認証・パスコード設定が全て削除された場合の脱出導線(#243)。ロック画面自体には
+  // 設定画面への遷移手段が無いため、AppLockScreenから直接setEnabled(false)を呼び出せるようにする
+  const handleDisableAppLock = useCallback(() => {
+    setAppLockEnabled(false).catch(() => {
+      // 永続化に失敗しても致命的な不具合(ロック画面から抜け出せない状態)を悪化させないよう、
+      // ここでは失敗を案内するのみに留める(app/(tabs)/settings.tsxのAppLockSectionと同じ方針)
+      Alert.alert(
+        'アプリロックの解除に失敗しました',
+        '設定を保存できませんでした。もう一度お試しください。',
+      );
+    });
+  }, [setAppLockEnabled]);
+
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
@@ -78,7 +93,12 @@ function RootLayoutContent() {
           解決済みの`colorScheme`から明示的に決定する */}
       <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
       <Onboarding visible={showOnboarding} onFinish={handleFinishOnboarding} />
-      <AppLockScreen visible={isAppLockEnabled && !isUnlocked} onAuthenticate={authenticate} />
+      <AppLockScreen
+        visible={isAppLockEnabled && !isUnlocked}
+        isSupported={isAppLockSupported}
+        onAuthenticate={authenticate}
+        onDisableAppLock={handleDisableAppLock}
+      />
       {/* ロック設定(AsyncStorage)の読み込みが完了するまでの間だけ表示する遮蔽用オーバーレイ。
           読み込み完了前はenabled/isUnlockedがまだ暫定値であり、これを未ロック扱いにしたまま
           下のタブ画面(カレンダー)を先に描画してしまうと、ONで再起動したユーザーの日記データが

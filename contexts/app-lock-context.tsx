@@ -66,6 +66,32 @@ export function AppLockProvider({ children }: PropsWithChildren) {
   // isUnlockedとは異なり、'active'に戻れば(enabledに関わらず)常にfalseへ戻す
   const [isInactiveOverlayVisible, setIsInactiveOverlayVisible] = useState(false);
 
+  // isSupportedの再チェック(#243)はマウント時だけでなく、バックグラウンド復帰(AppStateの
+  // 'active'イベント)のたびにも行うため、アンマウント後に状態更新してしまわないよう
+  // プロバイダ全体のマウント状態を専用のrefで追跡する
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  // 端末側で生体認証・パスコードの登録がすべて削除されると、ONのままの設定が二度と解除できない
+  // ロック画面を生み出してしまう(#243)。isAppLockSupportedAsync()の結果は変化しうる値として扱い、
+  // マウント時だけでなくAppState経由でも再取得できるよう関数として切り出す
+  const refreshIsSupported = useCallback(async () => {
+    try {
+      const supported = await isAppLockSupportedAsync();
+      if (isMountedRef.current) {
+        setIsSupported(supported);
+      }
+    } catch {
+      if (isMountedRef.current) {
+        setIsSupported(false);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -90,21 +116,12 @@ export function AppLockProvider({ children }: PropsWithChildren) {
         }
       });
 
-    isAppLockSupportedAsync()
-      .then((supported) => {
-        if (isMounted) {
-          setIsSupported(supported);
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setIsSupported(false);
-        }
-      });
+    refreshIsSupported();
 
     return () => {
       isMounted = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- マウント時に一度だけ実行したいため
   }, []);
 
   // AppStateのリスナー(マウント時に一度だけ登録する)から常に最新のenabled/isUnlockedを
@@ -184,6 +201,10 @@ export function AppLockProvider({ children }: PropsWithChildren) {
       }
       if (nextAppState === 'active') {
         setIsInactiveOverlayVisible(false);
+        // バックグラウンド中に端末側の生体認証・パスコード設定が削除されている可能性があるため、
+        // active復帰のたびにisSupportedを再取得する(#243)。認証手段が失われていた場合、
+        // 更新されたisSupportedを見たAppLockScreen側が脱出導線(アプリロックのOFF)を表示する
+        refreshIsSupported();
         // フォアグラウンド復帰時のみ自動で認証プロンプトを起動する(#226)。'background'遷移の
         // 瞬間(画面が暗転していく過程)に起動すると、OS標準パスコード入力へフォールバックして
         // しまう不具合があったため、必ず'active'に戻った時点で判定する
@@ -197,7 +218,7 @@ export function AppLockProvider({ children }: PropsWithChildren) {
     return () => {
       subscription.remove();
     };
-  }, [authenticate]);
+  }, [authenticate, refreshIsSupported]);
 
   const value = useMemo<AppLockContextValue>(
     () => ({
