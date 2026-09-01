@@ -795,25 +795,36 @@ describe('HomeScreen', () => {
     });
 
     it('restores previously saved plaintext entries (from before encryption was introduced) from AsyncStorage, showing a count badge, and navigates to the day-entries screen for that date when tapped', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      const storedEntries = [
-        { id: '1', text: '2件目の日記', createdAt: isoAt(now, dayWithEntry, 20, 0) },
-        { id: '2', text: '1件目の日記', createdAt: isoAt(now, dayWithEntry, 8, 0) },
-      ];
-      // 暗号化対応前に保存された想定の平文JSONをそのままAsyncStorageに書き込む
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
-      jest.clearAllMocks();
+      // pickTestDaysが選ぶ10〜20日はreact-native-calendars側のmaxDate判定(実行時点の
+      // 「今日」より後の日付はhasEntriesの有無に関わらずonDayPress自体が発火しない)の対象に
+      // なり得るため、月初にテストを実行しても該当日が必ず過去になるよう基準日を固定する
+      jest.useFakeTimers();
+      try {
+        const now = new Date(2026, 7, 25, 12, 0, 0);
+        jest.setSystemTime(now);
+        const { dayWithEntry } = pickTestDays(now);
+        const storedEntries = [
+          { id: '1', text: '2件目の日記', createdAt: isoAt(now, dayWithEntry, 20, 0) },
+          { id: '2', text: '1件目の日記', createdAt: isoAt(now, dayWithEntry, 8, 0) },
+        ];
+        // 暗号化対応前に保存された想定の平文JSONをそのままAsyncStorageに書き込む
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+        jest.clearAllMocks();
 
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      // 2件あるため、セルには件数バッジ「2」が表示され、タップするとその日の一覧画面へ遷移する
-      // (一覧の内容自体・時刻の昇順表示はtests/app/day-entries/[date].test.tsxで検証する)
-      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
+        // 2件あるため、セルには件数バッジ「2」が表示され、タップするとその日の一覧画面へ遷移する
+        // (一覧の内容自体・時刻の昇順表示はtests/app/day-entries/[date].test.tsxで検証する)
+        expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
 
-      expect(mockPush).toHaveBeenCalledWith(`/day-entries/${toDateKeyForTest(now, dayWithEntry)}`);
+        expect(mockPush).toHaveBeenCalledWith(
+          `/day-entries/${toDateKeyForTest(now, dayWithEntry)}`,
+        );
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('migrates a legacy plaintext entry into its own encrypted per-entry key on load, and persists newly saved entries independently', async () => {
@@ -1862,51 +1873,73 @@ describe('HomeScreen', () => {
     });
 
     it('navigates to the day-entries screen (not the new-entry creation modal) for an entry whose text is an empty string after the first line is trimmed, since tap behavior is based on entriesByDate, not on the trimmed title (defensive boundary for directly-corrupted/legacy storage data, since the composer itself never saves an empty/whitespace-only entry)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '   ', createdAt: isoAt(now, dayWithEntry) }]),
-      );
+      // pickTestDaysが選ぶ10〜20日は、実行時点の「今日」がその範囲より前だと未来日になり
+      // react-native-calendars側のmaxDate判定でonDayPress自体が発火しなくなる。
+      // 2026年8月は1日が土曜日で自然に6週間ぴったり(showSixWeeksによる前後月のはみ出しが
+      // 最小)になり、かつ25日を基準日にすることで10〜20日が確実に過去日になる
+      jest.useFakeTimers();
+      try {
+        const now = new Date(2026, 7, 25, 12, 0, 0);
+        jest.setSystemTime(now);
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([{ id: '1', text: '   ', createdAt: isoAt(now, dayWithEntry) }]),
+        );
 
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      // セルへの表示テキスト(タイトル)は空文字列だが、isPressable/statusLabelは
-      // タイトルの有無ではなくentriesByDateの有無(handleDayPressと同じ基準)で決まるため、
-      // このセルは「日記が実際に存在するセル」として1件カウントされる
-      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
+        // セルへの表示テキスト(タイトル)は空文字列だが、isPressable/statusLabelは
+        // タイトルの有無ではなくentriesByDateの有無(handleDayPressと同じ基準)で決まるため、
+        // このセルは「日記が実際に存在するセル」として1件カウントされる
+        expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
 
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
 
-      // handleDayPressはentriesByDateの有無で分岐するため、タイトル表示が空でも
-      // 新規作成モーダルではなく日付一覧画面への遷移が発生する
-      expect(mockPush).toHaveBeenCalledWith(`/day-entries/${toDateKeyForTest(now, dayWithEntry)}`);
+        // handleDayPressはentriesByDateの有無で分岐するため、タイトル表示が空でも
+        // 新規作成モーダルではなく日付一覧画面への遷移が発生する
+        expect(mockPush).toHaveBeenCalledWith(
+          `/day-entries/${toDateKeyForTest(now, dayWithEntry)}`,
+        );
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('opens the new-entry creation modal (does not navigate) when tapping a day cell that has no diary entries at all', async () => {
-      const now = new Date();
-      const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify([{ id: '1', text: '日記あり', createdAt: isoAt(now, dayWithEntry) }]),
-      );
+      // dayWithoutEntryが未来日になると、日記の無いセル自体がCalendarのmaxDateで
+      // 押せなくなってしまう。2026年8月は1日が土曜日で自然に6週間ぴったり(showSixWeeksに
+      // よる前後月のはみ出しが最小)になり、かつ25日を基準日にすることで10〜20日が
+      // 確実に過去日になる
+      jest.useFakeTimers();
+      try {
+        const now = new Date(2026, 7, 25, 12, 0, 0);
+        jest.setSystemTime(now);
+        const { dayWithEntry, dayWithoutEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([{ id: '1', text: '日記あり', createdAt: isoAt(now, dayWithEntry) }]),
+        );
 
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      // 日記が実際に存在するセルは1つだけ(dayWithEntry分)である
-      // (日記の無い日のセルも未来日でなければタップ可能になったため、
-      // 全体のボタン数ではなく「日記が実際に存在するセル」のみで絞り込んで確認する)
-      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
+        // 日記が実際に存在するセルは1つだけ(dayWithEntry分)である
+        // (日記の無い日のセルも未来日でなければタップ可能になったため、
+        // 全体のボタン数ではなく「日記が実際に存在するセル」のみで絞り込んで確認する)
+        expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
 
-      const emptyDayCell = screen.getByText(String(dayWithoutEntry));
-      fireEvent.press(emptyDayCell);
+        const emptyDayCell = screen.getByText(String(dayWithoutEntry));
+        fireEvent.press(emptyDayCell);
 
-      // 日付一覧画面への遷移ではなく新規作成モーダルが開く
-      const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
-      expect(newEntryModal.props.visible).toBe(true);
-      expect(mockPush).not.toHaveBeenCalled();
+        // 日付一覧画面への遷移ではなく新規作成モーダルが開く
+        const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
+        expect(newEntryModal.props.visible).toBe(true);
+        expect(mockPush).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     // スクリーンリーダー(VoiceOver/TalkBack)利用者にも、日付セルの数字だけでなく
@@ -2001,22 +2034,34 @@ describe('HomeScreen', () => {
     });
 
     it('navigates to the day-entries screen for the tapped date when it has diary entries (一覧の内容自体はtests/app/day-entries/[date].test.tsxで検証する)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      const storedEntries = [
-        { id: '1', text: '朝の出来事', createdAt: isoAt(now, dayWithEntry, 7, 0) },
-        { id: '2', text: '昼の出来事', createdAt: isoAt(now, dayWithEntry, 12, 0) },
-        { id: '3', text: '夜の出来事', createdAt: isoAt(now, dayWithEntry, 21, 0) },
-      ];
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      // dayWithEntryが未来日になると、react-native-calendars側のmaxDate判定で
+      // onDayPress自体が発火しなくなる。2026年8月は1日が土曜日で自然に6週間ぴったり
+      // (showSixWeeksによる前後月のはみ出しが最小)になり、かつ25日を基準日にすることで
+      // 10〜20日が確実に過去日になる
+      jest.useFakeTimers();
+      try {
+        const now = new Date(2026, 7, 25, 12, 0, 0);
+        jest.setSystemTime(now);
+        const { dayWithEntry } = pickTestDays(now);
+        const storedEntries = [
+          { id: '1', text: '朝の出来事', createdAt: isoAt(now, dayWithEntry, 7, 0) },
+          { id: '2', text: '昼の出来事', createdAt: isoAt(now, dayWithEntry, 12, 0) },
+          { id: '3', text: '夜の出来事', createdAt: isoAt(now, dayWithEntry, 21, 0) },
+        ];
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      // 3件になったセルには件数バッジが表示されるため、日付の数字でタップする
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
+        // 3件になったセルには件数バッジが表示されるため、日付の数字でタップする
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
 
-      expect(mockPush).toHaveBeenCalledWith(`/day-entries/${toDateKeyForTest(now, dayWithEntry)}`);
+        expect(mockPush).toHaveBeenCalledWith(
+          `/day-entries/${toDateKeyForTest(now, dayWithEntry)}`,
+        );
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('sets statusBarTranslucent and navigationBarTranslucent on the new-entry creation modal and the month picker modal, so they match the edge-to-edge display of the screen behind them', async () => {
@@ -2650,23 +2695,35 @@ describe('HomeScreen', () => {
     });
 
     it('keeps the count badge visible after tapping the day cell to navigate to the day-entries screen (regression: badge does not disappear due to the navigation)', async () => {
-      const now = new Date();
-      const { dayWithEntry } = pickTestDays(now);
-      const storedEntries = [
-        { id: '1', text: '朝の日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
-        { id: '2', text: '夜の日記', createdAt: isoAt(now, dayWithEntry, 21, 0) },
-      ];
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      // dayWithEntryが未来日になると、react-native-calendars側のmaxDate判定で
+      // onDayPress自体が発火しなくなる。2026年8月は1日が土曜日で自然に6週間ぴったり
+      // (showSixWeeksによる前後月のはみ出しが最小)になり、かつ25日を基準日にすることで
+      // 10〜20日が確実に過去日になる
+      jest.useFakeTimers();
+      try {
+        const now = new Date(2026, 7, 25, 12, 0, 0);
+        jest.setSystemTime(now);
+        const { dayWithEntry } = pickTestDays(now);
+        const storedEntries = [
+          { id: '1', text: '朝の日記', createdAt: isoAt(now, dayWithEntry, 7, 0) },
+          { id: '2', text: '夜の日記', createdAt: isoAt(now, dayWithEntry, 21, 0) },
+        ];
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-      expect(findEntryCountBadgeViews()).toHaveLength(1);
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        expect(findEntryCountBadgeViews()).toHaveLength(1);
 
-      fireEvent.press(screen.getByText(String(dayWithEntry)));
-      expect(mockPush).toHaveBeenCalledWith(`/day-entries/${toDateKeyForTest(now, dayWithEntry)}`);
+        fireEvent.press(screen.getByText(String(dayWithEntry)));
+        expect(mockPush).toHaveBeenCalledWith(
+          `/day-entries/${toDateKeyForTest(now, dayWithEntry)}`,
+        );
 
-      expect(findEntryCountBadgeViews()).toHaveLength(1);
-      expect(String(findEntryCountBadgeTexts()[0].props.children)).toBe('2');
+        expect(findEntryCountBadgeViews()).toHaveLength(1);
+        expect(String(findEntryCountBadgeTexts()[0].props.children)).toBe('2');
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('updates the badge from "2" to "3" once a third entry is saved for a day that already had 2 entries (正常系: 動的な件数増加への追従)', async () => {
@@ -2769,14 +2826,26 @@ describe('HomeScreen', () => {
     });
 
     it("sets maxFontSizeMultiplier on a regular (non-today) day cell's day number", async () => {
-      const now = new Date();
-      const day = pickNonTodayDayInRange(now);
+      // 実行時点の「今日」が月初(1〜9日)だと、pickNonTodayDayInRangeが選ぶ10〜20日が
+      // 未来日になり、Calendarのmaxdateで無効化された当月のセルと、6週分の枠を埋めるため
+      // 表示される翌月のはみ出しセル(同じく無効化扱い)の両方に同じ日番号が現れて
+      // 一意に特定できなくなる。2026年8月は1日が土曜日で自然に6週間ぴったり
+      // (showSixWeeksによる前後月のはみ出しが最小)になり、かつ25日を基準日にすることで
+      // pickNonTodayDayInRangeが選ぶ10〜20日と重ならない
+      jest.useFakeTimers();
+      try {
+        const now = new Date(2026, 7, 25, 12, 0, 0);
+        jest.setSystemTime(now);
+        const day = pickNonTodayDayInRange(now);
 
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      const dayNumber = screen.getByText(String(day));
-      expect(dayNumber.props.maxFontSizeMultiplier).toBe(EXPECTED_MAX_FONT_SCALE);
+        const dayNumber = screen.getByText(String(day));
+        expect(dayNumber.props.maxFontSizeMultiplier).toBe(EXPECTED_MAX_FONT_SCALE);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it("sets maxFontSizeMultiplier on today's badge day number", async () => {
@@ -2819,27 +2888,53 @@ describe('HomeScreen', () => {
     });
 
     it('still shows the day number and entry-count badge as before (regression check: adding maxFontSizeMultiplier does not change rendered content)', async () => {
-      const now = new Date();
-      const day = pickNonTodayDayInRange(now);
-      const storedEntries = [
-        { id: '1', text: '回帰確認用の日記1', createdAt: isoAt(now, day, 7, 0) },
-        { id: '2', text: '回帰確認用の日記2', createdAt: isoAt(now, day, 21, 0) },
-      ];
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      // 実行時点の「今日」が月初(1〜9日)だと、pickNonTodayDayInRangeが選ぶ10〜20日が
+      // 未来日になり、Calendarのmaxdateで無効化された当月のセルと、6週分の枠を埋めるため
+      // 表示される翌月のはみ出しセル(同じく無効化扱い)の両方に同じ日番号が現れて
+      // 一意に特定できなくなる。2026年8月は1日が土曜日で自然に6週間ぴったり
+      // (showSixWeeksによる前後月のはみ出しが最小)になり、かつ25日を基準日にすることで
+      // pickNonTodayDayInRangeが選ぶ10〜20日と重ならない
+      jest.useFakeTimers();
+      try {
+        const now = new Date(2026, 7, 25, 12, 0, 0);
+        jest.setSystemTime(now);
+        const day = pickNonTodayDayInRange(now);
+        const storedEntries = [
+          { id: '1', text: '回帰確認用の日記1', createdAt: isoAt(now, day, 7, 0) },
+          { id: '2', text: '回帰確認用の日記2', createdAt: isoAt(now, day, 21, 0) },
+        ];
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
-      render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-      const badgeViews = screen.UNSAFE_getAllByType(View).filter((node) => {
-        const flattened = StyleSheet.flatten(node.props.style ?? {});
-        return flattened.minWidth === 16 && flattened.height === 16;
-      });
-      expect(badgeViews).toHaveLength(1);
-      expect(screen.getByText(String(day))).toBeTruthy();
+        const badgeViews = screen.UNSAFE_getAllByType(View).filter((node) => {
+          const flattened = StyleSheet.flatten(node.props.style ?? {});
+          return flattened.minWidth === 16 && flattened.height === 16;
+        });
+        expect(badgeViews).toHaveLength(1);
+        expect(screen.getByText(String(day))).toBeTruthy();
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 
   describe('日記の無い日をタップした新規作成モーダル', () => {
+    // 「昨日」の計算に実行時のシステム時刻をそのまま使うため、月初にCIが実行されると
+    // 「昨日」が前月末になりカレンダー(当月分のみ描画)からセルが見つからず失敗する。
+    // 月またぎの影響を受けない月の中頃を基準日として固定する。
+    const FIXED_NOW = new Date(2026, 5, 15, 12, 0, 0);
+
+    beforeEach(() => {
+      jest.useFakeTimers();
+      jest.setSystemTime(FIXED_NOW);
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
     // 対象日('YYYY年M月D日、日記なし、タップして新規作成')のアクセシビリティラベルからセルを特定する
     function pastOrTodayCellLabel(date: Date): string {
       return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日、日記なし、タップして新規作成`;
