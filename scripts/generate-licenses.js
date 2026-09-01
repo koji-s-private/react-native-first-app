@@ -3,10 +3,9 @@
 /**
  * OSSライセンス一覧生成スクリプト
  *
- * package-lock.json(lockfileVersion 3)の "packages" フィールドを対象に、実際に
- * インストールされる全パッケージ(直接依存だけでなく、依存の依存であるtransitive依存も含む)
- * のうち、devDependencies経由でのみ必要なもの(`dev: true`。本番ビルドには同梱されない)を
- * 除いたものを収集し、それぞれの <パッケージパス>/package.json からライブラリ名・バージョン・
+ * package-lock.json(lockfileVersion 3)の "packages" フィールドを対象に、本番ビルドに
+ * 実際に同梱されるパッケージ(直接依存だけでなく、依存の依存であるtransitive依存も含む)を
+ * 特定し、それぞれの <パッケージパス>/package.json からライブラリ名・バージョン・
  * ライセンス種別・リポジトリURLを抽出して、静的なJSONファイル(data/licenses.json)として書き出す。
  *
  * 当初(Issue #101 / PR #115)はpackage.jsonの直接依存のみを対象にしていたが、実際にバンドルへ
@@ -14,6 +13,15 @@
  * license-checker-rseidelsohn等の外部ツールでの自動収集も試みたが、このリポジトリのnode_modules
  * 構成では正しく動作しなかったため、npm自体が生成するpackage-lock.jsonの情報だけを読み取る
  * シンプルな実装で代替している。依存関係の追加やツールのバージョン変動に左右されにくい利点もある。
+ *
+ * 本番パッケージの特定方法(Issue #235で変更): 以前は各エントリの `dev: true` フラグ
+ * (devDependencies経由でのみ到達可能な場合にnpmが付与する)で除外していたが、npmは
+ * peerDependencies経由でも到達可能なパッケージには`dev`を付与しない仕様のため、
+ * expo-router → @testing-library/react-native のようなpeerDependency経由の連鎖により
+ * jest/typescript/react-test-renderer/@testing-library/react-native等のdevDependencies由来の
+ * パッケージが誤って本番扱いになっていた。そのため、ルート(packages[""])の本番`dependencies`を
+ * 起点に、各パッケージの`dependencies`(devDependencies/peerDependencies/optionalDependenciesは
+ * 辿らない)のみを辿るBFSで到達可能性を自前で再計算し、その集合だけを対象にする。
  *
  * 実行方法: npm run generate-licenses
  */
@@ -57,17 +65,69 @@ function inferPackageNameFromKey(key) {
   return segments[segments.length - 1];
 }
 
+/**
+ * Node.jsのモジュール解決(ホイスティング考慮)に従い、`fromKey`のパッケージが依存する`name`が
+ * 実際にどの"packages"キーに配置されているかを探す。`fromKey`自身の配下のnode_modulesから
+ * 順に、見つかるまで親ディレクトリへ遡っていく。見つからない場合(未インストールの
+ * optionalDependencies等)はnullを返す。
+ */
+function resolveDependencyKey(packages, fromKey, name) {
+  let currentKey = fromKey;
+
+  for (;;) {
+    const candidate =
+      currentKey === '' ? `node_modules/${name}` : `${currentKey}/node_modules/${name}`;
+    if (Object.prototype.hasOwnProperty.call(packages, candidate)) return candidate;
+    if (currentKey === '') return null;
+
+    const nestedBoundary = currentKey.lastIndexOf('/node_modules/');
+    currentKey = nestedBoundary === -1 ? '' : currentKey.slice(0, nestedBoundary);
+  }
+}
+
+/**
+ * ルートの本番dependenciesを起点に、各パッケージの`dependencies`フィールド(本番の依存のみ。
+ * devDependencies/peerDependencies/optionalDependenciesは辿らない)だけをBFSで辿り、
+ * 本番ビルドに実際に同梱されるパッケージの"packages"キー集合を求める。
+ */
+function collectProductionPackageKeys(packages) {
+  const rootEntry = packages[''] || {};
+  const reachable = new Set();
+  const queue = [];
+
+  for (const name of Object.keys(rootEntry.dependencies || {})) {
+    const key = resolveDependencyKey(packages, '', name);
+    if (key && !reachable.has(key)) {
+      reachable.add(key);
+      queue.push(key);
+    }
+  }
+
+  while (queue.length > 0) {
+    const currentKey = queue.shift();
+    const currentEntry = packages[currentKey] || {};
+
+    for (const name of Object.keys(currentEntry.dependencies || {})) {
+      const key = resolveDependencyKey(packages, currentKey, name);
+      if (key && !reachable.has(key)) {
+        reachable.add(key);
+        queue.push(key);
+      }
+    }
+  }
+
+  return reachable;
+}
+
 function main() {
   const packageLock = JSON.parse(fs.readFileSync(packageLockPath, 'utf-8'));
-  const packageEntries = Object.entries(packageLock.packages || {});
-
-  // ルート自身("")と、devDependencies経由でのみ必要なパッケージ(本番ビルドに含まれない)を除外する
-  const productionEntries = packageEntries.filter(([key, entry]) => key !== '' && !entry.dev);
+  const packages = packageLock.packages || {};
+  const productionKeys = collectProductionPackageKeys(packages);
 
   // ネストしたnode_modulesによる重複(同一name+versionの組み合わせ)を除いた上で収集する
   const licenseByKey = new Map();
 
-  for (const [key] of productionEntries) {
+  for (const key of productionKeys) {
     const packageJsonPath = path.join(rootDir, key, 'package.json');
     if (!fs.existsSync(packageJsonPath)) continue;
 
