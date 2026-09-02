@@ -145,12 +145,22 @@ export default function DayEntriesScreen() {
                     コピー
                   </ThemedText>
                 </Pressable>
-                <Pressable onPress={() => handleStartEdit(item)} hitSlop={8}>
+                <Pressable
+                  onPress={() => handleStartEdit(item)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="この日記を編集"
+                >
                   <ThemedText style={[styles.entryActionText, { color: tintColor }]}>
                     編集
                   </ThemedText>
                 </Pressable>
-                <Pressable onPress={() => handleDeletePress(item)} hitSlop={8}>
+                <Pressable
+                  onPress={() => handleDeletePress(item)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="この日記を削除"
+                >
                   <ThemedText style={[styles.entryActionText, { color: errorColor }]}>
                     削除
                   </ThemedText>
