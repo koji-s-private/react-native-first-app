@@ -302,6 +302,19 @@ function getModalOverlayPressable(modal: TestNode): TestNode {
   return overlay;
 }
 
+// 各モーダルの「閉じる」ボタン(Pressable)を特定するヘルパー。実装側は
+// accessibilityRole="button"・accessibilityLabel="閉じる"を目印として付けている。
+function getModalCloseButton(modal: TestNode): TestNode {
+  const closeButton = modal.findAll(
+    (node: TestNode) =>
+      node.props.accessibilityRole === 'button' && node.props.accessibilityLabel === '閉じる',
+  )[0];
+  if (!closeButton) {
+    throw new Error('modal close button not found');
+  }
+  return closeButton;
+}
+
 describe('HomeScreen', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
@@ -2334,6 +2347,18 @@ describe('HomeScreen', () => {
       await waitFor(() => expect(screen.queryByText('年月を選択')).toBeNull());
     });
 
+    it('sets accessibilityRole="button" and accessibilityLabel="閉じる" on the month picker modal\'s close button (アクセシビリティ)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+
+      const closeButton = getModalCloseButton(getMonthPickerModal());
+      expect(closeButton.props.accessibilityRole).toBe('button');
+      expect(closeButton.props.accessibilityLabel).toBe(CLOSE_BUTTON_TEXT);
+    });
+
     it('resets the picker to the currently displayed year each time it is reopened, discarding any unselected year-stepper changes from a previous open (境界値)', async () => {
       const now = new Date();
       const storedEntries = [
@@ -3122,6 +3147,23 @@ describe('HomeScreen', () => {
 
         await waitFor(() => expect(screen.queryByText(heading)).toBeNull());
         expect(Alert.alert).not.toHaveBeenCalled();
+      });
+
+      it('sets accessibilityRole="button" and accessibilityLabel="閉じる" on the new-entry modal\'s close button (アクセシビリティ)', async () => {
+        const now = new Date();
+        const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        openNewEntryModalFor(yesterday);
+        const heading = `${yesterday.getFullYear()}年${yesterday.getMonth() + 1}月${yesterday.getDate()}日の日記を書く`;
+        await screen.findByText(heading);
+
+        const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
+        const closeButton = getModalCloseButton(newEntryModal);
+        expect(closeButton.props.accessibilityRole).toBe('button');
+        expect(closeButton.props.accessibilityLabel).toBe(CLOSE_BUTTON_TEXT);
       });
 
       it('shows the discard confirmation dialog when the background overlay is tapped after typing, and keeps the modal open until "破棄" is chosen (正常系)', async () => {
