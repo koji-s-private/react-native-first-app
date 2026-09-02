@@ -128,6 +128,8 @@ const secureStoreMock = SecureStore as unknown as { __reset: () => void };
 
 const DATE_KEY = '2026-08-15';
 const CLIPBOARD_COPY_LABEL = '日記本文をコピー';
+const EDIT_BUTTON_LABEL = 'この日記を編集';
+const DELETE_BUTTON_LABEL = 'この日記を削除';
 const EMPTY_STATE_MESSAGE = 'この日の日記はまだありません';
 
 // テストの事前状態として、指定したエントリ群をエントリ単位の個別キーへ暗号化して直接書き込むヘルパー
@@ -308,6 +310,18 @@ describe('DayEntriesScreen', () => {
 
       expect(mockPush).toHaveBeenCalledWith('/edit-entry/entry-1');
     });
+
+    it('sets accessibilityRole="button" and accessibilityLabel="この日記を編集" on the edit button (アクセシビリティ)', async () => {
+      await seedDiaryEntries([
+        { id: '1', text: 'アクセシビリティ確認用の日記', createdAt: localIso(DATE_KEY, 9, 0) },
+      ]);
+
+      render(<DayEntriesScreen />);
+      await screen.findByText('アクセシビリティ確認用の日記');
+
+      const editButton = screen.getByRole('button', { name: EDIT_BUTTON_LABEL });
+      expect(editButton.props.accessibilityLabel).toBe(EDIT_BUTTON_LABEL);
+    });
   });
 
   describe('削除', () => {
@@ -422,6 +436,18 @@ describe('DayEntriesScreen', () => {
         ),
       );
       expect(screen.getByText('削除失敗する日記')).toBeTruthy();
+    });
+
+    it('sets accessibilityRole="button" and accessibilityLabel="この日記を削除" on the delete button (アクセシビリティ)', async () => {
+      await seedDiaryEntries([
+        { id: '1', text: 'アクセシビリティ確認用の日記', createdAt: localIso(DATE_KEY, 9, 0) },
+      ]);
+
+      render(<DayEntriesScreen />);
+      await screen.findByText('アクセシビリティ確認用の日記');
+
+      const deleteButton = screen.getByRole('button', { name: DELETE_BUTTON_LABEL });
+      expect(deleteButton.props.accessibilityLabel).toBe(DELETE_BUTTON_LABEL);
     });
   });
 

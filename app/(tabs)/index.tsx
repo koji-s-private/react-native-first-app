@@ -1184,7 +1184,11 @@ export default function HomeScreen() {
                     <ThemedText type="subtitle">
                       {newEntryDate ? formatDateHeading(newEntryDate) : ''}の日記を書く
                     </ThemedText>
-                    <Pressable onPress={handleCancelNewEntry}>
+                    <Pressable
+                      onPress={handleCancelNewEntry}
+                      accessibilityRole="button"
+                      accessibilityLabel="閉じる"
+                    >
                       <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
                         閉じる
                       </ThemedText>
@@ -1274,7 +1278,11 @@ export default function HomeScreen() {
               >
                 <View style={styles.modalHeader}>
                   <ThemedText type="subtitle">年月を選択</ThemedText>
-                  <Pressable onPress={handleCloseMonthPicker}>
+                  <Pressable
+                    onPress={handleCloseMonthPicker}
+                    accessibilityRole="button"
+                    accessibilityLabel="閉じる"
+                  >
                     <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
                       閉じる
                     </ThemedText>
