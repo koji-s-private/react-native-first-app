@@ -7,6 +7,7 @@ import { Alert, StyleSheet } from 'react-native';
 import EditEntryScreen from '@/app/edit-entry/[id]';
 import { decryptText, encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
 import { buildDiaryEntryKey, type DiaryEntry } from '@/utils/diary-storage';
+import { BODY_MAX_LENGTH } from '@/utils/diary-text';
 
 // ネイティブの`AsyncStorage`はJest環境では利用できないため、公式のインメモリモックに差し替える
 // (tests/app/index.test.tsxと同じ方式)。
@@ -304,6 +305,42 @@ describe('EditEntryScreen', () => {
       resolveSetItem();
     });
     await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+  });
+
+  describe('インポート等で紛れ込んだ本文上限超過データを開いた場合の自動切り詰め(Issue #250)', () => {
+    it('truncates a persisted entry whose text exceeds BODY_MAX_LENGTH to exactly the limit before displaying it (異常系/境界値)', async () => {
+      const overLimitText = 'あ'.repeat(BODY_MAX_LENGTH + 10);
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: overLimitText,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      render(<EditEntryScreen />);
+      const truncatedText = 'あ'.repeat(BODY_MAX_LENGTH);
+
+      const input = await screen.findByDisplayValue(truncatedText);
+      expect(input.props.value).toBe(truncatedText);
+      expect(screen.getByText(`${BODY_MAX_LENGTH}/${BODY_MAX_LENGTH}`)).toBeTruthy();
+    });
+
+    it('allows saving without error immediately (no edits) once the overlong text has been truncated on load', async () => {
+      const overLimitText = 'あ'.repeat(BODY_MAX_LENGTH + 10);
+      const createdAt = '2026-01-01T00:00:00.000Z';
+      await seedDiaryEntry({ id: ENTRY_ID, text: overLimitText, createdAt });
+
+      render(<EditEntryScreen />);
+      const truncatedText = 'あ'.repeat(BODY_MAX_LENGTH);
+      await screen.findByDisplayValue(truncatedText);
+
+      fireEvent.press(screen.getByRole('button', { name: '保存' }));
+
+      await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+      expect(screen.queryByText('更新に失敗しました。もう一度お試しください。')).toBeNull();
+
+      const persisted = await readPersistedEntry(ENTRY_ID);
+      expect(persisted).toEqual({ id: ENTRY_ID, text: truncatedText, createdAt });
+    });
   });
 
   describe('画面を離れる際の未保存変更の破棄確認(beforeRemove)', () => {
