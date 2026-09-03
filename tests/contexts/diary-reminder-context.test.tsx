@@ -426,6 +426,134 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
       expect(result.current.hour).toBe(6);
       expect(result.current.minute).toBe(0);
     });
+
+    it('serializes rapid consecutive setTime calls so scheduleDailyReminderAsync ultimately runs in call order and settles on the last call even when earlier calls are mocked to resolve later (正常系: 連続呼び出しの直列化でレースコンディションを防ぐ)', async () => {
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+      const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await result.current.setEnabled(true);
+      });
+      jest.clearAllMocks();
+
+      jest.useFakeTimers();
+      try {
+        // 呼び出し順(10:00→11:00→12:00)とは逆に、最初の呼び出しほど解決が遅くなるよう
+        // モックする。直列化されていなければ最後に解決した呼び出しが最終状態を決めてしまい
+        // 表示時刻(12:00)とズレるが、Promiseチェーンで直列化されていれば呼び出し順どおりに
+        // 実行されるため、解決の遅さに関わらず呼び出し順=実行順が保たれる
+        const delaysMs = [300, 200, 100];
+        let callIndex = 0;
+        mockedNotificationsUtil.scheduleDailyReminderAsync.mockImplementation(
+          () =>
+            new Promise<void>((resolve) => {
+              const delay = delaysMs[callIndex++];
+              setTimeout(resolve, delay);
+            }),
+        );
+
+        act(() => {
+          result.current.setTime(10, 0);
+          result.current.setTime(11, 0);
+          result.current.setTime(12, 0);
+        });
+
+        // 画面表示上はすぐに最後の呼び出しの時刻へ更新される
+        expect(result.current.hour).toBe(12);
+        expect(result.current.minute).toBe(0);
+        // キューの先頭(Promise.resolve())へのthen()登録はマイクロタスクとして次のtickで
+        // 実行されるため、1回分だけマイクロタスクを進めてから呼び出し回数を確認する
+        await act(async () => {
+          await Promise.resolve();
+        });
+        // 直列化により、最初のタスクが完了するまで2番目以降はまだ実行されない
+        expect(mockedNotificationsUtil.scheduleDailyReminderAsync).toHaveBeenCalledTimes(1);
+        expect(mockedNotificationsUtil.scheduleDailyReminderAsync).toHaveBeenNthCalledWith(
+          1,
+          10,
+          0,
+        );
+
+        await act(async () => {
+          jest.advanceTimersByTime(300);
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        expect(mockedNotificationsUtil.scheduleDailyReminderAsync).toHaveBeenCalledTimes(2);
+        expect(mockedNotificationsUtil.scheduleDailyReminderAsync).toHaveBeenNthCalledWith(
+          2,
+          11,
+          0,
+        );
+
+        await act(async () => {
+          jest.advanceTimersByTime(200);
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        expect(mockedNotificationsUtil.scheduleDailyReminderAsync).toHaveBeenCalledTimes(3);
+        expect(mockedNotificationsUtil.scheduleDailyReminderAsync).toHaveBeenNthCalledWith(
+          3,
+          12,
+          0,
+        );
+
+        await act(async () => {
+          jest.advanceTimersByTime(100);
+          await Promise.resolve();
+        });
+
+        // 最終的に呼び出し順どおり(10→11→12)に実行され、最後の呼び出し引数で確定する
+        expect(mockedNotificationsUtil.scheduleDailyReminderAsync.mock.calls).toEqual([
+          [10, 0],
+          [11, 0],
+          [12, 0],
+        ]);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('keeps the schedule queue intact so a later setTime call still schedules even if an earlier call in the queue rejects (異常系: 途中の呼び出しが失敗してもキューは壊れない)', async () => {
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+      const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await result.current.setEnabled(true);
+      });
+      jest.clearAllMocks();
+
+      mockedNotificationsUtil.scheduleDailyReminderAsync.mockRejectedValueOnce(
+        new Error('schedule error'),
+      );
+      mockedNotificationsUtil.scheduleDailyReminderAsync.mockResolvedValueOnce(undefined);
+
+      act(() => {
+        result.current.setTime(9, 0);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      act(() => {
+        result.current.setTime(13, 30);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // 1回目(9:00)は失敗したが、キュー自体は壊れず2回目(13:30)の再スケジュールも実行される
+      expect(mockedNotificationsUtil.scheduleDailyReminderAsync).toHaveBeenNthCalledWith(1, 9, 0);
+      expect(mockedNotificationsUtil.scheduleDailyReminderAsync).toHaveBeenNthCalledWith(2, 13, 30);
+      expect(result.current.hour).toBe(13);
+      expect(result.current.minute).toBe(30);
+    });
   });
 
   describe('AppStateによるフォアグラウンド復帰時の再取得', () => {
