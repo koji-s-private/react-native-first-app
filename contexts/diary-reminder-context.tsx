@@ -200,12 +200,22 @@ export function DiaryReminderProvider({ children }: PropsWithChildren) {
     [permissionStatus, persist, settings],
   );
 
+  // TimeStepperの連続操作でsetTimeが短時間に複数回呼ばれた場合、scheduleDailyReminderAsync同士が
+  // 並行して走ると完了順序が呼び出し順と一致しないことがあり、画面表示上の時刻と実際にOSへ
+  // 登録される時刻がずれてしまう。enqueueDiaryWrite(app/(tabs)/index.tsx)と同様に
+  // Promiseチェーンで直列化し、呼び出し順=実行順を保証する
+  const scheduleQueueRef = useRef<Promise<void>>(Promise.resolve());
+
   const setTime = useCallback(
     (hour: number, minute: number) => {
       const next = { ...settings, hour, minute };
       persist(next);
       if (next.enabled && permissionStatus === 'granted') {
-        scheduleDailyReminderAsync(hour, minute).catch(() => {});
+        // .catch()をチェーンの各タスク側に付けているため、前段のタスクが失敗しても
+        // scheduleQueueRef.current自体はrejectせず、後続の再スケジュールは実行される
+        scheduleQueueRef.current = scheduleQueueRef.current.then(() =>
+          scheduleDailyReminderAsync(hour, minute).catch(() => {}),
+        );
       }
     },
     [permissionStatus, persist, settings],
