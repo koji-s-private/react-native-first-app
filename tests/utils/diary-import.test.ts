@@ -1,4 +1,5 @@
 import type { DiaryEntry } from '@/utils/diary-storage';
+import { BODY_MAX_LENGTH } from '@/utils/diary-text';
 import { parseDiaryEntriesForImport } from '@/utils/diary-import';
 
 describe('parseDiaryEntriesForImport', () => {
@@ -59,5 +60,72 @@ describe('parseDiaryEntriesForImport', () => {
     const result = parseDiaryEntriesForImport(JSON.stringify(entries));
 
     expect(result.validEntries).toEqual(entries);
+  });
+
+  it('accepts an entry whose text length is within BODY_MAX_LENGTH (正常系)', () => {
+    const entries: DiaryEntry[] = [
+      { id: '1', text: '本文'.repeat(10), createdAt: '2026-05-01T00:00:00.000Z' },
+    ];
+
+    const result = parseDiaryEntriesForImport(JSON.stringify(entries));
+
+    expect(result).toEqual({ validEntries: entries, invalidCount: 0 });
+  });
+
+  it('accepts an entry whose text length is exactly BODY_MAX_LENGTH (境界値: ちょうど上限)', () => {
+    const entries: DiaryEntry[] = [
+      { id: '1', text: 'あ'.repeat(BODY_MAX_LENGTH), createdAt: '2026-05-01T00:00:00.000Z' },
+    ];
+
+    const result = parseDiaryEntriesForImport(JSON.stringify(entries));
+
+    expect(result).toEqual({ validEntries: entries, invalidCount: 0 });
+  });
+
+  it('rejects an entry whose text length exceeds BODY_MAX_LENGTH by one grapheme (境界値: 上限+1)', () => {
+    const overLimitEntry: DiaryEntry = {
+      id: '1',
+      text: 'あ'.repeat(BODY_MAX_LENGTH + 1),
+      createdAt: '2026-05-01T00:00:00.000Z',
+    };
+
+    const result = parseDiaryEntriesForImport(JSON.stringify([overLimitEntry]));
+
+    expect(result).toEqual({ validEntries: [], invalidCount: 1 });
+  });
+
+  it('counts both text-length violations and schema violations together in invalidCount, keeping only the truly valid entries (異常系: 文字数超過と型不正の混在)', () => {
+    const valid: DiaryEntry = {
+      id: '1',
+      text: '有効なエントリ',
+      createdAt: '2026-05-01T00:00:00.000Z',
+    };
+    const overLimit: DiaryEntry = {
+      id: '2',
+      text: 'あ'.repeat(BODY_MAX_LENGTH + 1),
+      createdAt: '2026-05-02T00:00:00.000Z',
+    };
+    const schemaInvalid = { id: '3', text: '欠損データ' }; // createdAtが欠けている
+    const mixed = [valid, overLimit, schemaInvalid];
+
+    const result = parseDiaryEntriesForImport(JSON.stringify(mixed));
+
+    expect(result).toEqual({ validEntries: [valid], invalidCount: 2 });
+  });
+
+  it('counts BODY_MAX_LENGTH based on grapheme units, accepting a ZWJ-joined family emoji as a single character (境界値: grapheme単位の判定)', () => {
+    const familyEmoji = '👨‍👩‍👧‍👦';
+    // UTF-16コードユニット単位では11文字分だが、grapheme単位ではBODY_MAX_LENGTHちょうどになるよう構成する
+    const entries: DiaryEntry[] = [
+      {
+        id: '1',
+        text: `${'あ'.repeat(BODY_MAX_LENGTH - 1)}${familyEmoji}`,
+        createdAt: '2026-05-01T00:00:00.000Z',
+      },
+    ];
+
+    const result = parseDiaryEntriesForImport(JSON.stringify(entries));
+
+    expect(result).toEqual({ validEntries: entries, invalidCount: 0 });
   });
 });

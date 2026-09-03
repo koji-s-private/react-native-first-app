@@ -5,6 +5,7 @@
 // ロジック(JSON文字列のパース・スキーマ検証)のみを扱う。
 // `utils/diary-export.ts`と同じ設計方針(純粋関数として切り出すことでユニットテストしやすくする)。
 import { isDiaryEntry, type DiaryEntry } from '@/utils/diary-storage';
+import { BODY_MAX_LENGTH, splitIntoGraphemes } from '@/utils/diary-text';
 
 /** インポート対象のJSON文字列をパースした結果。 */
 export type DiaryImportParseResult = {
@@ -23,6 +24,8 @@ export type DiaryImportParseResult = {
  * - 配列要素のうち`DiaryEntry`の形を満たさないものは、`getAllDiaryEntries`が読み込み時に
  *   壊れたエントリをスキップするのと同様の方針で、そのエントリだけを除外し有効な要素のみ返す
  *   (1件の不整合でファイル全体のインポートが失敗しないようにするため)。
+ * - `text`の文字数(grapheme単位)が`BODY_MAX_LENGTH`を超えるエントリも、通常の入力・編集では
+ *   発生し得ない不正なデータとみなし、同様に無効な要素として除外する。
  */
 export function parseDiaryEntriesForImport(content: string): DiaryImportParseResult {
   const parsed: unknown = JSON.parse(content);
@@ -30,7 +33,10 @@ export function parseDiaryEntriesForImport(content: string): DiaryImportParseRes
     throw new Error('インポートするデータの形式が正しくありません(配列ではありません)');
   }
 
-  const validEntries = parsed.filter(isDiaryEntry);
+  const validEntries = parsed.filter(
+    (entry): entry is DiaryEntry =>
+      isDiaryEntry(entry) && splitIntoGraphemes(entry.text).length <= BODY_MAX_LENGTH,
+  );
   return {
     validEntries,
     invalidCount: parsed.length - validEntries.length,

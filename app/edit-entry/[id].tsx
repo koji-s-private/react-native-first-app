@@ -51,8 +51,20 @@ export default function EditEntryScreen() {
       }
       if (found) {
         entryRef.current = found;
-        setEditDraft(found.text);
-        editOriginalTextRef.current = found.text;
+        // インポート等で上限を超えるtextが紛れ込んでいた場合に備え、通常の入力と同様に
+        // 切り詰めてからドラフトへセットする(切り詰めないと保存時のガードに無言で弾かれ続ける)
+        const originalGraphemeCount = splitIntoGraphemes(found.text).length;
+        const truncatedText = truncateToBodyMaxLength(found.text);
+        setEditDraft(truncatedText);
+        editOriginalTextRef.current = truncatedText;
+        // 切り詰めが発生した場合、日記本文の一部が失われたことにユーザーが気づけるよう
+        // 一度きりの通知を出す(無編集のまま保存すると末尾が無言で失われてしまうため)
+        if (originalGraphemeCount > BODY_MAX_LENGTH) {
+          Alert.alert(
+            '本文の一部が切り詰められました',
+            `本文が文字数上限(${BODY_MAX_LENGTH}文字)を超えていたため、末尾の${originalGraphemeCount - BODY_MAX_LENGTH}文字を切り詰めました。`,
+          );
+        }
       }
       setIsLoaded(true);
     })();
