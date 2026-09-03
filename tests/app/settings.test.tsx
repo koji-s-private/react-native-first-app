@@ -1654,6 +1654,81 @@ describe('リマインダーセクション(日記を書く習慣化のための
     expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.disabled).toBe(false);
   });
 
+  it('shows a failure alert and reverts the toggle to OFF when re-scheduling fails after changing the time via the hour stepper (異常系: 時刻変更(時)時の通知登録失敗時のフィードバック)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+    await AsyncStorage.setItem(
+      DIARY_REMINDER_STORAGE_KEY,
+      JSON.stringify({ enabled: true, hour: 21, minute: 0 }),
+    );
+    renderSettingsScreen();
+    await waitFor(() =>
+      expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true),
+    );
+    mockedDiaryReminderNotifications.scheduleDailyReminderAsync.mockRejectedValue(
+      new Error('schedule error'),
+    );
+
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(HOUR_INCREASE_LABEL));
+    });
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'リマインダー時刻の変更に失敗しました',
+        '新しい時刻を通知に反映できませんでした。もう一度お試しください。',
+      ),
+    );
+    // 選択した時刻自体は変更後の値のまま維持される
+    expect(screen.getByText('22')).toBeTruthy();
+    // 通知の再スケジュールに失敗しているため、トグルの見た目もOFFへ戻る
+    expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(false);
+  });
+
+  it('shows a failure alert and reverts the toggle to OFF when re-scheduling fails after changing the time via the minute stepper (異常系: 時刻変更(分)時の通知登録失敗時のフィードバック)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+    await AsyncStorage.setItem(
+      DIARY_REMINDER_STORAGE_KEY,
+      JSON.stringify({ enabled: true, hour: 21, minute: 0 }),
+    );
+    renderSettingsScreen();
+    await waitFor(() =>
+      expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true),
+    );
+    mockedDiaryReminderNotifications.scheduleDailyReminderAsync.mockRejectedValue(
+      new Error('schedule error'),
+    );
+
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(MINUTE_INCREASE_LABEL));
+    });
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'リマインダー時刻の変更に失敗しました',
+        '新しい時刻を通知に反映できませんでした。もう一度お試しください。',
+      ),
+    );
+    // 選択した時刻自体は変更後の値のまま維持される
+    expect(screen.getByText('05')).toBeTruthy();
+    // 通知の再スケジュールに失敗しているため、トグルの見た目もOFFへ戻る
+    expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(false);
+  });
+
+  it('does not show a failure alert when changing the time while OFF, since no re-scheduling is attempted (境界値: OFF状態での時刻変更は失敗しようがない)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    renderSettingsScreen();
+
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(HOUR_INCREASE_LABEL));
+    });
+
+    expect(screen.getByText('22')).toBeTruthy();
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(mockedDiaryReminderNotifications.scheduleDailyReminderAsync).not.toHaveBeenCalled();
+  });
+
   it('restores a previously saved ON/time setting from AsyncStorage on mount (正常系: 起動時の復元)', async () => {
     mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('granted');
     await AsyncStorage.setItem(
