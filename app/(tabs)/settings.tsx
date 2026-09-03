@@ -152,18 +152,27 @@ function DiaryReminderSection() {
     [setEnabled],
   );
 
+  const handleScheduleFailure = useCallback(() => {
+    // setTimeが再スケジュール失敗時に例外を投げ直す(enabled自体はOFFへ戻される)ため、
+    // ここで必ず捕捉してユーザーへ失敗を案内する。捕捉しないと未処理のPromise rejectionになる
+    Alert.alert(
+      'リマインダー時刻の変更に失敗しました',
+      '新しい時刻を通知に反映できませんでした。もう一度お試しください。',
+    );
+  }, []);
+
   const handleHourChange = useCallback(
     (delta: number) => {
-      setTime((hour + delta + 24) % 24, minute);
+      setTime((hour + delta + 24) % 24, minute).catch(handleScheduleFailure);
     },
-    [hour, minute, setTime],
+    [hour, minute, setTime, handleScheduleFailure],
   );
 
   const handleMinuteChange = useCallback(
     (delta: number) => {
-      setTime(hour, (minute + delta + 60) % 60);
+      setTime(hour, (minute + delta + 60) % 60).catch(handleScheduleFailure);
     },
-    [hour, minute, setTime],
+    [hour, minute, setTime, handleScheduleFailure],
   );
 
   return (
