@@ -51,8 +51,11 @@ export default function EditEntryScreen() {
       }
       if (found) {
         entryRef.current = found;
-        setEditDraft(found.text);
-        editOriginalTextRef.current = found.text;
+        // インポート等で上限を超えるtextが紛れ込んでいた場合に備え、通常の入力と同様に
+        // 切り詰めてからドラフトへセットする(切り詰めないと保存時のガードに無言で弾かれ続ける)
+        const truncatedText = truncateToBodyMaxLength(found.text);
+        setEditDraft(truncatedText);
+        editOriginalTextRef.current = truncatedText;
       }
       setIsLoaded(true);
     })();
