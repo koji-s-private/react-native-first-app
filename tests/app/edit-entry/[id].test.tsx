@@ -308,13 +308,14 @@ describe('EditEntryScreen', () => {
   });
 
   describe('インポート等で紛れ込んだ本文上限超過データを開いた場合の自動切り詰め(Issue #250)', () => {
-    it('truncates a persisted entry whose text exceeds BODY_MAX_LENGTH to exactly the limit before displaying it (異常系/境界値)', async () => {
+    it('truncates a persisted entry whose text exceeds BODY_MAX_LENGTH to exactly the limit before displaying it, and notifies the user via Alert with the number of truncated characters (異常系/境界値)', async () => {
       const overLimitText = 'あ'.repeat(BODY_MAX_LENGTH + 10);
       await seedDiaryEntry({
         id: ENTRY_ID,
         text: overLimitText,
         createdAt: '2026-01-01T00:00:00.000Z',
       });
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
       render(<EditEntryScreen />);
       const truncatedText = 'あ'.repeat(BODY_MAX_LENGTH);
@@ -322,12 +323,31 @@ describe('EditEntryScreen', () => {
       const input = await screen.findByDisplayValue(truncatedText);
       expect(input.props.value).toBe(truncatedText);
       expect(screen.getByText(`${BODY_MAX_LENGTH}/${BODY_MAX_LENGTH}`)).toBeTruthy();
+      expect(Alert.alert).toHaveBeenCalledTimes(1);
+      const [title, message] = (Alert.alert as jest.Mock).mock.calls[0];
+      expect(title).toBe('本文の一部が切り詰められました');
+      expect(message).toContain('10文字');
+    });
+
+    it('does not show the truncation Alert when the persisted text is within BODY_MAX_LENGTH (正常系)', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '上限以内の日記',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<EditEntryScreen />);
+      await screen.findByDisplayValue('上限以内の日記');
+
+      expect(Alert.alert).not.toHaveBeenCalled();
     });
 
     it('allows saving without error immediately (no edits) once the overlong text has been truncated on load', async () => {
       const overLimitText = 'あ'.repeat(BODY_MAX_LENGTH + 10);
       const createdAt = '2026-01-01T00:00:00.000Z';
       await seedDiaryEntry({ id: ENTRY_ID, text: overLimitText, createdAt });
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
       render(<EditEntryScreen />);
       const truncatedText = 'あ'.repeat(BODY_MAX_LENGTH);
