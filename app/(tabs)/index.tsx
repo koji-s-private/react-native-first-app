@@ -1174,72 +1174,77 @@ export default function HomeScreen() {
                   transform: [{ translateY: newEntryModalTransition.contentTranslateY }],
                 }}
               >
-                <ThemedView
-                  style={[styles.modalContent, { borderColor: iconColor }]}
-                  // オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
-                  // modalContent内でのタッチ開始をこのViewがレスポンダーとして引き受け、伝播を止める
-                  onStartShouldSetResponder={() => true}
-                >
-                  <View style={styles.modalHeader}>
-                    <ThemedText type="subtitle">
-                      {newEntryDate ? formatDateHeading(newEntryDate) : ''}の日記を書く
-                    </ThemedText>
-                    <Pressable
-                      onPress={handleCancelNewEntry}
-                      accessibilityRole="button"
-                      accessibilityLabel="閉じる"
-                    >
-                      <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
-                        閉じる
+                {/* オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
+                    modalContentをPressableで包んで伝播を止める。以前はThemedView側の
+                    onStartShouldSetResponderで同じことを試みていたが、react-native-webの
+                    Pressableはレスポンダーシステムではなくクリックイベントで判定するため
+                    (Web版のみ)効果が無く、TextInputをタップ/入力するたびに背景タップと
+                    誤認識されモーダルが閉じてしまっていた(#249)。Pressableのクリックハンドラは
+                    内部でstopPropagationを呼ぶため、この包み方であればWeb・Native双方で
+                    確実に伝播を止められる */}
+                <Pressable onPress={() => {}}>
+                  <ThemedView style={[styles.modalContent, { borderColor: iconColor }]}>
+                    <View style={styles.modalHeader}>
+                      <ThemedText type="subtitle">
+                        {newEntryDate ? formatDateHeading(newEntryDate) : ''}の日記を書く
                       </ThemedText>
-                    </Pressable>
-                  </View>
-                  <TextInput
-                    style={[styles.input, { color: textColor, borderColor: tintColor }]}
-                    placeholder="その日の出来事や気持ちを書いてみましょう"
-                    placeholderTextColor={iconColor}
-                    value={newEntryDraft}
-                    onChangeText={handleChangeNewEntryDraft}
-                    multiline
-                    // draft用TextInputと同様、スクリーンリーダー向けに明示的なラベルを付ける
-                    accessibilityLabel="日記本文"
-                    // draft用TextInputと同様の理由でmaxLength propはあえて指定しない
-                  />
-                  <View style={styles.composerFooter}>
-                    <ThemedText
-                      style={[
-                        styles.charCount,
-                        newEntryDraftGraphemeCount >= BODY_MAX_LENGTH
-                          ? { color: errorColor }
-                          : { color: iconColor },
-                      ]}
-                    >
-                      {newEntryDraftGraphemeCount}/{BODY_MAX_LENGTH}
-                    </ThemedText>
-                    <Pressable
-                      style={[
-                        styles.saveButton,
-                        { backgroundColor: tintColor },
-                        // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
-                        { opacity: !newEntryDraft.trim() || isSavingNewEntry ? 0.5 : 1 },
-                      ]}
-                      onPress={handleSaveNewEntry}
-                      disabled={!newEntryDraft.trim() || isSavingNewEntry}
-                      accessibilityRole="button"
-                      accessibilityLabel="保存"
-                      accessibilityState={{ disabled: !newEntryDraft.trim() || isSavingNewEntry }}
-                    >
-                      <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
-                        保存
+                      <Pressable
+                        onPress={handleCancelNewEntry}
+                        accessibilityRole="button"
+                        accessibilityLabel="閉じる"
+                      >
+                        <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
+                          閉じる
+                        </ThemedText>
+                      </Pressable>
+                    </View>
+                    <TextInput
+                      style={[styles.input, { color: textColor, borderColor: tintColor }]}
+                      placeholder="その日の出来事や気持ちを書いてみましょう"
+                      placeholderTextColor={iconColor}
+                      value={newEntryDraft}
+                      onChangeText={handleChangeNewEntryDraft}
+                      multiline
+                      // draft用TextInputと同様、スクリーンリーダー向けに明示的なラベルを付ける
+                      accessibilityLabel="日記本文"
+                      // draft用TextInputと同様の理由でmaxLength propはあえて指定しない
+                    />
+                    <View style={styles.composerFooter}>
+                      <ThemedText
+                        style={[
+                          styles.charCount,
+                          newEntryDraftGraphemeCount >= BODY_MAX_LENGTH
+                            ? { color: errorColor }
+                            : { color: iconColor },
+                        ]}
+                      >
+                        {newEntryDraftGraphemeCount}/{BODY_MAX_LENGTH}
                       </ThemedText>
-                    </Pressable>
-                  </View>
-                  {newEntryError ? (
-                    <ThemedText style={[styles.errorText, { color: errorColor }]}>
-                      {newEntryError}
-                    </ThemedText>
-                  ) : null}
-                </ThemedView>
+                      <Pressable
+                        style={[
+                          styles.saveButton,
+                          { backgroundColor: tintColor },
+                          // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
+                          { opacity: !newEntryDraft.trim() || isSavingNewEntry ? 0.5 : 1 },
+                        ]}
+                        onPress={handleSaveNewEntry}
+                        disabled={!newEntryDraft.trim() || isSavingNewEntry}
+                        accessibilityRole="button"
+                        accessibilityLabel="保存"
+                        accessibilityState={{ disabled: !newEntryDraft.trim() || isSavingNewEntry }}
+                      >
+                        <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
+                          保存
+                        </ThemedText>
+                      </Pressable>
+                    </View>
+                    {newEntryError ? (
+                      <ThemedText style={[styles.errorText, { color: errorColor }]}>
+                        {newEntryError}
+                      </ThemedText>
+                    ) : null}
+                  </ThemedView>
+                </Pressable>
               </Animated.View>
             </Pressable>
           </KeyboardAvoidingView>

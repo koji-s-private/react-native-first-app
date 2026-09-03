@@ -315,6 +315,27 @@ function getModalCloseButton(modal: TestNode): TestNode {
   return closeButton;
 }
 
+// モーダル本文コンテナ(ThemedView)を包む、タップ伝播を止めるためだけのPressable
+// (onPress={() => {}})を特定するヘルパー(Issue #249の修正で追加された)。他のPressable
+// (背景オーバーレイ・閉じるボタン・保存ボタン)は`style`・`testID`・`accessibilityRole`の
+// いずれかを必ず持つのに対し、このPressableだけは`onPress`と`children`しか持たないため、
+// その組み合わせで一意に特定する。
+function getModalContentTouchAbsorber(modal: TestNode): TestNode {
+  const candidates = modal.findAll(
+    (node: TestNode) =>
+      typeof node.props.onPress === 'function' &&
+      node.props.style === undefined &&
+      node.props.testID === undefined &&
+      node.props.accessibilityRole === undefined,
+  );
+  if (candidates.length !== 1) {
+    throw new Error(
+      `expected exactly one modal content touch-absorbing Pressable, found ${candidates.length}`,
+    );
+  }
+  return candidates[0];
+}
+
 describe('HomeScreen', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
@@ -3211,6 +3232,37 @@ describe('HomeScreen', () => {
 
         expect(newEntryModal.props.visible).toBe(true);
         expect(getNewEntryInput().props.value).toBe('キャンセルで残るはずの下書き');
+      });
+
+      it('does not show the discard confirmation dialog or close the modal when a tap lands inside the modal content area (e.g. around the TextInput), unlike tapping the background overlay (回帰: Issue #249 - モーダル内タップで意図せず閉じてしまう不具合の再発防止)', async () => {
+        const now = new Date();
+        const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        openNewEntryModalFor(yesterday);
+        fireEvent.changeText(getNewEntryInput(), '入力中に消えては困る下書き');
+
+        const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
+
+        // 本文コンテナを包むタップ吸収用Pressable(Issue #249の修正で追加)へのタップは、
+        // 背景オーバーレイのPressable(handleCancelNewEntry)まで伝播しないため、
+        // 未保存の下書きがあっても破棄確認ダイアログは出ず、モーダルも閉じない
+        const contentTouchAbsorber = getModalContentTouchAbsorber(newEntryModal);
+        fireEvent.press(contentTouchAbsorber);
+
+        expect(Alert.alert).not.toHaveBeenCalled();
+        expect(newEntryModal.props.visible).toBe(true);
+        expect(getNewEntryInput().props.value).toBe('入力中に消えては困る下書き');
+
+        // 対照実験: 同じ状態で背景オーバーレイを直接タップした場合は破棄確認ダイアログが表示される。
+        // これにより、上の検証が正しくタップ吸収用Pressableを対象にできていたことを確認する
+        const overlay = getModalOverlayPressable(newEntryModal);
+        fireEvent.press(overlay);
+        expect(Alert.alert).toHaveBeenCalledTimes(1);
+        expect(newEntryModal.props.visible).toBe(true);
       });
     });
 
