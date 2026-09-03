@@ -307,7 +307,7 @@ describe('EditEntryScreen', () => {
     await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
   });
 
-  describe('インポート等で紛れ込んだ本文上限超過データを開いた場合の自動切り詰め(Issue #250)', () => {
+  describe('インポート等で紛れ込んだ本文上限超過データを開いた場合の自動切り詰め', () => {
     it('truncates a persisted entry whose text exceeds BODY_MAX_LENGTH to exactly the limit before displaying it, and notifies the user via Alert with the number of truncated characters (異常系/境界値)', async () => {
       const overLimitText = 'あ'.repeat(BODY_MAX_LENGTH + 10);
       await seedDiaryEntry({
