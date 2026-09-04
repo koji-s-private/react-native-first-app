@@ -76,6 +76,33 @@ describe('useSaveDiaryEntry', () => {
     expect(result.current.error).toBeNull();
   });
 
+  it('does nothing when the text is an empty string (not just whitespace) (バリデーション: 空文字列も何もしない)', async () => {
+    const { result } = renderHook(() => useSaveDiaryEntry());
+    const persist = jest.fn();
+
+    await act(async () => {
+      await result.current.save({ text: '', persist, errorMessage: 'エラー' });
+    });
+
+    expect(persist).not.toHaveBeenCalled();
+    expect(result.current.isSaving).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('calls persist when the text length is exactly BODY_MAX_LENGTH graphemes (境界値: 上限ちょうどは保存される)', async () => {
+    const { result } = renderHook(() => useSaveDiaryEntry());
+    const persist = jest.fn().mockResolvedValue(undefined);
+    const exactlyMax = 'あ'.repeat(BODY_MAX_LENGTH);
+
+    await act(async () => {
+      await result.current.save({ text: exactlyMax, persist, errorMessage: 'エラー' });
+    });
+
+    expect(persist).toHaveBeenCalledWith(exactlyMax);
+    expect(result.current.isSaving).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
   it('skips persist and returns immediately when a save is already in progress (連打防止: 保存中は再入力を無視する)', async () => {
     const { result } = renderHook(() => useSaveDiaryEntry());
     let resolveFirstPersist: () => void = () => {};
