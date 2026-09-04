@@ -33,35 +33,25 @@ import { buildCreatedAtForDateKey, formatDateHeading, toDateKey } from '@/utils/
 import { BODY_MAX_LENGTH, splitIntoGraphemes, truncateToBodyMaxLength } from '@/utils/diary-text';
 import { getAllDiaryEntries, saveDiaryEntry, type DiaryEntry } from '@/utils/diary-storage';
 
-// 保存前の下書き(draft)を自動保存するためのAsyncStorageキー。日記本文の保存キー(エントリ単位の
-// 個別キー、utils/diary-storage.ts参照)とは
-// 別キーにすることで、保存済みエントリの一覧データとは独立して読み書きできるようにする。
-// 「保存」ボタンを押すまで下書きが永続化されないと、入力途中でアプリがバックグラウンド化・
-// 強制終了された場合に内容が失われてしまうため、入力が止まってから一定時間後に自動保存し、
-// 次回起動時・画面マウント時に復元する
+// 保存前の下書きを自動保存するAsyncStorageキー(保存済みエントリの個別キーとは別。utils/diary-storage.ts参照)
 const DIARY_DRAFT_STORAGE_KEY = 'diary-draft';
 
-// 下書きの自動保存をデバウンスする間隔(ミリ秒)。1文字入力するたびにAsyncStorageへ書き込むと
-// 頻度が高すぎるため、入力が一定時間止まってからまとめて保存する
+// 下書きの自動保存をデバウンスする間隔(ミリ秒)
 const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
 
 // カレンダーの日付セルに表示するタイトルの最大文字数(超える場合は省略記号を付ける)
 const TITLE_MAX_LENGTH = 20;
 
-// 保存成功時にトーストへ表示するメッセージ
 const SAVE_SUCCESS_MESSAGE = '保存しました';
 
-// 日付セルの高さのデフォルト最小値(外枠の実測高さがまだ取れていない初回レンダー用のフォールバック)
+// 外枠の実測高さがまだ取れていない初回レンダー用のフォールバック値
 const DEFAULT_DAY_CELL_HEIGHT = 48;
-// 日付セル内テキストの拡大率上限。react-native-calendarsのヘッダー・曜日行はallowFontScaling={false}
-// 固定でOS文字サイズ設定の影響を受けないが、差し替えているセル本体(ThemedText)は無制限に
-// 拡大されるとdayCellHeightを超えてoverflow: 'hidden'で見切れるため、上限を設けてリスクを抑える
+// 日付セル内テキストの拡大率上限。OS文字サイズ設定で無制限に拡大されるとdayCellHeightを
+// 超えてoverflow: 'hidden'で見切れてしまうため、上限を設ける
 const DAY_CELL_MAX_FONT_SCALE = 1.5;
-// showSixWeeksを有効にし、月をまたいでも常に6行で表示を揃えるため6固定で計算する
+// showSixWeeksにより月をまたいでも常に6行になるため、固定値で計算する
 const CALENDAR_WEEK_ROWS = 6;
-// react-native-calendarsのヘッダー+曜日行のおおよその高さと、週の行のマージン(デフォルトの
-// weekVerticalMargin=7を上下2回分)。ヘッダー等はallowFontScaling={false}固定でOS文字サイズ設定の
-// 影響を受けないため、この概算値もフォントスケール補正なしの固定値としてそのまま使う
+// react-native-calendarsのヘッダー+曜日行のおおよその高さと、週の行マージン(weekVerticalMargin=7の上下2回分)
 const CALENDAR_CHROME_HEIGHT = 90;
 const CALENDAR_WEEK_ROW_MARGIN = 14;
 
@@ -94,7 +84,7 @@ function getYearFromMonthIndex(monthIndex: number): number {
   return Math.floor((monthIndex - 1) / 12);
 }
 
-// 指定した年月の1日を表す'YYYY-MM-DD'キーを組み立てる(calendarInitialDateの更新箇所で共通利用する)
+// 指定した年月の1日を表す'YYYY-MM-DD'キーを組み立てる
 function getFirstDayOfMonthKey(year: number, month: number): string {
   return `${year}-${`${month}`.padStart(2, '0')}-01`;
 }
@@ -103,8 +93,7 @@ function getFirstDayOfMonthKey(year: number, month: number): string {
 // CalendarPropsから抽出して利用する)
 type DayComponentProps = ComponentProps<NonNullable<CalendarProps['dayComponent']>>;
 
-// 日本語の月名。react-native-calendarsのロケール設定(月名・月省略名)と、
-// 年月ジャンプ用ピッカーの月ボタン表示の両方で共有する
+// 日本語の月名。react-native-calendarsのロケール設定と年月ピッカーの月ボタン表示で共有する
 const JA_MONTH_NAMES = [
   '1月',
   '2月',
@@ -130,10 +119,8 @@ LocaleConfig.locales.ja = {
 };
 LocaleConfig.defaultLocale = 'ja';
 
-// 日記本文からカレンダーセルに表示する短いタイトルを作る
-// (改行があれば最初の行のみを使い、さらに長ければ指定文字数で切り詰める)。
-// 文字数のカウント・切り詰めは書記素クラスタ単位で行い、絵文字などの
-// サロゲートペア・結合文字の途中で文字列が分断されないようにする
+// 日記本文の最初の行から、カレンダーセル表示用の短いタイトルを作る。
+// 文字数のカウント・切り詰めは書記素クラスタ単位で行い、絵文字等が途中で分断されないようにする
 function getEntryTitle(text: string): string {
   const firstLine = text.split('\n')[0]?.trim() ?? '';
   const graphemes = splitIntoGraphemes(firstLine);
@@ -146,9 +133,8 @@ function getEntryTitle(text: string): string {
 // 検索結果の抜粋で、マッチ箇所の前後何文字を表示するか
 const SEARCH_EXCERPT_CONTEXT_LENGTH = 20;
 
-// ひらがな(U+3041〜U+3096)とカタカナ(U+30A1〜U+30F6)のコードポイントの差。
-// ひらがなをカタカナへ寄せることで、ひらがな/カタカナの表記ゆれを吸収する
-// (半角カタカナはNFKC正規化で全角カタカナに統一されるため、カタカナ側に寄せたほうが変換が少なく済む)
+// ひらがな(U+3041〜U+3096)とカタカナ(U+30A1〜U+30F6)のコードポイント差。
+// 半角カタカナはNFKC正規化で全角カタカナに統一されるため、ひらがなをカタカナ側に寄せて表記ゆれを吸収する
 const HIRAGANA_TO_KATAKANA_CODE_POINT_OFFSET = 0x60;
 
 // 文字列中のひらがなをすべてカタカナへ変換する。ひらがな以外の文字はそのまま返す
@@ -165,25 +151,19 @@ function hiraganaToKatakana(text: string): string {
   return result;
 }
 
-// 検索比較用に正規化した文字列と、その各文字が元の文字列上のどの範囲([start, end))に
-// 対応するかを示すマップ
+// 検索比較用に正規化した文字列と、その各文字が元の文字列上のどの範囲([start, end))に対応するかを示すマップ
 type NormalizedForSearch = {
   normalized: string;
   startMap: number[];
   endMap: number[];
 };
 
-// 検索クエリ・日記本文の比較前に行う正規化。
-// 1. Unicodeの正規化形式NFKCにより、全角英数字→半角、半角カタカナ→全角カタカナ等の
-//    全角/半角の表記ゆれを吸収する。
-// 2. ひらがなをカタカナへ変換し、ひらがな/カタカナの表記ゆれを吸収する。
-// 大文字/小文字は呼び出し元でtoLowerCase()するため、ここでは扱わない。
-// 抜粋表示(getSearchExcerpt)で「正規化後の文字列上でのマッチ位置」を「元の文字列上の位置」に
-// 復元できるよう、1文字ずつ正規化しながら元の文字列上の範囲(startMap/endMap)を記録する。
-// NFKCは文字によって1文字→複数文字に展開されることがあるため、その場合は展開後の各文字を
-// 同じ元の文字の範囲に対応付ける。逆に「ｶ」+「ﾞ」→「ガ」のような複数文字が正規化によって
-// 1文字に減るケースは、1文字ずつ独立に正規化する本実装では結合されず素通りする
-// (稀なエッジケースであり表記ゆれ対応の主眼ではないため、この程度の割り切りとする)
+// 検索クエリ・日記本文の比較前の正規化(NFKCで全角/半角の表記ゆれ、ひらがな→カタカナ変換で
+// ひらがな/カタカナの表記ゆれを吸収する。大文字/小文字は呼び出し元でtoLowerCase()済み)。
+// 抜粋表示(getSearchExcerpt)で正規化後の位置を元の文字列上の位置に復元できるよう、
+// 1文字ずつ正規化しながら元の文字列上の範囲(startMap/endMap)を記録する。
+// 「ｶ」+「ﾞ」→「ガ」のように複数文字が正規化で1文字に減るケースは本実装では非対応
+// (稀なエッジケースのため許容する)
 function normalizeForSearch(text: string): NormalizedForSearch {
   let normalized = '';
   const startMap: number[] = [];
@@ -192,10 +172,8 @@ function normalizeForSearch(text: string): NormalizedForSearch {
   for (const char of text) {
     const normalizedChar = hiraganaToKatakana(char.normalize('NFKC'));
     const charEnd = originalIndex + char.length;
-    // normalizedChar内の各文字(絵文字等のサロゲートペア文字を含みうる)について、
-    // normalized文字列に加算されるUTF-16コード単位数(c.length)分だけstartMap/endMapに
-    // pushする。1文字=1pushだと、サロゲートペア文字(c.length===2)で
-    // normalizedとstartMap/endMapの長さがズレ、以降のインデックス参照が崩れる
+    // サロゲートペア文字(c.length===2)を1文字=1pushで扱うと、normalizedと
+    // startMap/endMapの長さがズレるため、UTF-16コード単位数分だけpushする
     for (const c of normalizedChar) {
       normalized += c;
       for (let i = 0; i < c.length; i++) {
@@ -208,19 +186,16 @@ function normalizeForSearch(text: string): NormalizedForSearch {
   return { normalized, startMap, endMap };
 }
 
-// 検索結果一覧での抜粋表示用に、マッチ箇所の前後(prefix/suffix)とマッチ箇所自体(match)を
-// 分割して保持する。呼び出し側はmatchのみハイライト表示できる
+// 検索結果抜粋の構成要素(prefix/match/suffix)。呼び出し側はmatchのみハイライト表示する
 type SearchExcerpt = {
   prefix: string;
   match: string;
   suffix: string;
 };
 
-// 検索キーワードにマッチした日記本文から、マッチ箇所を中心とした抜粋を作る。
-// 改行を挟むと一覧上で見づらくなるため空白に置き換え、前後を切り詰めた場合は省略記号を付ける。
-// (タイトル表示用のgetEntryTitle/splitIntoGraphemesとは異なり、抜粋位置の計算は
-// 単純な文字列操作で行っている。サロゲートペア境界で万一ズレても表示が多少前後するだけで、
-// 機能上の実害は無いため、既存のタイトル省略ロジックほど厳密なgrapheme単位分割はしていない)
+// 検索キーワードにマッチした日記本文から、マッチ箇所を中心とした抜粋を作る
+// (改行は見づらいので空白に置換し、前後を切り詰めた場合は省略記号を付ける)。
+// getEntryTitleと異なりgrapheme単位までは厳密にせず、多少のズレは許容する単純な文字列操作で行う
 function getSearchExcerpt(text: string, query: string): SearchExcerpt {
   const normalizedText = text.replace(/\n+/g, ' ');
   const {
@@ -231,14 +206,12 @@ function getSearchExcerpt(text: string, query: string): SearchExcerpt {
   const lowerQuery = normalizeForSearch(query.toLowerCase()).normalized;
   const matchIndex = lowerText.indexOf(lowerQuery);
 
-  // 通常は呼び出し元でマッチ済みのエントリのみ渡されるため到達しないはずだが、
-  // 念のためフォールバックとして先頭部分を返す(ハイライト対象は無いためmatchは空文字列)
+  // 通常は到達しないが、念のためのフォールバック(ハイライト対象なしのためmatchは空文字列)
   if (matchIndex === -1 || lowerQuery.length === 0) {
     return { prefix: getEntryTitle(normalizedText), match: '', suffix: '' };
   }
 
-  // 正規化後の文字列上でのマッチ位置(matchIndex)を、startMap/endMap経由で
-  // 元の文字列(normalizedText)上のマッチ範囲に変換する
+  // 正規化後の位置(matchIndex)を、startMap/endMap経由で元の文字列上の範囲に変換する
   const matchStart = startMap[matchIndex] ?? 0;
   const matchEnd = endMap[matchIndex + lowerQuery.length - 1] ?? normalizedText.length;
 
@@ -253,23 +226,18 @@ function getSearchExcerpt(text: string, query: string): SearchExcerpt {
   };
 }
 
-// モーダルの背景オーバーレイ(フェード)・コンテンツ(下端からのスライド)のアニメーション時間(ミリ秒)。
-// 2箇所のモーダル(新規作成・年月ピッカー)すべてで同じ見た目・タイミングになるよう
-// 共通の定数として持つ(日付一覧・編集は専用画面への遷移(Issue #221)に置き換えたため対象外)
+// モーダルのフェード・スライドアニメーション時間(ミリ秒)。2箇所のモーダル(新規作成・年月ピッカー)で
+// 共通定数として使う(日付一覧・編集は専用画面への遷移(Issue #221)に置き換えたため対象外)
 const MODAL_ANIMATION_DURATION_MS = 220;
 
-// コンテンツのスライドイン開始位置(画面外下端)。modalContentの高さは中身の量によって変わるため、
-// 画面全体の高さを開始位置に使うことで、コンテンツの実際の高さによらず必ず画面外からスライドさせる
+// コンテンツのスライドイン開始位置。modalContentの実際の高さによらず画面外からスライドさせるため、
+// 画面全体の高さを使う
 const MODAL_SLIDE_DISTANCE = Dimensions.get('window').height;
 
-// 背景オーバーレイのフェードとコンテンツのスライドを分離してアニメーションさせるためのフック。
-// `Modal`自体の`animationType`は'none'にし、呼び出し側でこのフックが返すAnimated.Valueを
-// オーバーレイ/コンテンツそれぞれのstyleに適用する。
-// `isOpen`がtrue→falseになった瞬間に`Modal`の`visible`をfalseにすると退場アニメーションが
-// 再生される前にモーダルが消えてしまうため、実際に`Modal`を描画するかどうかを表す`isMounted`を
-// 別のstateとして持ち、退場アニメーション完了後のコールバックでfalseに反映する
-// (`isOpen`自体の値やその変化タイミングは、呼び出し側の既存の開閉ロジック・破棄確認Alert等に
-// 一切影響しない)
+// 背景オーバーレイのフェードとコンテンツのスライドを分離アニメーションさせるフック
+// (`Modal`のanimationTypeは'none'にし、返り値のAnimated.Valueを呼び出し側でstyleに適用する)。
+// `isOpen`がfalseになった瞬間に`visible`もfalseにすると退場アニメーションが再生されないため、
+// 実際に描画するかどうかを表す`isMounted`を別stateで持ち、退場アニメーション完了後にfalseへ戻す
 function useModalSlideTransition(isOpen: boolean) {
   const [isMounted, setIsMounted] = useState(isOpen);
   const overlayOpacity = useRef(new Animated.Value(isOpen ? 1 : 0)).current;
@@ -277,11 +245,10 @@ function useModalSlideTransition(isOpen: boolean) {
 
   useEffect(() => {
     if (isOpen) {
-      // 入場アニメーションを再生する前に描画状態にする(退場時はアニメーション完了後にfalseへ戻す)
+      // 入場アニメーション再生前に描画状態にする(退場時は完了後にfalseへ戻す)
       setIsMounted(true);
     }
-    // opacity/transformはどちらもuseNativeDriverの対象にでき、UIスレッド側でアニメーションが
-    // 進行するためJSスレッドの混雑(入力処理等)の影響を受けにくくなる
+    // opacity/transformはuseNativeDriver対象にでき、UIスレッド側で進行するためJSスレッド混雑の影響を受けにくい
     const animation = Animated.parallel([
       Animated.timing(overlayOpacity, {
         toValue: isOpen ? 1 : 0,
@@ -295,8 +262,7 @@ function useModalSlideTransition(isOpen: boolean) {
       }),
     ]);
     animation.start(({ finished }) => {
-      // 新しいアニメーション開始によって中断された場合はfinished===falseになる。
-      // その場合は何もせず、後から開始した(=最新の)アニメーション側の完了処理に任せる
+      // 中断された場合はfinished===falseになるため、後から開始した最新のアニメーション側に任せる
       if (finished && !isOpen) {
         setIsMounted(false);
       }
@@ -309,65 +275,46 @@ function useModalSlideTransition(isOpen: boolean) {
 
 export default function HomeScreen() {
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
-  // 初回のloadEntries完了までの間だけtrueにする読み込み中フラグ。
-  // useFocusEffectによりloadEntriesはタブへフォーカスが当たるたびに毎回呼ばれるが、
-  // その都度trueへ戻してしまうと空状態メッセージの代わりに表示するローディング表示が
-  // 毎回ちらついてしまうため、初期値true→初回読み込み完了時にfalseの一方向にのみ遷移させる
-  // (falseになった後は二度とtrueへ戻さない)
+  // 初回のloadEntries完了までtrueの読み込み中フラグ。useFocusEffectで再フォーカス時にも
+  // loadEntriesは呼ばれるが、都度trueに戻すとローディング表示がちらつくため一方向にのみ遷移させる
   const [isLoading, setIsLoading] = useState(true);
   const [draft, setDraft] = useState('');
-  // 起動時・画面マウント時にAsyncStorageからの下書き復元が完了したかどうか。復元が完了する前に
-  // 自動保存用のeffectを動かしてしまうと、まだ何も読み込んでいない初期値(空文字列)で
-  // 保存済みの下書きを誤って上書き・削除してしまうため、復元完了までは自動保存の対象外にする
+  // 下書き復元が完了したか。完了前に自動保存effectを動かすと、初期値(空文字列)で
+  // 保存済みの下書きを誤って上書き・削除してしまうため、完了までは自動保存の対象外にする
   const [isDraftRestored, setIsDraftRestored] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   // 保存成功時に一時的に表示するトーストのメッセージ。nullの間は非表示
   const [saveToastMessage, setSaveToastMessage] = useState<string | null>(null);
-  // 日記本文のキーワード検索用の入力値。既存の「今日の出来事を書く」入力欄(composer)とは
-  // 独立した、検索専用のstate
+  // 日記本文のキーワード検索用の入力値(composerの入力とは独立したstate)
   const [searchQuery, setSearchQuery] = useState('');
-  // handleSave(新規保存)の実行中かどうか。保存ボタンの連打(またはタップと同時に発生する
-  // 複数のonPressイベント)によって、同じ内容の日記エントリが重複して保存されてしまうことを防ぐため、
-  // 実行中は早期returnし、保存ボタンもdisabledにする
+  // handleSaveの実行中かどうか。連打による重複保存を防ぐため、実行中は早期returnしボタンもdisabledにする
   const [isSaving, setIsSaving] = useState(false);
-  // 新規作成モーダル(日記の無い日をタップした際に、その日付向けに新規作成する導線)の対象日付
-  // ('YYYY-MM-DD')。nullの間はモーダルを閉じている
+  // 新規作成モーダルの対象日付('YYYY-MM-DD')。nullの間はモーダルを閉じている
   const [newEntryDate, setNewEntryDate] = useState<string | null>(null);
   const [newEntryDraft, setNewEntryDraft] = useState('');
   const [newEntryError, setNewEntryError] = useState<string | null>(null);
-  // handleSaveNewEntryの実行中かどうか。isSavingと同様、連打による重複保存を防ぐため、
-  // 実行中は早期returnし、保存ボタンもdisabledにする
+  // handleSaveNewEntryの実行中かどうか。isSavingと同様に連打による重複保存を防ぐ
   const [isSavingNewEntry, setIsSavingNewEntry] = useState(false);
-  // handleSave内の保存処理(pending中)開始後に、ユーザーがdraft用TextInputへ入力操作を
-  // 行ったかどうかを表すref。「pending開始時にセットした空文字列のまま」なのか
-  // 「pending中に入力した末、自分で全部消して空文字列に戻した」のかを、値の内容(空文字列か
-  // どうか)では区別できないため、編集操作の有無そのものをrefで別途持つ
+  // handleSaveの保存処理中にユーザーがdraftを編集したかどうかを表すref。空文字列という値だけでは
+  // 「pending開始時のまま」なのか「入力後に全部消した」のかを区別できないため別途持つ
   const draftEditedRef = useRef(false);
-  // カレンダーの外枠(タイトル・入力欄・保存ボタンの下からタブバーの上までの残りスペースを
-  // `flex: 1`で使い切るView)の実測高さ(onLayoutで取得)。この外枠自体に枠線・角丸を付け、
-  // 日付グリッドの高さもこの実測値を基準に算出することで、外枠と日付グリッドの基準を一致させる
+  // カレンダー外枠(flex: 1で残りスペースを使い切るView)の実測高さ(onLayoutで取得)。
+  // 日付グリッドの高さもこの値を基準に算出し、外枠との基準を一致させる
   const [wrapperHeight, setWrapperHeight] = useState(0);
-  // カレンダーに現在表示中の年・月。react-native-calendarsのCalendarは`current`propを
-  // 初回マウント時にしか参照しないため(以降のジャンプにはinitialDateを使う。下記
-  // calendarInitialDateのコメント参照)、ヘッダーの年月表示・年月ピッカーの初期選択・
-  // 月ボタンのハイライトはこのstateを正とする。onMonthChangeでユーザーのスワイプ/矢印操作にも追従する
+  // カレンダーに現在表示中の年・月。react-native-calendarsの`current`propは初回マウント時にしか
+  // 参照されない(ジャンプにはinitialDateを使う)ため、ヘッダー表示・ピッカーはこのstateを正とし、
+  // onMonthChangeでスワイプ/矢印操作にも追従させる
   const [displayedYear, setDisplayedYear] = useState(() => new Date().getFullYear());
   const [displayedMonth, setDisplayedMonth] = useState(() => new Date().getMonth() + 1);
-  // Calendarへ渡す'YYYY-MM-DD'形式の日付。react-native-calendars内部の実装上、`current`propは
-  // 初回マウント時の初期値としてしか使われず、マウント後に値を変えても表示月は追従しない一方、
-  // `initialDate`propは値が変わるたびにその月へ強制的にジャンプする挙動になっているため、
-  // 年月ピッカーで選択された年月へジャンプさせる用途にはこちらを使う。加えて、テーマ切替時の
-  // `key={colorScheme}`強制再マウント(下のCalendar参照)後もスワイプ・矢印操作で移動した月を
-  // 復元できるよう、handleMonthChangeでも常にその月の1日に同期させている
+  // Calendarへ渡す'YYYY-MM-DD'。`current`propは初回マウント時のみ参照され追従しないが、
+  // `initialDate`は値が変わるたびその月へジャンプするため、年月ピッカーからのジャンプに使う。
+  // テーマ切替時の強制再マウント後も移動先の月を復元できるよう、handleMonthChangeでも同期させる
   const [calendarInitialDate, setCalendarInitialDate] = useState(() => toDateKey(new Date()));
-  // 年月ジャンプ用ピッカーモーダルの表示状態と、ピッカー内で選択中の年
-  // (月は上のdisplayedMonthをそのまま参照する)
+  // 年月ジャンプ用ピッカーの表示状態と、ピッカー内で選択中の年(月はdisplayedMonthを参照)
   const [isMonthPickerVisible, setIsMonthPickerVisible] = useState(false);
   const [pickerYear, setPickerYear] = useState(displayedYear);
 
-  // 2つのモーダル(新規作成・年月ピッカー)それぞれの、背景オーバーレイのフェードと
-  // コンテンツのスライドを分離したアニメーション制御(詳細はuseModalSlideTransitionのコメント参照)。
-  // 日付一覧・編集は専用画面への遷移(Issue #221)に置き換えたため、対象はこの2つのみになった
+  // 新規作成・年月ピッカー、それぞれのモーダルのアニメーション制御(詳細はuseModalSlideTransitionを参照)
   const newEntryModalTransition = useModalSlideTransition(newEntryDate !== null);
   const monthPickerTransition = useModalSlideTransition(isMonthPickerVisible);
 
@@ -380,51 +327,36 @@ export default function HomeScreen() {
   const errorColor = useThemeColor({}, 'error');
   const searchHighlightBackgroundColor = useThemeColor({}, 'searchHighlightBackground');
 
-  // この画面内で行う保存処理(「今日」の入力欄からの新規保存・日付指定の新規作成)の
-  // 永続化を直列化するためのキュー。編集・削除は専用画面(day-entries/edit-entry)へ
-  // 移動しそちらで直接永続化するため、このキューの対象は「保存」のみになっている。
-  // loadEntriesが下でこのrefを参照するため、宣言順をloadEntriesより前にしている
+  // この画面内の保存処理(新規保存・日付指定の新規作成)を直列化するキュー。
+  // 編集・削除は専用画面で直接永続化するため対象外。loadEntriesが参照するため宣言順を前にしている
   const writeQueueRef = useRef<Promise<void>>(Promise.resolve());
-  // 現在キューに積まれている(まだAsyncStorageへの書き込みが完了していない)タスクの件数。
-  // loadEntriesが「pending中の書き込みがある場合だけ」writeQueueRef.currentを待つかどうかの
-  // 判定に使う(詳細はloadEntries内のコメント参照)
+  // キューに積まれ未完了のタスク件数。loadEntriesがwriteQueueRef.currentを待つべきか判定するのに使う
   const pendingWriteCountRef = useRef(0);
 
   const loadEntries = useCallback(async () => {
-    // useFocusEffectでタブに再フォーカスした際、保存の書き込みがwriteQueueRef上で
-    // まだpending中(AsyncStorageへの実際の書き込みが完了していない)ことがある。ここで待たずに
-    // 読み込むと、キューの書き込みが完了する前の古い内容を一時的に読み込んでしまい、楽観的更新で
-    // 表示していた内容から一瞬戻ってしまう(その後キューの書き込みが完了すればUIは正しい状態に
-    // 収束するが、ちらつきとして見えてしまう)。そのため、pending中の書き込みがある場合に限り、
-    // 直近でキューに積まれた書き込みが完了するまで待ってから読み込む。
-    // pending中の書き込みが無い場合にまで無条件で`await`すると、既に解決済みのPromiseであっても
-    // 1マイクロタスク分の遅延が余分に発生し、他の非同期処理(下書き復元など)との実行順序が
-    // ずれてしまうため、必要な場合のみ待つようにしている
+    // pending中の書き込みがある場合、待たずに読み込むと楽観的更新後の内容が一瞬古い内容に
+    // 戻ってちらつくため、直近の書き込み完了を待ってから読み込む。pending無しでも無条件にawaitすると
+    // 他の非同期処理との実行順序が余分な1マイクロタスク分ずれるため、必要な場合のみ待つ
     if (pendingWriteCountRef.current > 0) {
       await writeQueueRef.current;
     }
-    // 復号を含む読み込みロジックはutils/diary-storage.tsの共通関数に集約しており、
-    // 設定画面のエクスポート機能とも共有している。ストレージが空・壊れている場合は
-    // 例外を投げず空配列を返す仕様のため、ここで個別にtry/catchする必要はない
+    // getAllDiaryEntriesはストレージが空・壊れている場合も例外を投げず空配列を返すため、
+    // ここで個別にtry/catchする必要はない
     setEntries(await getAllDiaryEntries());
-    // 初回読み込みが完了したことを示す(既にfalseの場合でも呼び出し自体は無害)。
-    // isLoadingをtrueへ戻す処理はどこにも無いため、一方向にのみ遷移する
+    // 初回読み込み完了を示す(isLoadingは一方向にのみ遷移し、trueへ戻す処理は無い)
     setIsLoading(false);
   }, []);
 
-  // entryは今回保存する1件分のエントリ(新規作成)を表す。エントリ単位の個別キーで
-  // 保存するため、他のエントリの読み書きは発生しない
+  // エントリ単位の個別キーで保存するため、他のエントリの読み書きは発生しない
   const enqueueDiaryWrite = useCallback((entry: DiaryEntry): Promise<void> => {
-    // タスクをキューに積んだ時点(実行完了を待たず)で同期的にインクリメントする。
-    // これにより、この関数の呼び出し直後にloadEntriesが走った場合でも、
-    // まだ実行順が回ってきていないタスクの存在を正しく検知できる
+    // 実行完了を待たず、積んだ時点で同期的にインクリメントする。これにより呼び出し直後に
+    // loadEntriesが走っても未実行のタスクの存在を検知できる
     pendingWriteCountRef.current += 1;
     const task = writeQueueRef.current.then(async () => {
       await saveDiaryEntry(entry);
     });
-    // キュー自体は個々のタスクの成否に関わらず先に進める(失敗はtask側のcatchで呼び出し元に伝える)。
-    // 併せてpendingWriteCountRefも、成否に関わらずタスクが完了(=もはやpendingではなくなる)
-    // 時点でデクリメントする
+    // キューは成否に関わらず先へ進める(失敗はtask側で呼び出し元に伝わる)。
+    // pendingWriteCountRefも成否問わず完了時点でデクリメントする
     writeQueueRef.current = task.then(
       () => {
         pendingWriteCountRef.current -= 1;
@@ -436,13 +368,9 @@ export default function HomeScreen() {
     return task;
   }, []);
 
-  // expo-routerの`Tabs`はデフォルトで一度訪れたタブ画面をアンマウントせず保持するため、
-  // マウント時に一度だけ読み込む`useEffect`だと、設定タブでの全件削除のように他画面から
-  // AsyncStorageが書き換えられても、この画面のstateには反映されないまま残ってしまう
-  // (その状態で新しい日記を保存すると、stateに残っていた削除前の古いエントリを含めて
-  // 上書き保存してしまい、削除したはずのデータが復活する)。
-  // `useFocusEffect`でタブにフォーカスが当たるたびに読み込み直すことで、この不整合を防ぐ
-  // (初回マウント時にフォーカスされている場合も含めて発火するため、従来のマウント時読み込みも兼ねる)。
+  // expo-routerの`Tabs`はタブ画面をアンマウントせず保持するため、マウント時一度きりのuseEffectだと
+  // 他画面(設定タブの全件削除等)によるAsyncStorageの変更がstateに反映されないまま残り、
+  // 古いエントリを巻き込んで上書き保存してしまう。useFocusEffectで再フォーカス毎に読み直し防ぐ
   useFocusEffect(
     useCallback(() => {
       loadEntries();
@@ -450,8 +378,7 @@ export default function HomeScreen() {
   );
 
   // 起動時・画面マウント時に、自動保存されていた下書きが残っていればTextInputへ復元する。
-  // タブの再フォーカスのたびに実行されるuseFocusEffectとは異なり、マウント時に一度だけ読めばよい
-  // (この画面がアンマウントされずに保持される間は、draft自体が引き続きReact stateとして残るため)。
+  // 画面はアンマウントされず保持されるため、マウント時に一度だけ読めば済む
   useEffect(() => {
     let isCancelled = false;
     (async () => {
@@ -461,9 +388,8 @@ export default function HomeScreen() {
           setDraft(storedDraft);
         }
       } catch {
-        // 下書きの読み込みに失敗した場合は復元を諦めるだけにとどめ、未処理のPromise
-        // rejectionを発生させない。ここで早期returnせずisDraftRestoredをtrueにすることで、
-        // 以降のデバウンス自動保存(下のuseEffect)が無効化されたままにならないようにする
+        // 復元を諦めるだけにとどめる。finallyでisDraftRestoredをtrueにするため、
+        // 以降の自動保存が無効化されたままにはならない
       } finally {
         if (!isCancelled) {
           setIsDraftRestored(true);
@@ -475,11 +401,9 @@ export default function HomeScreen() {
     };
   }, []);
 
-  // draftの変更をデバウンスし、入力が一定時間止まってからAsyncStorageへ自動保存する。
-  // 入力途中でアプリがバックグラウンド化・強制終了された場合でも、次回起動時に下書きを復元できる
+  // draftの変更をデバウンスし、入力が止まってからAsyncStorageへ自動保存する
   useEffect(() => {
-    // 下書きの復元が完了する前は、まだ何も読み込んでいない初期値(空文字列)で
-    // 保存済みの下書きを誤って上書き・削除してしまわないよう、何もしない
+    // 復元完了前は、初期値(空文字列)で保存済みの下書きを上書きしないよう何もしない
     if (!isDraftRestored) {
       return;
     }
@@ -487,8 +411,7 @@ export default function HomeScreen() {
       const persist = draft
         ? AsyncStorage.setItem(DIARY_DRAFT_STORAGE_KEY, draft)
         : AsyncStorage.removeItem(DIARY_DRAFT_STORAGE_KEY);
-      // 下書きの自動保存はバックグラウンドでの補助的な処理のため、失敗してもユーザーの入力自体には
-      // 影響させず、静かに無視する(本保存の失敗はhandleSave側でsaveErrorとして明示的に伝える)
+      // 下書きの自動保存は補助的な処理のため、失敗しても静かに無視する(本保存の失敗はhandleSave側で伝える)
       persist.catch(() => {});
     }, DRAFT_AUTO_SAVE_DEBOUNCE_MS);
     return () => clearTimeout(timer);
@@ -501,8 +424,7 @@ export default function HomeScreen() {
     }
 
     const trimmed = draft.trim();
-    // 万が一上限を超えたテキストが渡ってきても保存しない(onChangeText側のgrapheme単位の
-    // 切り詰めが主な防御線)。上限チェック自体もsplitIntoGraphemesでgrapheme単位で行い、
+    // 万が一上限超のテキストが渡っても保存しない。チェックもgrapheme単位で行い、
     // UTF-16コードユニット単位のlengthとのズレを防ぐ
     if (!trimmed || splitIntoGraphemes(trimmed).length > BODY_MAX_LENGTH) {
       return;
@@ -511,8 +433,7 @@ export default function HomeScreen() {
     setIsSaving(true);
 
     const newEntry: DiaryEntry = {
-      // Date.now().toString() は同一ミリ秒での衝突リスクがあるため、
-      // 衝突しにくいUUID v4を生成するexpo-cryptoのrandomUUID()を使用する
+      // Date.now().toString()は同一ミリ秒での衝突リスクがあるため、UUID v4を生成するrandomUUID()を使う
       id: randomUUID(),
       text: trimmed,
       createdAt: new Date().toISOString(),
@@ -522,64 +443,49 @@ export default function HomeScreen() {
     // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
     setEntries([newEntry, ...entries]);
     setDraft('');
-    // pending開始時点ではまだ編集操作が発生していないことを表すため、フラグをリセットする
     draftEditedRef.current = false;
     setSaveError(null);
 
     try {
-      // 日記本文を平文のままAsyncStorageに保存しないよう、SecureStoreで保護した鍵で
-      // AES-256-GCM暗号化してから保存する。この画面内の他の保存処理と競合しないよう、
-      // 書き込みはキュー経由で直列化する(このエントリ専用のキーへの書き込みのみで完結する)
+      // 本文はSecureStoreで保護した鍵でAES-256-GCM暗号化して保存する。他の保存処理と競合しないよう
+      // 書き込みはキュー経由で直列化する
       await enqueueDiaryWrite(newEntry);
-      // 既に楽観的更新でReact stateは正しい内容になっているため、永続化された内容での
-      // setEntriesによる再同期は不要
+      // 楽観的更新で既にstateは正しいため、永続化後の再同期(setEntries)は不要
 
-      // 保存に成功したので、自動保存していた下書きは不要になったためクリアする。
-      // draft自体は既にsetDraft('')で空にしているが、AsyncStorage側に下書きキーが残ったままだと
-      // 次回起動時に既に保存済みの内容を誤って復元してしまうため、明示的に削除する
+      // 保存成功時は自動保存済みの下書きキーも削除する。残したままだと次回起動時に
+      // 既に保存済みの内容を誤って復元してしまう
       try {
         await AsyncStorage.removeItem(DIARY_DRAFT_STORAGE_KEY);
       } catch {
         // 下書きキーのクリアに失敗しても、日記本体は既に保存済みで致命的ではないため無視する
       }
 
-      // 保存成功をユーザーに明示するため、一時的なトーストとハプティックフィードバックを発火する。
-      // 保存失敗時はsaveErrorでエラーメッセージを表示しており、成功時も対称的にフィードバックする
+      // 保存成功をユーザーに明示するため、トーストとハプティックフィードバックを発火する
       setSaveToastMessage(SAVE_SUCCESS_MESSAGE);
       if (process.env.EXPO_OS === 'ios') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
     } catch {
-      // 永続化に失敗した場合は保存前の状態に戻し、ユーザーにエラーを伝える。
-      // ただし、保存処理中(この非同期処理の完了を待つ間)にユーザーが既に次の文章を
-      // 入力し始めている場合、previousDraftで単純に上書きすると新しい入力を消してしまう。
-      // 現在値が空文字列かどうかでは、「pending開始時のまま何も入力していない」場合と
-      // 「pending中に入力した後、自分で全部消して空文字列に戻した」場合を区別できないため、
-      // draftEditedRef(pending開始後に編集操作があったかどうか)で判定する。
-      // 編集操作が無ければpreviousDraftへ戻し、編集操作があればユーザーが最後に入力した
-      // 内容(空文字列を含む)をそのまま優先して上書きしない
+      // 永続化失敗時は保存前の状態に戻す。ただしdraftEditedRefで編集操作の有無を判定し、
+      // 保存処理中にユーザーが既に入力していた場合はpreviousDraftで上書きしない
       setEntries(previousEntries);
       if (!draftEditedRef.current) {
         setDraft(previousDraft);
       }
       setSaveError('保存に失敗しました。もう一度お試しください。');
     } finally {
-      // 成功・失敗いずれの場合も、次の保存を行えるよう必ず実行中フラグを戻す
       setIsSaving(false);
     }
   }, [draft, entries, isSaving, enqueueDiaryWrite]);
 
-  // draft用TextInputのonChangeText。setDraftに加えて、pending中にユーザーが入力操作を
-  // 行ったことをdraftEditedRefへ記録する(handleSaveの保存失敗時ロールバック判定に使う)。
-  // TextInput側にmaxLength propを指定していないため、ここでtruncateToBodyMaxLengthを使い
-  // grapheme単位でBODY_MAX_LENGTHを超えないよう切り詰める
+  // draft用TextInputのonChangeText。draftEditedRefへ編集済みを記録し(handleSaveのロールバック判定に使う)、
+  // maxLength未指定のためtruncateToBodyMaxLengthでgrapheme単位に切り詰める
   const handleChangeDraft = useCallback((text: string) => {
     draftEditedRef.current = true;
     setDraft(truncateToBodyMaxLength(text));
   }, []);
 
-  // 新規作成用TextInputのonChangeText。draft用と同様の理由でtruncateToBodyMaxLength
-  // (grapheme単位の切り詰め)を使う
+  // 新規作成用TextInputのonChangeText。draft用と同様にgrapheme単位で切り詰める
   const handleChangeNewEntryDraft = useCallback((text: string) => {
     setNewEntryDraft(truncateToBodyMaxLength(text));
   }, []);
@@ -606,9 +512,8 @@ export default function HomeScreen() {
     ]);
   }, [newEntryDraft, closeNewEntryModal]);
 
-  // 日記の無い日をタップして開いたモーダルからの新規保存。ホーム画面上部の「今日」入力欄用の
-  // handleSaveとは異なり、createdAtをその瞬間の日時ではなく選択された日付基準
-  // (buildCreatedAtForDateKey)にする
+  // 日記の無い日をタップして開いたモーダルからの新規保存。handleSaveと異なり、
+  // createdAtはその瞬間ではなく選択された日付基準(buildCreatedAtForDateKey)にする
   const handleSaveNewEntry = useCallback(async () => {
     // 既に保存処理が進行中であれば、連打による重複保存を防ぐため何もしない
     if (isSavingNewEntry || !newEntryDate) {
@@ -616,8 +521,7 @@ export default function HomeScreen() {
     }
 
     const trimmed = newEntryDraft.trim();
-    // 万が一上限を超えたテキストが渡ってきても保存しない(onChangeText側のgrapheme単位の
-    // 切り詰めが主な防御線)。上限チェック自体もsplitIntoGraphemesでgrapheme単位で行い、
+    // 万が一上限超のテキストが渡っても保存しない。チェックもgrapheme単位で行い、
     // UTF-16コードユニット単位のlengthとのズレを防ぐ
     if (!trimmed || splitIntoGraphemes(trimmed).length > BODY_MAX_LENGTH) {
       return;
@@ -636,11 +540,9 @@ export default function HomeScreen() {
     setNewEntryError(null);
 
     try {
-      // この画面内の他の保存処理と競合しないよう、書き込みはキュー経由で直列化する
-      // (このエントリ専用のキーへの書き込みのみで完結する)
+      // 他の保存処理と競合しないよう、書き込みはキュー経由で直列化する
       await enqueueDiaryWrite(newEntry);
-      // 既に楽観的更新でReact stateは正しい内容になっているため、永続化された内容での
-      // setEntriesによる再同期は不要。永続化に成功した場合のみモーダルを閉じる
+      // 楽観的更新で既にstateは正しいため、永続化後の再同期は不要。成功時のみモーダルを閉じる
       setNewEntryDate(null);
       setNewEntryDraft('');
     } catch {
@@ -648,15 +550,12 @@ export default function HomeScreen() {
       setEntries(previousEntries);
       setNewEntryError('保存に失敗しました。もう一度お試しください。');
     } finally {
-      // 成功・失敗いずれの場合も、次の保存を行えるよう必ず実行中フラグを戻す
       setIsSavingNewEntry(false);
     }
   }, [entries, enqueueDiaryWrite, isSavingNewEntry, newEntryDate, newEntryDraft]);
 
-  // トーストを非表示にする(SaveToastのuseEffectの依存配列に含まれるため、毎レンダーで
-  // 参照が変わらないようuseCallbackで安定化する。インライン関数のままだと、トースト表示中に
-  // ユーザーが入力欄を編集し続けるたびにHomeScreenが再レンダーされてonHideの参照が変わり、
-  // 自動非表示タイマーが張り直され続けてトーストが仕様通り2.5秒で消えなくなってしまう)
+  // トーストを非表示にする。SaveToastのuseEffect依存配列に含まれるため、参照を安定させないと
+  // 再レンダーのたびにタイマーが張り直され、トーストが仕様通りの時間で消えなくなる
   const handleHideSaveToast = useCallback(() => {
     setSaveToastMessage(null);
   }, []);
@@ -681,11 +580,8 @@ export default function HomeScreen() {
   // 検索キーワードの前後の空白を除いたもの。空文字列の間は「検索していない」状態として扱う
   const trimmedSearchQuery = searchQuery.trim();
 
-  // 検索キーワードに本文が部分一致する(大文字小文字、全角/半角、ひらがな/カタカナの
-  // 表記ゆれを区別しない)エントリの一覧。
-  // 全文検索エンジンのような大掛かりな仕組みは使わず、既存のentries stateに対する
-  // クライアントサイドの単純なフィルタリングで実現する。
-  // 新しく書かれたものほど見つけやすいよう、日時の降順(新しい順)に並べ替える
+  // 検索キーワードに本文が部分一致する(大文字小文字・全角半角・ひらがな/カタカナの表記ゆれを
+  // 区別しない)エントリの一覧。日時の降順(新しい順)に並べ替える
   const searchResults = useMemo(() => {
     if (!trimmedSearchQuery) {
       return [];
@@ -711,12 +607,10 @@ export default function HomeScreen() {
     setSearchQuery('');
   }, []);
 
-  // 外枠の実測高さ(wrapperHeight)からヘッダー+曜日行のおおよその高さと6週分の行マージンを差し引き、
-  // 残りを6週で均等に割ることで、外枠いっぱいに日付グリッドが広がる日付セルの高さを算出する。
-  // (カレンダー本体側の実測値を使って反復的に補正する方式も試したが、react-native-calendarsの
-  // 内部レイアウトが確定するタイミングとズレて誤った実測値を拾ってしまい、セルの高さが
-  // 異常に大きくなる/更新が反映されないなど不安定だったため、外枠の実測値のみを使う
-  // シンプルな一度切りの計算に倒している)
+  // 外枠の実測高さ(wrapperHeight)からヘッダー+曜日行の高さと6週分の行マージンを差し引き、
+  // 残りを6週で均等に割って日付セルの高さを算出する。カレンダー本体側の実測値を使う反復補正も
+  // 試したが、react-native-calendarsのレイアウト確定タイミングとズレて不安定だったため、
+  // 外枠の実測値のみを使うシンプルな一度切りの計算にしている
   const dayCellHeight = useMemo(() => {
     if (wrapperHeight <= 0) {
       return DEFAULT_DAY_CELL_HEIGHT;
@@ -747,14 +641,10 @@ export default function HomeScreen() {
   const isPreviousYearDisabled = pickerYear <= pickerMinYear;
   const isNextYearDisabled = pickerYear >= pickerMaxYear;
 
-  // スワイプ・矢印操作でカレンダーの表示月が変わった際、ヘッダー表示と年月ピッカーの
-  // ハイライトをその月に追従させる(ピッカー経由のジャンプ以外の全ての月変更手段をカバーする)。
-  // 併せてcalendarInitialDateもその月の1日へ同期させる。react-native-calendarsの
-  // Calendarは`theme` propをuseRefで初回計算した値のままキャッシュし続けるため、テーマ切替時に
-  // `key={colorScheme}`で強制再マウントしているが(下のCalendar参照)、再マウント後の新しい
-  // Calendarインスタンスは`initialDate`から表示月を再構築する。ここを同期させておかないと、
-  // 月ピッカーを使わずスワイプ・矢印だけで移動した状態でテーマを切り替えた際、ヘッダー表示は
-  // 移動後の月のままなのに実際の日付グリッドだけ古いinitialDate(=今日の月)へ巻き戻ってしまう
+  // スワイプ・矢印操作で表示月が変わった際、ヘッダー表示・年月ピッカーのハイライト・
+  // calendarInitialDateをその月に追従させる。テーマ切替時の`key={colorScheme}`強制再マウント後、
+  // 新しいCalendarインスタンスはinitialDateから表示月を再構築するため、ここで同期させておかないと
+  // スワイプ・矢印だけで移動した状態でテーマを切り替えた際に日付グリッドが今日の月へ巻き戻ってしまう
   const handleMonthChange = useCallback((date: DateData) => {
     setDisplayedYear(date.year);
     setDisplayedMonth(date.month);
@@ -800,9 +690,8 @@ export default function HomeScreen() {
     [isPickerMonthInRange, pickerYear],
   );
 
-  // react-native-calendarsのrenderHeaderは矢印・曜日行はそのまま維持しつつ、中央の見出し部分のみを
-  // 差し替える仕組みのため、既存のスワイプ・矢印での月送りやレイアウトに影響を与えず、
-  // 見出しをタップ可能なボタンに置き換えられる
+  // react-native-calendarsのrenderHeaderは矢印・曜日行を維持したまま中央の見出しのみ差し替えられるため、
+  // 既存の月送り・レイアウトに影響せず見出しをタップ可能なボタンに置き換えられる
   const renderCalendarHeader = useCallback(() => {
     return (
       <Pressable
@@ -826,14 +715,12 @@ export default function HomeScreen() {
   const handleDayPress = useCallback(
     (date: DateData) => {
       if (entriesByDate[date.dateString]?.length) {
-        // 月次・週次いずれの表示であっても、日付タップ時は専用の一覧画面へ遷移する
-        // (以前はモーダル(ドロワー)として重ねて表示していたが、Issue #221で画面遷移に置き換えた)
+        // 日付タップ時は専用の一覧画面へ遷移する(以前はモーダル表示だったが#221で置き換えた)
         router.push(`/day-entries/${date.dateString}`);
         return;
       }
-      // 日記の無い日は、未来日でなければその日付向けの新規作成モーダルを開く。
-      // 未来日はCalendarのmaxDateで既にセル自体が押せなくなっている(renderDay参照)が、
-      // 念のためここでも二重にチェックする
+      // 日記の無い日は、未来日でなければ新規作成モーダルを開く。未来日はmaxDateで既に
+      // 押せなくなっている(renderDay参照)が、念のため二重にチェックする
       if (date.dateString > toDateKey(new Date())) {
         return;
       }
@@ -849,18 +736,15 @@ export default function HomeScreen() {
       }
 
       const dayEntries = entriesByDate[date.dateString];
-      // その日にエントリが実在するか(タイトル文字列の有無ではなく、handleDayPressと同じ基準で判定する。
-      // 本文が空白のみのレガシーデータではタイトルが空文字列になり得るため、両者を区別する必要がある)
+      // その日にエントリが実在するか(タイトル文字列の有無ではなくhandleDayPressと同じ基準で判定。
+      // 本文が空白のみのレガシーデータではタイトルが空文字列になり得るため区別が必要)
       const hasEntries = Boolean(dayEntries?.length);
       const entryCount = dayEntries?.length ?? 0;
       const isDisabled = state === 'disabled' || state === 'inactive';
       const isToday = state === 'today';
-      // 日記が無い日でも、未来日でなければ新規作成モーダルを開けるようタップ可能にする。
-      // 未来日はCalendarのmaxDateによりstateが'disabled'になるため、それ以外は押せる扱いにする
+      // 未来日はmaxDateによりstateが'disabled'になるため、それ以外は押せる扱いにする
       const isPressable = hasEntries || state !== 'disabled';
-      // スクリーンリーダー(VoiceOver/TalkBack)利用者にも、セルの数字だけでなく
-      // 「何年何月何日か」と「その日に日記があるか・新規作成できるか」が伝わるようラベルを組み立てる
-      // (フォーマットはモーダル見出しと同じformatDateHeadingを再利用する)
+      // スクリーンリーダー向けに「何年何月何日か」「日記の有無・新規作成可否」が伝わるラベルを組み立てる
       const statusLabel = hasEntries
         ? `日記あり(${entryCount}件)`
         : isPressable
@@ -879,7 +763,7 @@ export default function HomeScreen() {
           accessibilityState={{ disabled: !isPressable }}
         >
           {isToday ? (
-            // 今日のセルは数字を丸背景で囲んで強調する(一般的なカレンダーアプリの表現に合わせる)
+            // 今日のセルは数字を丸背景で囲んで強調する
             <View style={[styles.todayBadge, { backgroundColor: tintColor }]}>
               <ThemedText
                 style={[styles.dayNumber, { color: backgroundColor, fontWeight: '700' as const }]}
@@ -897,12 +781,10 @@ export default function HomeScreen() {
             </ThemedText>
           )}
           {entryCount === 1 ? (
-            // タイトル文字は小さすぎて読めないため、日記が1件あることだけが伝わる
-            // 視認性の高いドットで代替する
+            // タイトル文字は小さすぎて読めないため、日記が1件あることが伝わるドットで代替する
             <View style={[styles.entryDot, { backgroundColor: tintColor }]} />
           ) : entryCount > 1 ? (
-            // 2件以上ある場合は合計件数を丸バッジで表示する(モーダルを開かなくても
-            // 複数件あることに気づけるようにするため)
+            // 2件以上ある場合は合計件数を丸バッジで表示する
             <View style={[styles.entryCountBadge, { backgroundColor: tintColor }]}>
               <ThemedText
                 style={[styles.entryCountText, { color: backgroundColor }]}
@@ -928,15 +810,12 @@ export default function HomeScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.flex}
-      // Android SDK 54のedge-to-edge対応でwindowSoftInputModeの自動リサイズが効かない
-      // ケースがあるため、iOS同様behaviorを明示的に指定する(未指定だと入力欄が隠れうる)
+      // Android SDK 54のedge-to-edge対応でwindowSoftInputModeの自動リサイズが効かないケースがあるため明示指定する
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      {/* ステータスバー/ノッチ領域とタイトルが重ならないよう、TabScreenContainerで
-          セーフエリア上端インセットぶんの余白を自動的に加算する */}
+      {/* ステータスバー/ノッチ領域とタイトルが重ならないよう、TabScreenContainerでセーフエリア上端インセットぶんの余白を自動的に加算する */}
       <TabScreenContainer style={styles.container}>
-        {/* 背景タップでキーボードを閉じる。TextInput/Pressable自身がタッチを受け取るため既存の
-            操作性は損なわれない。accessible={false}で内側の要素が1つにまとめて読み上げられるのを防ぐ */}
+        {/* 背景タップでキーボードを閉じる。accessible={false}で内側要素がまとめて読み上げられるのを防ぐ */}
         <Pressable
           style={styles.contentWrapper}
           onPress={() => Keyboard.dismiss()}
@@ -954,11 +833,9 @@ export default function HomeScreen() {
               value={draft}
               onChangeText={handleChangeDraft}
               multiline
-              // placeholderはフォーカス後に読み上げられない環境があるため、
-              // スクリーンリーダー向けに明示的なラベルを付ける
+              // placeholderはフォーカス後に読み上げられない環境があるため、明示的なラベルを付ける
               accessibilityLabel="日記本文"
-              // maxLength propはUTF-16コードユニット単位でしか制限できないためあえて指定せず、
-              // handleChangeDraft側でgrapheme単位の切り詰めを行っている
+              // maxLengthはUTF-16コードユニット単位でしか制限できないため使わず、grapheme単位で切り詰める
             />
             <View style={styles.composerFooter}>
               {/* 文字数カウンター(上限に近づいた/達したことがひと目で分かるよう常に表示する) */}
@@ -998,8 +875,7 @@ export default function HomeScreen() {
             ) : null}
           </ThemedView>
 
-          {/* 日記本文のキーワード検索用の入力欄。「今日の出来事を書く」入力欄(composer)とは
-            独立した検索専用の入力欄で、キーワードが入力されている間だけ下に検索結果一覧を表示する */}
+          {/* 日記検索用の入力欄。composerとは独立し、キーワード入力中は下に検索結果一覧を表示する */}
           <View style={styles.searchContainer}>
             <TextInput
               style={[
@@ -1014,14 +890,11 @@ export default function HomeScreen() {
               onChangeText={setSearchQuery}
               returnKeyType="search"
               accessibilityLabel="日記を検索"
-              // 検索欄は日記本文をそのまま入力する用途ではなく、composer/edit用の
-              // grapheme単位切り詰めのような厳密な制御は不要なため、TextInput標準の
-              // maxLength(UTF-16コードユニット単位)でBODY_MAX_LENGTHを上限として指定する
+              // 検索欄は本文入力ほど厳密な制御は不要なため、標準のmaxLength(UTF-16コードユニット単位)を使う
               maxLength={BODY_MAX_LENGTH}
             />
             {searchQuery ? (
-              // TextInputのclearButtonModeはiOS専用のためクロスプラットフォームで挙動を揃えられず、
-              // 入力欄に重ねて配置するカスタムボタンでクリア操作を実現する
+              // clearButtonModeはiOS専用のため、カスタムボタンでクリア操作をクロスプラットフォームに実現する
               <Pressable
                 style={styles.searchClearButton}
                 onPress={handleClearSearch}
@@ -1083,15 +956,12 @@ export default function HomeScreen() {
           ) : (
             <>
               {isLoading ? (
-                // 初回読み込み中は、まだentriesが空配列なだけなのに空状態メッセージが
-                // 一瞬誤って表示されてしまわないよう、代わりにローディング表示を出す
+                // 初回読み込み中はentriesが空配列なだけで空状態メッセージが誤表示されないよう、ローディング表示にする
                 <ThemedView style={styles.emptyState}>
                   <ActivityIndicator color={tintColor} />
                 </ThemedView>
               ) : entries.length === 0 ? (
-                // 日記が1件も保存されていない場合、ラベルの無いカレンダーだけが表示されて
-                // 何をすればよいか分かりにくくならないよう、案内メッセージを表示する
-                // (カレンダー自体は今後日記を書く導線として引き続き表示しておく)
+                // 日記が1件も無い場合、案内メッセージを表示する(カレンダー自体は書く導線として表示し続ける)
                 <ThemedView style={styles.emptyState}>
                   <ThemedText style={styles.emptyStateText}>
                     まだ日記がありません。最初の日記を書いてみましょう。
@@ -1104,11 +974,8 @@ export default function HomeScreen() {
                 onLayout={(event) => setWrapperHeight(event.nativeEvent.layout.height)}
               >
                 <Calendar
-                  // react-native-calendars内部はtheme propに応じたスタイルをuseRefで初回計算した
-                  // ものをキャッシュし続け、マウント後のtheme変更(Web版のハイドレーション後の
-                  // colorScheme確定や、設定画面でのテーマ切り替え)に追従しない。colorSchemeを
-                  // keyに含めて配色が変わるたびに強制的に再マウントさせ、常に現在のテーマで
-                  // スタイルを計算させる
+                  // react-native-calendarsはtheme propのスタイルをuseRefで初回計算しキャッシュするため、
+                  // マウント後のテーマ変更に追従しない。colorSchemeをkeyにして変化のたびに強制再マウントさせる
                   key={colorScheme}
                   theme={{
                     backgroundColor,
@@ -1122,13 +989,10 @@ export default function HomeScreen() {
                   }}
                   dayComponent={renderDay}
                   onDayPress={handleDayPress}
-                  // 月・年の見出しを「2026年8月」のような日本語の語順で表示しつつ、タップで
-                  // 年月ジャンプ用ピッカーを開けるボタンに差し替える(矢印・曜日行はそのまま維持される)
+                  // 見出しを日本語語順で表示しつつ、タップで年月ピッカーを開くボタンに差し替える
                   renderHeader={renderCalendarHeader}
                   enableSwipeMonths
-                  // ピッカーから任意の年月へジャンプするための制御用prop(詳細は
-                  // calendarInitialDate stateのコメント参照)。スワイプ・矢印操作による
-                  // 表示月の変化もhandleMonthChange(onMonthChange)でstate側に反映する
+                  // ピッカーから任意の年月へジャンプするための制御用prop(詳細はcalendarInitialDateを参照)
                   initialDate={calendarInitialDate}
                   onMonthChange={handleMonthChange}
                   // 未来日を新規作成の対象外にするため、今日より後の日付をタップ不可(state: 'disabled')にする
@@ -1149,8 +1013,7 @@ export default function HomeScreen() {
           statusBarTranslucent
           navigationBarTranslucent
         >
-          {/* Modalは親のKeyboardAvoidingViewとは別のネイティブサーフェスに描画され効果を受けないため、
-              TextInput(本文入力欄)を含むこのモーダル内にも別途KeyboardAvoidingViewを配置する */}
+          {/* Modalは親のKeyboardAvoidingViewの効果を受けないため、モーダル内にも別途配置する */}
           <KeyboardAvoidingView
             style={styles.flex}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -1174,14 +1037,9 @@ export default function HomeScreen() {
                   transform: [{ translateY: newEntryModalTransition.contentTranslateY }],
                 }}
               >
-                {/* オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
-                    modalContentをPressableで包んで伝播を止める。以前はThemedView側の
-                    onStartShouldSetResponderで同じことを試みていたが、react-native-webの
-                    Pressableはレスポンダーシステムではなくクリックイベントで判定するため
-                    (Web版のみ)効果が無く、TextInputをタップ/入力するたびに背景タップと
-                    誤認識されモーダルが閉じてしまっていた(#249)。Pressableのクリックハンドラは
-                    内部でstopPropagationを呼ぶため、この包み方であればWeb・Native双方で
-                    確実に伝播を止められる */}
+                {/* オーバーレイ側へのタップ伝播で意図せず閉じないよう、modalContentをPressableで包んで止める。
+                    react-native-webのPressableはクリックイベント判定のためonStartShouldSetResponderでは
+                    効果が無く(#249)、Pressableのクリックハンドラは内部でstopPropagationするためこの包み方で防げる */}
                 <Pressable onPress={() => {}}>
                   <ThemedView style={[styles.modalContent, { borderColor: iconColor }]}>
                     <View style={styles.modalHeader}>
@@ -1207,7 +1065,6 @@ export default function HomeScreen() {
                       multiline
                       // draft用TextInputと同様、スクリーンリーダー向けに明示的なラベルを付ける
                       accessibilityLabel="日記本文"
-                      // draft用TextInputと同様の理由でmaxLength propはあえて指定しない
                     />
                     <View style={styles.composerFooter}>
                       <ThemedText
@@ -1277,8 +1134,7 @@ export default function HomeScreen() {
             >
               <ThemedView
                 style={[styles.modalContent, { borderColor: iconColor }]}
-                // オーバーレイ側のPressableへタップイベントが伝播して意図せず閉じてしまわないよう、
-                // modalContent内でのタッチ開始をこのViewがレスポンダーとして引き受け、伝播を止める
+                // オーバーレイへのタップ伝播を防ぐため、modalContent内のタッチ開始をこのViewが引き受ける
                 onStartShouldSetResponder={() => true}
               >
                 <View style={styles.modalHeader}>
@@ -1380,9 +1236,8 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
-  // 背景タップでキーボードを閉じるためのPressableラッパー。従来containerに指定していた
-  // gapは、ラッパーの追加によりtitle/composer/検索欄/カレンダー等の直接の親がこちらに
-  // 変わったため、レイアウトを崩さないようこちらへ移動している
+  // 背景タップでキーボードを閉じるPressableラッパー。直接の親がこちらに変わったため、
+  // 元containerのgapもここへ移動している
   contentWrapper: {
     flex: 1,
     gap: 16,
@@ -1473,9 +1328,8 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   calendarWrapper: {
-    // タイトル・入力欄・保存ボタンの下からタブバーの上までの残りスペースをすべて使い切る。
-    // 枠線・角丸もこの外枠に付け、内側の日付グリッドの高さ計算もこの実測高さを基準にすることで、
-    // 「外枠と内部の高さ計算の基準がズレて中身がはみ出す」問題が起きないようにする
+    // 残りスペースをすべて使い切る外枠。日付グリッドの高さ計算もこの実測高さを基準にし、
+    // 外枠と内部の基準がズレて中身がはみ出さないようにする
     flex: 1,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 8,
@@ -1508,8 +1362,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   monthGridButton: {
-    // 3列×4行で12ヶ月分を均等に並べる(gap込みで4等分すると幅がはみ出すため、
-    // gap分の余白を差し引いてから3等分している)
+    // 3列×4行で12ヶ月を並べる(gap込みで4等分すると幅がはみ出すため31%にしている)
     width: '31%',
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 8,
@@ -1553,16 +1406,14 @@ const styles = StyleSheet.create({
   entryCountText: {
     fontSize: 9,
     fontWeight: '700',
-    // ThemedTextのdefaultスタイル(lineHeight: 24)を引き継ぐと丸の中で数字が下寄りになるため、
-    // fontSizeに近い値を明示して縦方向も中央に揃える
+    // ThemedTextのデフォルトlineHeight(24)だと丸の中で数字が下寄りになるため、fontSizeに近い値を明示する
     lineHeight: 11,
   },
   modalOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
   },
-  // 背景の暗さのみを別レイヤーとして持つことで、Animatedによるopacityのフェードを
-  // コンテンツ側のスライドから独立させる(詳細はuseModalSlideTransitionのコメント参照)
+  // 背景の暗さを別レイヤーにし、opacityフェードをコンテンツのスライドから独立させる
   modalOverlayBackground: {
     backgroundColor: 'rgba(0, 0, 0, 0.4)',
   },
