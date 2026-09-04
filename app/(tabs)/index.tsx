@@ -28,6 +28,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useThemePreference } from '@/contexts/theme-preference-context';
+import { useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { buildCreatedAtForDateKey, formatDateHeading, toDateKey } from '@/utils/diary-date';
 import { BODY_MAX_LENGTH, splitIntoGraphemes, truncateToBodyMaxLength } from '@/utils/diary-text';
@@ -282,19 +283,22 @@ export default function HomeScreen() {
   // 下書き復元が完了したか。完了前に自動保存effectを動かすと、初期値(空文字列)で
   // 保存済みの下書きを誤って上書き・削除してしまうため、完了までは自動保存の対象外にする
   const [isDraftRestored, setIsDraftRestored] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   // 保存成功時に一時的に表示するトーストのメッセージ。nullの間は非表示
   const [saveToastMessage, setSaveToastMessage] = useState<string | null>(null);
   // 日記本文のキーワード検索用の入力値(composerの入力とは独立したstate)
   const [searchQuery, setSearchQuery] = useState('');
-  // handleSaveの実行中かどうか。連打による重複保存を防ぐため、実行中は早期returnしボタンもdisabledにする
-  const [isSaving, setIsSaving] = useState(false);
+  // handleSaveの実行中かどうか・エラー内容。連打による重複保存を防ぐため、実行中は早期returnしボタンもdisabledにする
+  const { isSaving, error: saveError, save: saveDraftEntry } = useSaveDiaryEntry();
   // 新規作成モーダルの対象日付('YYYY-MM-DD')。nullの間はモーダルを閉じている
   const [newEntryDate, setNewEntryDate] = useState<string | null>(null);
   const [newEntryDraft, setNewEntryDraft] = useState('');
-  const [newEntryError, setNewEntryError] = useState<string | null>(null);
-  // handleSaveNewEntryの実行中かどうか。isSavingと同様に連打による重複保存を防ぐ
-  const [isSavingNewEntry, setIsSavingNewEntry] = useState(false);
+  // handleSaveNewEntryの実行中かどうか・エラー内容。isSavingと同様に連打による重複保存を防ぐ
+  const {
+    isSaving: isSavingNewEntry,
+    error: newEntryError,
+    setError: setNewEntryError,
+    save: saveNewEntry,
+  } = useSaveDiaryEntry();
   // handleSaveの保存処理中にユーザーがdraftを編集したかどうかを表すref。空文字列という値だけでは
   // 「pending開始時のまま」なのか「入力後に全部消した」のかを区別できないため別途持つ
   const draftEditedRef = useRef(false);
@@ -418,65 +422,55 @@ export default function HomeScreen() {
   }, [draft, isDraftRestored]);
 
   const handleSave = useCallback(async () => {
-    // 既に保存処理が進行中であれば、連打による重複保存を防ぐため何もしない
-    if (isSaving) {
-      return;
-    }
+    // ロールバック用に保存前の状態をpersist内で退避し、失敗時にonErrorから参照する
+    let previousEntries: DiaryEntry[] = [];
+    let previousDraft = '';
 
-    const trimmed = draft.trim();
-    // 万が一上限超のテキストが渡っても保存しない。チェックもgrapheme単位で行い、
-    // UTF-16コードユニット単位のlengthとのズレを防ぐ
-    if (!trimmed || splitIntoGraphemes(trimmed).length > BODY_MAX_LENGTH) {
-      return;
-    }
+    await saveDraftEntry({
+      text: draft,
+      persist: async (trimmed) => {
+        const newEntry: DiaryEntry = {
+          // Date.now().toString()は同一ミリ秒での衝突リスクがあるため、UUID v4を生成するrandomUUID()を使う
+          id: randomUUID(),
+          text: trimmed,
+          createdAt: new Date().toISOString(),
+        };
+        previousEntries = entries;
+        previousDraft = draft;
+        // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
+        setEntries([newEntry, ...entries]);
+        setDraft('');
+        draftEditedRef.current = false;
+        // 本文はSecureStoreで保護した鍵でAES-256-GCM暗号化して保存する。他の保存処理と競合しないよう
+        // 書き込みはキュー経由で直列化する
+        await enqueueDiaryWrite(newEntry);
+      },
+      onSuccess: async () => {
+        // 保存成功時は自動保存済みの下書きキーも削除する。残したままだと次回起動時に
+        // 既に保存済みの内容を誤って復元してしまう
+        try {
+          await AsyncStorage.removeItem(DIARY_DRAFT_STORAGE_KEY);
+        } catch {
+          // 下書きキーのクリアに失敗しても、日記本体は既に保存済みで致命的ではないため無視する
+        }
 
-    setIsSaving(true);
-
-    const newEntry: DiaryEntry = {
-      // Date.now().toString()は同一ミリ秒での衝突リスクがあるため、UUID v4を生成するrandomUUID()を使う
-      id: randomUUID(),
-      text: trimmed,
-      createdAt: new Date().toISOString(),
-    };
-    const previousEntries = entries;
-    const previousDraft = draft;
-    // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
-    setEntries([newEntry, ...entries]);
-    setDraft('');
-    draftEditedRef.current = false;
-    setSaveError(null);
-
-    try {
-      // 本文はSecureStoreで保護した鍵でAES-256-GCM暗号化して保存する。他の保存処理と競合しないよう
-      // 書き込みはキュー経由で直列化する
-      await enqueueDiaryWrite(newEntry);
-      // 楽観的更新で既にstateは正しいため、永続化後の再同期(setEntries)は不要
-
-      // 保存成功時は自動保存済みの下書きキーも削除する。残したままだと次回起動時に
-      // 既に保存済みの内容を誤って復元してしまう
-      try {
-        await AsyncStorage.removeItem(DIARY_DRAFT_STORAGE_KEY);
-      } catch {
-        // 下書きキーのクリアに失敗しても、日記本体は既に保存済みで致命的ではないため無視する
-      }
-
-      // 保存成功をユーザーに明示するため、トーストとハプティックフィードバックを発火する
-      setSaveToastMessage(SAVE_SUCCESS_MESSAGE);
-      if (process.env.EXPO_OS === 'ios') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }
-    } catch {
-      // 永続化失敗時は保存前の状態に戻す。ただしdraftEditedRefで編集操作の有無を判定し、
-      // 保存処理中にユーザーが既に入力していた場合はpreviousDraftで上書きしない
-      setEntries(previousEntries);
-      if (!draftEditedRef.current) {
-        setDraft(previousDraft);
-      }
-      setSaveError('保存に失敗しました。もう一度お試しください。');
-    } finally {
-      setIsSaving(false);
-    }
-  }, [draft, entries, isSaving, enqueueDiaryWrite]);
+        // 保存成功をユーザーに明示するため、トーストとハプティックフィードバックを発火する
+        setSaveToastMessage(SAVE_SUCCESS_MESSAGE);
+        if (process.env.EXPO_OS === 'ios') {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+      },
+      onError: () => {
+        // 永続化失敗時は保存前の状態に戻す。ただしdraftEditedRefで編集操作の有無を判定し、
+        // 保存処理中にユーザーが既に入力していた場合はpreviousDraftで上書きしない
+        setEntries(previousEntries);
+        if (!draftEditedRef.current) {
+          setDraft(previousDraft);
+        }
+      },
+      errorMessage: '保存に失敗しました。もう一度お試しください。',
+    });
+  }, [draft, entries, enqueueDiaryWrite, saveDraftEntry]);
 
   // draft用TextInputのonChangeText。draftEditedRefへ編集済みを記録し(handleSaveのロールバック判定に使う)、
   // maxLength未指定のためtruncateToBodyMaxLengthでgrapheme単位に切り詰める
@@ -496,7 +490,7 @@ export default function HomeScreen() {
     setNewEntryDate(null);
     setNewEntryDraft('');
     setNewEntryError(null);
-  }, []);
+  }, [setNewEntryError]);
 
   // 新規作成モーダルを閉じる(背景タップ・「閉じる」ボタン・Android戻る操作の共通ハンドラ)。
   // 入力途中の内容がある場合のみ、誤って入力内容を失わないよう確認ダイアログを挟む
@@ -515,44 +509,40 @@ export default function HomeScreen() {
   // 日記の無い日をタップして開いたモーダルからの新規保存。handleSaveと異なり、
   // createdAtはその瞬間ではなく選択された日付基準(buildCreatedAtForDateKey)にする
   const handleSaveNewEntry = useCallback(async () => {
-    // 既に保存処理が進行中であれば、連打による重複保存を防ぐため何もしない
-    if (isSavingNewEntry || !newEntryDate) {
+    // 対象日付が未確定(モーダルが閉じている状態)であれば何もしない
+    if (!newEntryDate) {
       return;
     }
+    const targetDateKey = newEntryDate;
+    // ロールバック用に保存前の状態をpersist内で退避し、失敗時にonErrorから参照する
+    let previousEntries: DiaryEntry[] = [];
 
-    const trimmed = newEntryDraft.trim();
-    // 万が一上限超のテキストが渡っても保存しない。チェックもgrapheme単位で行い、
-    // UTF-16コードユニット単位のlengthとのズレを防ぐ
-    if (!trimmed || splitIntoGraphemes(trimmed).length > BODY_MAX_LENGTH) {
-      return;
-    }
-
-    setIsSavingNewEntry(true);
-
-    const newEntry: DiaryEntry = {
-      id: randomUUID(),
-      text: trimmed,
-      createdAt: buildCreatedAtForDateKey(newEntryDate),
-    };
-    const previousEntries = entries;
-    // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
-    setEntries([newEntry, ...entries]);
-    setNewEntryError(null);
-
-    try {
-      // 他の保存処理と競合しないよう、書き込みはキュー経由で直列化する
-      await enqueueDiaryWrite(newEntry);
-      // 楽観的更新で既にstateは正しいため、永続化後の再同期は不要。成功時のみモーダルを閉じる
-      setNewEntryDate(null);
-      setNewEntryDraft('');
-    } catch {
-      // 永続化に失敗した場合は保存前の状態に戻し、モーダルは開いたままエラーを伝える
-      setEntries(previousEntries);
-      setNewEntryError('保存に失敗しました。もう一度お試しください。');
-    } finally {
-      setIsSavingNewEntry(false);
-    }
-  }, [entries, enqueueDiaryWrite, isSavingNewEntry, newEntryDate, newEntryDraft]);
+    await saveNewEntry({
+      text: newEntryDraft,
+      persist: async (trimmed) => {
+        const newEntry: DiaryEntry = {
+          id: randomUUID(),
+          text: trimmed,
+          createdAt: buildCreatedAtForDateKey(targetDateKey),
+        };
+        previousEntries = entries;
+        // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
+        setEntries([newEntry, ...entries]);
+        // 他の保存処理と競合しないよう、書き込みはキュー経由で直列化する
+        await enqueueDiaryWrite(newEntry);
+      },
+      onSuccess: () => {
+        // 楽観的更新で既にstateは正しいため、永続化後の再同期は不要。成功時のみモーダルを閉じる
+        setNewEntryDate(null);
+        setNewEntryDraft('');
+      },
+      onError: () => {
+        // 永続化に失敗した場合は保存前の状態に戻し、モーダルは開いたままエラーを伝える
+        setEntries(previousEntries);
+      },
+      errorMessage: '保存に失敗しました。もう一度お試しください。',
+    });
+  }, [entries, enqueueDiaryWrite, newEntryDate, newEntryDraft, saveNewEntry]);
 
   // トーストを非表示にする。SaveToastのuseEffect依存配列に含まれるため、参照を安定させないと
   // 再レンダーのたびにタイマーが張り直され、トーストが仕様通りの時間で消えなくなる
