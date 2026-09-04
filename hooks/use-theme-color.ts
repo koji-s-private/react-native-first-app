@@ -1,8 +1,3 @@
-/**
- * ライトモードとダークモードについて詳しくは以下を参照:
- * https://docs.expo.dev/guides/color-schemes/
- */
-
 import { Colors } from '@/constants/theme';
 import { useThemePreference } from '@/contexts/theme-preference-context';
 
