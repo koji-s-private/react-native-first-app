@@ -1,6 +1,5 @@
 // 日記エントリの日付・時刻の整形/変換に関する共通ユーティリティ。
-// `app/(tabs)/index.tsx`(カレンダー画面)・`app/day-entries/[date].tsx`(日付ごとの日記一覧画面)の
-// 両方から利用するため、どちらか一方のファイルに閉じずここへ切り出している。
+// カレンダー画面・日付ごとの日記一覧画面の両方から利用するためここに切り出している。
 
 // Dateをreact-native-calendarsが使う'YYYY-MM-DD'形式のキーに変換する(端末のローカル日時基準)
 export function toDateKey(date: Date): string {
@@ -10,10 +9,9 @@ export function toDateKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-// 'YYYY-MM-DD'形式の日付キーから、その日の正午(端末のローカルタイム)を表すISO文字列を作る。
-// 過去日を選んで新規作成する際のcreatedAtに使う。0時付近の時刻だと、この後toDateKey()で
-// 日付キーへ逆算する際にタイムゾーンやサマータイムの影響で日付がずれるおそれがあるため、
-// 日付境界から離れた正午を採用している
+// 'YYYY-MM-DD'形式の日付キーから、その日の正午(ローカルタイム)を表すISO文字列を作る。
+// 0時付近だと後でtoDateKey()へ逆算する際にタイムゾーン・サマータイムの影響でずれ得るため、
+// 日付境界から離れた正午を採用している(過去日の新規作成時のcreatedAtに使用)
 export function buildCreatedAtForDateKey(dateKey: string): string {
   const [year, month, day] = dateKey.split('-').map(Number);
   return new Date(year, month - 1, day, 12, 0, 0, 0).toISOString();

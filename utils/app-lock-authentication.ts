@@ -1,8 +1,6 @@
-// アプリロック機能(#155)で使う、expo-local-authenticationの薄いラッパー。
-//
-// Web版はexpo-local-authenticationのネイティブモジュールが存在せず、`hasHardwareAsync`等が
-// 常に固定値(false/[]/NONE)を返す実装になっている(authenticateAsyncに至っては未実装のため
-// 呼び出すとUnavailabilityErrorを投げる)。そのため、この機能自体をWebでは提供しない。
+// アプリロック機能で使う、expo-local-authenticationの薄いラッパー。
+// Web版はネイティブモジュールが存在せず`hasHardwareAsync`等は常に固定値を返し、
+// authenticateAsyncは未実装で呼び出すとUnavailabilityErrorを投げるため、この機能自体を提供しない。
 import * as LocalAuthentication from 'expo-local-authentication';
 import { Platform } from 'react-native';
 
@@ -19,9 +17,8 @@ export async function isAppLockSupportedAsync(): Promise<boolean> {
   if (!hasHardware) {
     return false;
   }
-  // isEnrolledAsyncは生体認証の登録有無のみを見るため、生体認証は未登録でもOS標準パスコードは
-  // 設定済み、というケースを取りこぼさないようgetEnrolledLevelAsyncも合わせて確認する
-  // (disableDeviceFallback: falseで呼び出すauthenticateAsyncはパスコードにもフォールバックできるため)
+  // isEnrolledAsyncは生体認証の登録有無のみ判定するため、パスコードのみ設定済みのケースを
+  // 取りこぼさないようgetEnrolledLevelAsyncも合わせて確認する
   const isBiometricEnrolled = await LocalAuthentication.isEnrolledAsync();
   if (isBiometricEnrolled) {
     return true;
@@ -32,8 +29,7 @@ export async function isAppLockSupportedAsync(): Promise<boolean> {
 
 /**
  * 生体認証(またはOS標準パスコード)によるアプリロック解除を試みる。
- * 生体認証が利用できない・失敗した場合は、OS標準のパスコード入力へフォールバックできるよう
- * `disableDeviceFallback: false`で呼び出す。
+ * 生体認証が失敗・利用不可の場合にパスコードへフォールバックできるよう`disableDeviceFallback: false`で呼ぶ。
  */
 export async function authenticateForAppLockAsync(): Promise<boolean> {
   const result = await LocalAuthentication.authenticateAsync({
