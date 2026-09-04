@@ -8,17 +8,14 @@ import {
 } from '@/utils/diary-encryption';
 
 /**
- * 日記データをAsyncStorageに保存する際に、かつて使われていた単一キー(全件を1つの配列として
- * 保存する方式)。
- * このキー自体は「移行(マイグレーション)元」としてのみ参照する。
- * 既存テストや過去バージョンで保存されたデータとの後方互換のため、exportは維持する。
+ * かつて全件を1つの配列として保存していた際の単一キー。現在は移行(マイグレーション)元としてのみ
+ * 参照する。過去バージョンで保存されたデータとの後方互換のためexportを維持する。
  */
 export const DIARY_ENTRIES_STORAGE_KEY = 'diary-entries';
 
 /**
- * 日記エントリ1件分をAsyncStorageに個別に保存する際のキーのプレフィックス。
- * `<prefix><id>`の形で、エントリごとに独立したキーを持つ。
- * 1件の保存/削除がO(1)になり、エントリ数が増えても他のエントリの読み書きが発生しない。
+ * 日記エントリ1件を個別キー(`<prefix><id>`)で保存する際のプレフィックス。
+ * エントリごとにキーを分けることで、1件の保存/削除をO(1)にする。
  */
 export const DIARY_ENTRY_KEY_PREFIX = 'diary-entry:';
 
@@ -27,10 +24,7 @@ export function buildDiaryEntryKey(id: string): string {
   return `${DIARY_ENTRY_KEY_PREFIX}${id}`;
 }
 
-/**
- * 日記1件分のデータ構造。`app/(tabs)/index.tsx`とエクスポート機能(`getAllDiaryEntries`)の
- * 両方で使うため、ここに集約する。
- */
+/** 日記1件分のデータ構造。一覧表示とエクスポート機能の両方で使うため、ここに集約する。 */
 export type DiaryEntry = {
   id: string;
   text: string;
@@ -38,11 +32,9 @@ export type DiaryEntry = {
 };
 
 /**
- * 与えられた値が`DiaryEntry`として妥当な形をしているかどうかを判定する型ガード。
- * `id`, `text`, `createdAt`のいずれもstring型であることを確認する
- * (AsyncStorageから読み込んだJSONは実行時に型が保証されないため、`JSON.parse`結果を
- * そのまま`as DiaryEntry`で扱わずここで検証する)。
- * `utils/diary-import.ts`のインポート時スキーマ検証でも同じロジックを再利用するためexportする。
+ * 値が`DiaryEntry`として妥当な形かどうかを判定する型ガード。AsyncStorageから読み込んだJSONは
+ * 実行時に型が保証されないため、`as DiaryEntry`で決め打ちせずここで検証する。
+ * `utils/diary-import.ts`のインポート時スキーマ検証でも再利用するためexportする。
  */
 export function isDiaryEntry(value: unknown): value is DiaryEntry {
   if (typeof value !== 'object' || value === null) {
@@ -57,14 +49,9 @@ export function isDiaryEntry(value: unknown): value is DiaryEntry {
 }
 
 /**
- * レガシーキー(`DIARY_ENTRIES_STORAGE_KEY`)に全件配列として保存された日記データが残っている場合、
- * エントリ単位の個別キーへ移行する。
- *
- * - レガシーキーが存在しない場合は何もしない(冪等)。
- * - 移行が完了すると必ずレガシーキーを削除するため、次回以降の呼び出しでは即座に返る。
- * - 復号・パースに失敗した場合は例外を投げる(呼び出し元の`getAllDiaryEntries`のtry/catchで
- *   空配列を返す処理に委ねる。中途半端な状態でレガシーキーを消してデータを失わないようにするため、
- *   ここでは削除しない)。
+ * レガシーキー(`DIARY_ENTRIES_STORAGE_KEY`)に全件配列で保存された日記データが残っていれば、
+ * エントリ単位の個別キーへ移行する。復号・パースに失敗した場合は例外を投げてレガシーキーは
+ * 削除しない(中途半端な状態でデータを失わないよう、呼び出し元の`getAllDiaryEntries`に委ねる)。
  */
 async function migrateLegacyEntriesIfNeeded(): Promise<void> {
   const legacyStored = await AsyncStorage.getItem(DIARY_ENTRIES_STORAGE_KEY);
@@ -103,13 +90,9 @@ async function migrateLegacyEntriesIfNeeded(): Promise<void> {
 }
 
 /**
- * 保存済みの日記データをAsyncStorageから全件削除する。
- * ストアのデータ削除要件(Google Play/Apple双方でユーザーによるデータ削除手段の提供が
- * 求められる)に対応するための機能で、設定画面から呼び出される想定。
- *
- * 暗号鍵(expo-secure-store側)や他の設定値など、日記データ以外のAsyncStorageキーには
- * 影響を与えないよう、日記データのキー(エントリ単位の個別キー、および念のためレガシーキー)
- * のみを対象に削除する。
+ * 保存済みの日記データを全件削除する(Google Play/Apple双方で求められるユーザーによる
+ * データ削除手段への対応)。暗号鍵や他の設定値に影響しないよう、日記データのキー
+ * (エントリ単位の個別キー、および念のためレガシーキー)のみを対象にする。
  */
 export async function clearAllDiaryEntries(): Promise<void> {
   const allKeys = await AsyncStorage.getAllKeys();
@@ -122,17 +105,10 @@ export async function clearAllDiaryEntries(): Promise<void> {
 }
 
 /**
- * 保存済みの日記データをAsyncStorageから全件取得し、必要であれば復号して返す。
- * `app/(tabs)/index.tsx`の一覧表示と、設定画面のエクスポート機能の両方から利用する
- * 共通ロジックとして切り出している(復号ロジックを重複実装しない)。
- *
- * 呼び出しの冒頭でレガシーキーからの移行(migrateLegacyEntriesIfNeeded)を行ってから、
- * エントリ単位の個別キーを全て読み込む。AsyncStorage.getAllKeys()の返す順序は保証されない
- * ため、`createdAt`の降順(新しい順)に並べ替えて返す(UI側は配列の先頭が最新という前提を
- * 置いているため、この並び順を崩さないようにする)。
- *
- * ストレージが空・壊れている・スキーマ不整合・復号失敗のいずれの場合も例外を投げず、
- * 空配列を返す(呼び出し元の既存の挙動を踏襲)。
+ * 保存済みの日記データを全件取得し、必要であれば復号して返す。一覧表示とエクスポート機能の
+ * 両方が利用する共通ロジック。AsyncStorage.getAllKeys()の順序は保証されないため、
+ * `createdAt`の降順(新しい順、UI側は先頭が最新という前提)に並べ替える。
+ * ストレージが空・壊れている・復号失敗のいずれの場合も例外を投げず空配列を返す。
  */
 export async function getAllDiaryEntries(): Promise<DiaryEntry[]> {
   try {
@@ -175,8 +151,7 @@ export async function getAllDiaryEntries(): Promise<DiaryEntry[]> {
           invalidCount += 1;
         }
       } catch {
-        // 個々のエントリの復号・パースに失敗しても、他の正常なエントリの表示を妨げないよう
-        // このエントリだけをスキップする(1件の破損が全件読み込み不能に波及しないようにするため)
+        // 1件の破損が全件読み込み不能に波及しないよう、このエントリだけをスキップする
         invalidCount += 1;
       }
     }
@@ -205,10 +180,8 @@ export async function getAllDiaryEntries(): Promise<DiaryEntry[]> {
 }
 
 /**
- * idを指定して日記エントリ1件だけをAsyncStorageから取得する。
- * `app/edit-entry/[id].tsx`(編集画面)が、全件を読み込む`getAllDiaryEntries`を使わずに
- * 対象の1件だけをO(1)で取得するために使う。
- * 見つからない場合・復号やパースに失敗した場合はnullを返す(呼び出し元での例外処理を不要にする)。
+ * idを指定して日記エントリ1件だけを取得する。編集画面が、全件取得の`getAllDiaryEntries`を
+ * 使わずO(1)で対象の1件を取得するために使う。見つからない・復号失敗時はnullを返す。
  */
 export async function getDiaryEntryById(id: string): Promise<DiaryEntry | null> {
   try {
