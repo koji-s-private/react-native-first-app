@@ -1,7 +1,4 @@
-/**
- * 以下はアプリで使用する色。ライトモードとダークモードそれぞれに定義されている。
- * アプリのスタイリング方法は他にも様々あり、例えば[Nativewind](https://www.nativewind.dev/)、[Tamagui](https://tamagui.dev/)、[unistyles](https://reactnativeunistyles.vercel.app)などがある。
- */
+/** アプリで使用する色。ライトモードとダークモードそれぞれに定義されている。 */
 
 import { Platform } from 'react-native';
 
