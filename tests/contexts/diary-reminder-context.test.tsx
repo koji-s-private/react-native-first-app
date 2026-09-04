@@ -397,7 +397,7 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
       expect(result.current.minute).toBe(20);
     });
 
-    it('does not crash the UI (state still updates) even when the underlying scheduleDailyReminderAsync call rejects (異常系: 再スケジュール失敗はcatchで握りつぶす)', async () => {
+    it('reverts enabled back to false and propagates the error from scheduleDailyReminderAsync when changing the time, while keeping the newly selected time (異常系: 再スケジュール失敗時はenabledをfalseへ戻し例外を伝播する)', async () => {
       mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
       const { result } = renderHook(() => useDiaryReminder(), { wrapper });
       await act(async () => {
@@ -407,24 +407,44 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
       await act(async () => {
         await result.current.setEnabled(true);
       });
-      mockedNotificationsUtil.scheduleDailyReminderAsync.mockRejectedValue(
+      // `mockRejectedValueOnce`を使い、この呼び出しのみを失敗させる(setEnabledの
+      // 異常系テストと同じ理由で`mockRejectedValue`の永続的な上書きは避ける)
+      mockedNotificationsUtil.scheduleDailyReminderAsync.mockRejectedValueOnce(
         new Error('schedule error'),
       );
 
-      // setTime内部では`scheduleDailyReminderAsync(...).catch(() => {})`されているため、
-      // 呼び出し元(この関数呼び出し自体)は例外を投げない
-      expect(() => {
-        act(() => {
-          result.current.setTime(6, 0);
-        });
-      }).not.toThrow();
-      await act(async () => {
-        await Promise.resolve();
+      // setTimeの呼び出し自体(persistによる新しい時刻の即時反映)を、それを待ち受ける
+      // act()とは別の同期act()に分離する。1つのact()内でsetTime呼び出しからPromiseの
+      // 解決まで一気にawaitすると、内部で追跡している最新値(settingsRef.current)が
+      // 更新される前に失敗時のenabled巻き戻し処理が走ってしまい、テスト環境特有のタイミングで
+      // 新しい時刻が失われてしまう(実機では通知APIの呼び出し自体がネイティブブリッジを
+      // またぐため、この分離と同等の再レンダー機会が自然に生まれる)
+      let promise: Promise<void> = Promise.resolve();
+      act(() => {
+        promise = result.current.setTime(6, 0);
       });
 
-      // 通知の再スケジュールには失敗しているが、画面上の選択状態(見た目)は更新されたまま
+      let caughtError: unknown;
+      await act(async () => {
+        try {
+          await promise;
+        } catch (error) {
+          caughtError = error;
+        }
+      });
+
+      expect(caughtError).toBeInstanceOf(Error);
+      expect((caughtError as Error).message).toBe('schedule error');
+      // setEnabledと同様、「ONに見えるが実際には通知が届かない」状態を避けるため
+      // enabledはfalseへ戻される(呼び出し元は例外を捕捉してユーザーへ案内する想定)。
+      // 一方でhour/minuteは新しく選択した値のまま維持される
+      expect(result.current.enabled).toBe(false);
       expect(result.current.hour).toBe(6);
       expect(result.current.minute).toBe(0);
+      expect(AsyncStorage.setItem).toHaveBeenLastCalledWith(
+        DIARY_REMINDER_STORAGE_KEY,
+        JSON.stringify({ enabled: false, hour: 6, minute: 0 }),
+      );
     });
 
     it('serializes rapid consecutive setTime calls so scheduleDailyReminderAsync ultimately runs in call order and settles on the last call even when earlier calls are mocked to resolve later (正常系: 連続呼び出しの直列化でレースコンディションを防ぐ)', async () => {
@@ -532,20 +552,24 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
       );
       mockedNotificationsUtil.scheduleDailyReminderAsync.mockResolvedValueOnce(undefined);
 
+      // 1回目の失敗によって(呼び出し元のPromiseチェーンとは別に)enabledがfalseへ戻される
+      // ため、間を空けて2回連続で呼び出すと2回目は再レンダー後のenabled=falseなクロージャを
+      // 使ってしまいそもそもスケジュールされなくなる。TimeStepperの連続操作(前段の再レンダーが
+      // 反映される前に次の呼び出しが来る状況)を再現するため、同じレンダリング内(enabled=trueの
+      // クロージャ)で間を空けずに呼び出す。さらに、この2回の呼び出し自体は、それを待ち受ける
+      // act()とは別の同期act()に分離する(理由は直前の異常系テストのコメントと同様。分離しないと
+      // テスト環境特有のタイミングで1回目の失敗によるenabled巻き戻しが2回目の新しい時刻まで
+      // 巻き戻してしまう)。1回目の返り値はrejectするため、未処理のrejectionにならないよう
+      // 明示的に.catch()する
+      let firstCall: Promise<void> = Promise.resolve();
+      let secondCall: Promise<void> = Promise.resolve();
       act(() => {
-        result.current.setTime(9, 0);
-      });
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
+        firstCall = result.current.setTime(9, 0);
+        secondCall = result.current.setTime(13, 30);
       });
 
-      act(() => {
-        result.current.setTime(13, 30);
-      });
       await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
+        await Promise.all([firstCall.catch(() => {}), secondCall]);
       });
 
       // 1回目(9:00)は失敗したが、キュー自体は壊れず2回目(13:30)の再スケジュールも実行される
@@ -729,11 +753,12 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
       expect(mockedNotificationsUtil.scheduleDailyReminderAsync).not.toHaveBeenCalled();
     });
 
-    it('does not throw when setTime is called outside of the Provider (境界値: Provider外でのsetTimeはno-op)', () => {
+    it('does not throw and resolves to undefined when setTime is called outside of the Provider (境界値: Provider外でのsetTimeはno-op)', async () => {
       const { result } = renderHook(() => useDiaryReminder());
 
-      expect(() => result.current.setTime(8, 0)).not.toThrow();
+      await expect(result.current.setTime(8, 0)).resolves.toBeUndefined();
       expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+      expect(mockedNotificationsUtil.scheduleDailyReminderAsync).not.toHaveBeenCalled();
     });
   });
 });

@@ -68,8 +68,12 @@ type DiaryReminderContextValue = {
    * 返り値のPromiseがreject する(呼び出し元でユーザーへのエラー案内に利用する想定)。
    */
   setEnabled: (enabled: boolean) => Promise<void>;
-  /** リマインダーの時刻を変更する。ON状態であれば新しい時刻で再スケジュールする */
-  setTime: (hour: number, minute: number) => void;
+  /**
+   * リマインダーの時刻を変更する。ON状態であれば新しい時刻で再スケジュールする。
+   * 許可済みでも通知のスケジュール登録自体に失敗した場合は、setEnabledと同様にenabledを
+   * falseへ戻したうえで、返り値のPromiseがreject する(呼び出し元でユーザーへのエラー案内に利用する想定)。
+   */
+  setTime: (hour: number, minute: number) => Promise<void>;
 };
 
 const DiaryReminderContext = createContext<DiaryReminderContextValue | null>(null);
@@ -207,16 +211,27 @@ export function DiaryReminderProvider({ children }: PropsWithChildren) {
   const scheduleQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const setTime = useCallback(
-    (hour: number, minute: number) => {
+    (hour: number, minute: number): Promise<void> => {
       const next = { ...settings, hour, minute };
       persist(next);
-      if (next.enabled && permissionStatus === 'granted') {
-        // .catch()をチェーンの各タスク側に付けているため、前段のタスクが失敗しても
-        // scheduleQueueRef.current自体はrejectせず、後続の再スケジュールは実行される
-        scheduleQueueRef.current = scheduleQueueRef.current.then(() =>
-          scheduleDailyReminderAsync(hour, minute).catch(() => {}),
-        );
+      if (!(next.enabled && permissionStatus === 'granted')) {
+        // OFFまたは未許可の場合はそもそもスケジュールを試みないため、何もせず成功扱いにする
+        return Promise.resolve();
       }
+
+      // 直列化キュー(scheduleQueueRef.current)自体は、このタスクが失敗しても後続の
+      // 再スケジュールをブロックしてはいけない(TimeStepper連続操作対応)ため、キュー継続用の
+      // catchと、呼び出し元へ失敗を伝播させるためのcatchを分離する
+      const task = scheduleQueueRef.current.then(() => scheduleDailyReminderAsync(hour, minute));
+      scheduleQueueRef.current = task.catch(() => {});
+
+      return task.catch((error) => {
+        // setEnabledと同様、スケジュール登録に失敗した場合は「ONに見えるが実際には通知が
+        // 届かない」状態を検知できるよう、enabledをfalseへ戻したうえで呼び出し元へ伝播させる
+        // (hour/minuteは新しい値のまま維持する)
+        persist({ ...settingsRef.current, enabled: false });
+        throw error;
+      });
     },
     [permissionStatus, persist, settings],
   );
@@ -254,6 +269,6 @@ export function useDiaryReminder(): DiaryReminderContextValue {
     minute: DEFAULT_REMINDER_SETTINGS.minute,
     permissionStatus: 'undetermined',
     setEnabled: async () => {},
-    setTime: () => {},
+    setTime: async () => {},
   };
 }
