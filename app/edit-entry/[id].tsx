@@ -35,6 +35,15 @@ export default function EditEntryScreen() {
   const entryRef = useRef<DiaryEntry | null>(null);
   // 編集開始時点の本文。破棄確認の要否判定(editDraftとの比較)に使う
   const editOriginalTextRef = useRef('');
+  // アンマウント後にstate更新を行わないようにするためのフラグ(保存処理の完了を待つ間に
+  // 画面がアンマウントされ得るため、非同期処理のcatch/finallyで参照して安全性を確保する)
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
@@ -102,9 +111,15 @@ export default function EditEntryScreen() {
       editOriginalTextRef.current = trimmed;
       router.back();
     } catch {
-      setEditError('更新に失敗しました。もう一度お試しください。');
+      // 保存完了前にアンマウントされていた場合、アンマウント済みコンポーネントへのstate更新
+      // (Reactの警告の原因)を避けるためスキップする
+      if (isMountedRef.current) {
+        setEditError('更新に失敗しました。もう一度お試しください。');
+      }
     } finally {
-      setIsSavingEdit(false);
+      if (isMountedRef.current) {
+        setIsSavingEdit(false);
+      }
     }
   }, [editDraft, isSavingEdit, router]);
 
@@ -112,6 +127,13 @@ export default function EditEntryScreen() {
   // ジェスチャーのいずれも対象になる)、未保存の変更がある場合のみ破棄確認ダイアログを挟む
   useEffect(() => {
     const unsubscribe = navigation.addListener('beforeRemove', (event) => {
+      // 保存処理の進行中は、破棄確認ダイアログとhandleSaveEdit完了後のrouter.back()が
+      // 競合してしまうため、離脱操作自体を一律ブロックする(保存完了後のrouter.back()による
+      // プログラム的な遷移のみが画面を離れる手段になる)
+      if (isSavingEdit) {
+        event.preventDefault();
+        return;
+      }
       if (editDraft.trim() === editOriginalTextRef.current.trim()) {
         return;
       }
@@ -126,7 +148,7 @@ export default function EditEntryScreen() {
       ]);
     });
     return unsubscribe;
-  }, [navigation, editDraft]);
+  }, [navigation, editDraft, isSavingEdit]);
 
   const editDraftGraphemeCount = useMemo(() => splitIntoGraphemes(editDraft).length, [editDraft]);
 

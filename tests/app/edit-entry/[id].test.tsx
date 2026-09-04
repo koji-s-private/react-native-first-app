@@ -481,6 +481,124 @@ describe('EditEntryScreen', () => {
       expect(screen.getByDisplayValue('キャンセルで保持される内容')).toBeTruthy();
     });
 
+    it('blocks leaving without showing the discard confirmation dialog while a save is still in flight, then navigates back via handleSaveEdit once the save completes (異常系/競合)', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '保存中に離脱される日記',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      let resolveSetItem: () => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSetItem = resolve;
+          }),
+      );
+
+      render(<EditEntryScreen />);
+      const input = await screen.findByDisplayValue('保存中に離脱される日記');
+      fireEvent.changeText(input, '保存中に離脱される変更後の内容');
+      fireEvent.press(screen.getByRole('button', { name: '保存' }));
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      // 保存処理が完了するまでの間は、破棄確認ダイアログを出さずに一律離脱をブロックする
+      const preventDefault = jest.fn();
+      getBeforeRemoveListener()(buildBeforeRemoveEvent(preventDefault));
+
+      expect(preventDefault).toHaveBeenCalledTimes(1);
+      expect(Alert.alert).not.toHaveBeenCalled();
+      expect(mockBack).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveSetItem();
+      });
+
+      // 保存完了後はhandleSaveEdit内のrouter.back()によってのみ画面を離れる
+      await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+      expect(Alert.alert).not.toHaveBeenCalled();
+    });
+
+    it('keeps blocking every subsequent leave attempt consistently while the save is still in flight (境界値/複数回試行)', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '保存中に複数回離脱される日記',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      let resolveSetItem: () => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSetItem = resolve;
+          }),
+      );
+
+      render(<EditEntryScreen />);
+      const input = await screen.findByDisplayValue('保存中に複数回離脱される日記');
+      fireEvent.changeText(input, '保存中に複数回離脱される変更後の内容');
+      fireEvent.press(screen.getByRole('button', { name: '保存' }));
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      // ヘッダーの戻る操作・物理戻るボタン・スワイプなど、保存完了までの間に何度離脱を
+      // 試みても一貫してブロックされ続けることを確認する(1回目だけ塞いで2回目以降は
+      // すり抜けてしまう、といった回帰が無いか)
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const preventDefault = jest.fn();
+        getBeforeRemoveListener()(buildBeforeRemoveEvent(preventDefault));
+        expect(preventDefault).toHaveBeenCalledTimes(1);
+      }
+      expect(Alert.alert).not.toHaveBeenCalled();
+      expect(mockBack).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveSetItem();
+      });
+
+      await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+      expect(Alert.alert).not.toHaveBeenCalled();
+    });
+
+    // 補足: React 18以降はアンマウント済みコンポーネントへのstate更新を検知する
+    // コンソール警告自体が撤廃されたため、このテストはガードの有無に関わらずpassし得る
+    // (console.errorへの出力が無いことは確認できるが、isMountedRefガードが実際に効いた
+    // ことの直接証明にはならない)。ガードの意義はReactの将来的な仕様変更や他レンダラーへの
+    // 備えとしての防御的実装であり、コードレビューで妥当性を担保する。
+    it('does not update state after unmounting while a save is still in flight (avoids a "state update on an unmounted component" warning)', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: 'アンマウントされる日記',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      let rejectSetItem: (error: Error) => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectSetItem = reject;
+          }),
+      );
+
+      const { unmount } = render(<EditEntryScreen />);
+      const input = await screen.findByDisplayValue('アンマウントされる日記');
+      fireEvent.changeText(input, 'アンマウント時点で保存中の内容');
+      fireEvent.press(screen.getByRole('button', { name: '保存' }));
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      unmount();
+
+      await act(async () => {
+        rejectSetItem(new Error('write failed'));
+      });
+
+      const stateUpdateWarning = consoleErrorSpy.mock.calls.find(([message]) =>
+        String(message).includes('a component'),
+      );
+      expect(stateUpdateWarning).toBeUndefined();
+      consoleErrorSpy.mockRestore();
+    });
+
     it('does not prevent leaving on a subsequent beforeRemove check once the draft has been saved successfully', async () => {
       await seedDiaryEntry({
         id: ENTRY_ID,
