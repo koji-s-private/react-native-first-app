@@ -804,5 +804,141 @@ describe('EditEntryScreen', () => {
       expect(await screen.findByDisplayValue('エントリ2の元の本文')).toBeTruthy();
       expect(screen.queryByDisplayValue('エントリ1専用の下書き')).toBeNull();
     });
+
+    it('truncates a restored draft to BODY_MAX_LENGTH when the auto-saved draft itself exceeds the limit, even though the saved original text is within the limit (境界値)', async () => {
+      const overLimitDraft = 'あ'.repeat(BODY_MAX_LENGTH + 10);
+      const truncatedDraft = 'あ'.repeat(BODY_MAX_LENGTH);
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '上限以内の元の本文',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      await AsyncStorage.setItem(DRAFT_STORAGE_KEY, overLimitDraft);
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<EditEntryScreen />);
+
+      expect(await screen.findByDisplayValue(truncatedDraft)).toBeTruthy();
+      expect(screen.getByText(`${BODY_MAX_LENGTH}/${BODY_MAX_LENGTH}`)).toBeTruthy();
+      // 切り詰め通知Alertは「保存済みの元の本文」の文字数のみを基準に判定される実装のため、
+      // 元の本文自体は上限以内であるこのケースでは、下書き側が切り詰められても通知は出ない
+      expect(Alert.alert).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the saved original text and keeps auto-save working afterward when restoring the draft fails (AsyncStorage.getItem rejects) (異常系)', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '下書き復元に失敗した場合の元の本文',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      // async-storage-mockは元々jest.fn()のため、jest.spyOnの`mockRestore()`では元の実装に
+      // 戻らない(既知の挙動)。上書き前の実装を保存しておき、finallyで明示的に復元する
+      const originalGetItemImpl = (AsyncStorage.getItem as jest.Mock).getMockImplementation();
+      // 下書きキーへのgetItemのみrejectさせ、日記本体キーへの呼び出しは通常通り解決させる
+      const getItemSpy = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key: string) => {
+        if (key === DRAFT_STORAGE_KEY) {
+          return Promise.reject(new Error('read failed'));
+        }
+        return originalGetItemImpl ? originalGetItemImpl(key) : Promise.resolve(null);
+      });
+
+      // 未処理のPromise rejectionが発生していないことを検知するため、一時的にリスナーを登録する
+      const unhandledRejections: unknown[] = [];
+      const onUnhandledRejection = (reason: unknown) => {
+        unhandledRejections.push(reason);
+      };
+      process.on('unhandledRejection', onUnhandledRejection);
+
+      jest.useFakeTimers();
+      try {
+        render(<EditEntryScreen />);
+
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY));
+
+        // rejectしたPromiseのcatch/finally節が実行されるまでマイクロタスクキューをフラッシュする
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        expect(unhandledRejections).toHaveLength(0);
+        expect(screen.getByDisplayValue('下書き復元に失敗した場合の元の本文')).toBeTruthy();
+
+        // 復元処理が失敗してもisDraftRestoredはtrueになり、自動保存が無効化されたままにならない
+        const input = screen.getByDisplayValue('下書き復元に失敗した場合の元の本文');
+        fireEvent.changeText(input, '復元失敗後も自動保存される内容');
+
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        await waitFor(() =>
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+            DRAFT_STORAGE_KEY,
+            '復元失敗後も自動保存される内容',
+          ),
+        );
+      } finally {
+        jest.useRealTimers();
+        process.off('unhandledRejection', onUnhandledRejection);
+        if (originalGetItemImpl) {
+          getItemSpy.mockImplementation(originalGetItemImpl);
+        }
+      }
+    });
+
+    it('silently ignores an auto-save write failure (AsyncStorage.setItem rejects for the draft key) without showing an error or losing the in-progress edit (異常系)', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '下書き自動保存失敗確認対象',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      const originalSetItemImpl = (AsyncStorage.setItem as jest.Mock).getMockImplementation();
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementation((key: string, value: string) => {
+        if (key === DRAFT_STORAGE_KEY) {
+          return Promise.reject(new Error('write failed'));
+        }
+        return originalSetItemImpl ? originalSetItemImpl(key, value) : Promise.resolve();
+      });
+
+      const unhandledRejections: unknown[] = [];
+      const onUnhandledRejection = (reason: unknown) => {
+        unhandledRejections.push(reason);
+      };
+      process.on('unhandledRejection', onUnhandledRejection);
+
+      jest.useFakeTimers();
+      try {
+        render(<EditEntryScreen />);
+        const input = await screen.findByDisplayValue('下書き自動保存失敗確認対象');
+        fireEvent.changeText(input, '保存に失敗するはずの下書き');
+
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+        await waitFor(() =>
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+            DRAFT_STORAGE_KEY,
+            '保存に失敗するはずの下書き',
+          ),
+        );
+
+        // 下書きの自動保存(補助的な処理)が失敗しても、本文編集は継続でき、
+        // 更新失敗のエラーメッセージ(本保存用)は表示されない
+        expect(screen.queryByText('更新に失敗しました。もう一度お試しください。')).toBeNull();
+        expect(screen.getByDisplayValue('保存に失敗するはずの下書き')).toBeTruthy();
+        expect(unhandledRejections).toHaveLength(0);
+
+        const stateUpdateWarning = consoleErrorSpy.mock.calls.find(([message]) =>
+          String(message).includes('a component'),
+        );
+        expect(stateUpdateWarning).toBeUndefined();
+      } finally {
+        jest.useRealTimers();
+        process.off('unhandledRejection', onUnhandledRejection);
+        consoleErrorSpy.mockRestore();
+      }
+    });
   });
 });
