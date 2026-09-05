@@ -622,4 +622,401 @@ describe('EditEntryScreen', () => {
       expect(Alert.alert).not.toHaveBeenCalled();
     });
   });
+
+  describe('編集下書きの自動保存', () => {
+    // 実装(`app/edit-entry/[id].tsx`)の`diary-edit-draft-`接頭辞・デバウンス間隔(1000ms)と対応させる
+    const DRAFT_STORAGE_KEY = `diary-edit-draft-${ENTRY_ID}`;
+    const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
+
+    it('does not immediately persist the edit draft key when the user types (debounced)', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '下書き自動保存確認対象',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      render(<EditEntryScreen />);
+      const input = await screen.findByDisplayValue('下書き自動保存確認対象');
+
+      fireEvent.changeText(input, '書きかけの編集内容');
+
+      // デバウンス時間が経過するまでは、下書きキーへの書き込みはまだ発生しない
+      expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(DRAFT_STORAGE_KEY, expect.any(String));
+    });
+
+    it('auto-saves the edit draft under an entry-id-specific AsyncStorage key once the debounce interval elapses', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '下書き自動保存確認対象',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.useFakeTimers();
+      try {
+        render(<EditEntryScreen />);
+        const input = await screen.findByDisplayValue('下書き自動保存確認対象');
+
+        fireEvent.changeText(input, '書きかけの編集内容');
+
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        await waitFor(() =>
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+            DRAFT_STORAGE_KEY,
+            '書きかけの編集内容',
+          ),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('restores a previously auto-saved draft (prioritized over the saved original text) into the text input on mount', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '保存済みの元の本文',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      await AsyncStorage.setItem(DRAFT_STORAGE_KEY, '前回の続きから復元される下書き');
+
+      render(<EditEntryScreen />);
+
+      expect(await screen.findByDisplayValue('前回の続きから復元される下書き')).toBeTruthy();
+    });
+
+    it('shows the discard confirmation dialog on beforeRemove after restoring a draft that differs from the original text, even without further edits', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '保存済みの元の本文',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      await AsyncStorage.setItem(DRAFT_STORAGE_KEY, '前回の続きから復元される下書き');
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<EditEntryScreen />);
+      await screen.findByDisplayValue('前回の続きから復元される下書き');
+
+      // 下書きを復元しただけで、そこから更に編集していない状態でも、元の本文とは
+      // 異なるため破棄確認が発火する(editOriginalTextRefが下書きではなく元の本文を保持している確認)
+      const preventDefault = jest.fn();
+      getBeforeRemoveListener()(buildBeforeRemoveEvent(preventDefault));
+
+      expect(preventDefault).toHaveBeenCalledTimes(1);
+      expect(Alert.alert).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not prioritize the restored draft and does not trigger the discard confirmation when the auto-saved draft equals the saved original text', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '元の本文と同一の下書き',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      await AsyncStorage.setItem(DRAFT_STORAGE_KEY, '元の本文と同一の下書き');
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<EditEntryScreen />);
+      await screen.findByDisplayValue('元の本文と同一の下書き');
+
+      const preventDefault = jest.fn();
+      getBeforeRemoveListener()(buildBeforeRemoveEvent(preventDefault));
+
+      expect(preventDefault).not.toHaveBeenCalled();
+      expect(Alert.alert).not.toHaveBeenCalled();
+    });
+
+    it('clears the auto-saved edit draft key once the entry is successfully saved', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '下書き削除確認対象',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.useFakeTimers();
+      try {
+        render(<EditEntryScreen />);
+        const input = await screen.findByDisplayValue('下書き削除確認対象');
+
+        fireEvent.changeText(input, '保存される編集内容');
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+        await waitFor(() =>
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+            DRAFT_STORAGE_KEY,
+            '保存される編集内容',
+          ),
+        );
+
+        fireEvent.press(screen.getByRole('button', { name: '保存' }));
+
+        await waitFor(() =>
+          expect(AsyncStorage.removeItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('clears the auto-saved edit draft key once "破棄" is chosen to leave without saving', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '破棄時下書き削除確認対象',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<EditEntryScreen />);
+      const input = await screen.findByDisplayValue('破棄時下書き削除確認対象');
+      fireEvent.changeText(input, '破棄されるはずの編集内容');
+
+      const preventDefault = jest.fn();
+      getBeforeRemoveListener()(buildBeforeRemoveEvent(preventDefault));
+
+      const [, , buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+      const discardButton = (buttons as { text: string; onPress?: () => void }[]).find(
+        (b) => b.text === '破棄',
+      );
+      await act(async () => {
+        discardButton?.onPress?.();
+      });
+
+      await waitFor(() => expect(AsyncStorage.removeItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY));
+    });
+
+    it('does not resurrect the discarded draft when the pending debounce timer fires after "破棄" is confirmed (race condition regression)', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '破棄後タイマー発火確認対象',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      jest.useFakeTimers();
+      try {
+        render(<EditEntryScreen />);
+        const input = await screen.findByDisplayValue('破棄後タイマー発火確認対象');
+        fireEvent.changeText(input, '破棄されるはずの内容');
+
+        // デバウンスタイマーが発火する(1000ms経過する)前に破棄を確定する
+        const preventDefault = jest.fn();
+        getBeforeRemoveListener()(buildBeforeRemoveEvent(preventDefault));
+        const [, , buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+        const discardButton = (buttons as { text: string; onPress?: () => void }[]).find(
+          (b) => b.text === '破棄',
+        );
+        await act(async () => {
+          discardButton?.onPress?.();
+        });
+        await waitFor(() =>
+          expect(AsyncStorage.removeItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY),
+        );
+        (AsyncStorage.setItem as jest.Mock).mockClear();
+
+        // 破棄確定時点で残っていたはずのデバウンスタイマーが発火しても、
+        // 明示的にキャンセルされているため下書きが復活しない
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(
+          DRAFT_STORAGE_KEY,
+          expect.any(String),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('does not re-persist the just-cleared draft when the pending debounce timer fires after a successful save', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '保存後タイマー発火確認対象',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.useFakeTimers();
+      try {
+        render(<EditEntryScreen />);
+        const input = await screen.findByDisplayValue('保存後タイマー発火確認対象');
+        fireEvent.changeText(input, '保存される編集内容');
+
+        // デバウンスタイマーが発火する(1000ms経過する)前に保存する
+        fireEvent.press(screen.getByRole('button', { name: '保存' }));
+        await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+        await waitFor(() =>
+          expect(AsyncStorage.removeItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY),
+        );
+        (AsyncStorage.setItem as jest.Mock).mockClear();
+
+        // 保存完了時点で残っていたはずのデバウンスタイマーが発火しても、
+        // 明示的にキャンセルされているため下書きキーへの書き込みが復活しない
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(
+          DRAFT_STORAGE_KEY,
+          expect.any(String),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('keeps auto-saved drafts separate per entry id so they do not bleed into another entry', async () => {
+      const otherEntryId = 'entry-2';
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: 'エントリ1の元の本文',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      await seedDiaryEntry({
+        id: otherEntryId,
+        text: 'エントリ2の元の本文',
+        createdAt: '2026-01-02T00:00:00.000Z',
+      });
+      await AsyncStorage.setItem(DRAFT_STORAGE_KEY, 'エントリ1専用の下書き');
+
+      setMockIdParam(otherEntryId);
+      render(<EditEntryScreen />);
+
+      // エントリ1専用の下書きキーが、無関係なエントリ2の編集画面に混入していないことを確認する
+      expect(await screen.findByDisplayValue('エントリ2の元の本文')).toBeTruthy();
+      expect(screen.queryByDisplayValue('エントリ1専用の下書き')).toBeNull();
+    });
+
+    it('truncates a restored draft to BODY_MAX_LENGTH when the auto-saved draft itself exceeds the limit, even though the saved original text is within the limit (境界値)', async () => {
+      const overLimitDraft = 'あ'.repeat(BODY_MAX_LENGTH + 10);
+      const truncatedDraft = 'あ'.repeat(BODY_MAX_LENGTH);
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '上限以内の元の本文',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      await AsyncStorage.setItem(DRAFT_STORAGE_KEY, overLimitDraft);
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<EditEntryScreen />);
+
+      expect(await screen.findByDisplayValue(truncatedDraft)).toBeTruthy();
+      expect(screen.getByText(`${BODY_MAX_LENGTH}/${BODY_MAX_LENGTH}`)).toBeTruthy();
+      // 切り詰め通知Alertは「保存済みの元の本文」の文字数のみを基準に判定される実装のため、
+      // 元の本文自体は上限以内であるこのケースでは、下書き側が切り詰められても通知は出ない
+      expect(Alert.alert).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the saved original text and keeps auto-save working afterward when restoring the draft fails (AsyncStorage.getItem rejects) (異常系)', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '下書き復元に失敗した場合の元の本文',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      // async-storage-mockは元々jest.fn()のため、jest.spyOnの`mockRestore()`では元の実装に
+      // 戻らない(既知の挙動)。上書き前の実装を保存しておき、finallyで明示的に復元する
+      const originalGetItemImpl = (AsyncStorage.getItem as jest.Mock).getMockImplementation();
+      // 下書きキーへのgetItemのみrejectさせ、日記本体キーへの呼び出しは通常通り解決させる
+      const getItemSpy = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key: string) => {
+        if (key === DRAFT_STORAGE_KEY) {
+          return Promise.reject(new Error('read failed'));
+        }
+        return originalGetItemImpl ? originalGetItemImpl(key) : Promise.resolve(null);
+      });
+
+      // 未処理のPromise rejectionが発生していないことを検知するため、一時的にリスナーを登録する
+      const unhandledRejections: unknown[] = [];
+      const onUnhandledRejection = (reason: unknown) => {
+        unhandledRejections.push(reason);
+      };
+      process.on('unhandledRejection', onUnhandledRejection);
+
+      jest.useFakeTimers();
+      try {
+        render(<EditEntryScreen />);
+
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY));
+
+        // rejectしたPromiseのcatch/finally節が実行されるまでマイクロタスクキューをフラッシュする
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        expect(unhandledRejections).toHaveLength(0);
+        expect(screen.getByDisplayValue('下書き復元に失敗した場合の元の本文')).toBeTruthy();
+
+        // 復元処理が失敗してもisDraftRestoredはtrueになり、自動保存が無効化されたままにならない
+        const input = screen.getByDisplayValue('下書き復元に失敗した場合の元の本文');
+        fireEvent.changeText(input, '復元失敗後も自動保存される内容');
+
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        await waitFor(() =>
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+            DRAFT_STORAGE_KEY,
+            '復元失敗後も自動保存される内容',
+          ),
+        );
+      } finally {
+        jest.useRealTimers();
+        process.off('unhandledRejection', onUnhandledRejection);
+        if (originalGetItemImpl) {
+          getItemSpy.mockImplementation(originalGetItemImpl);
+        }
+      }
+    });
+
+    it('silently ignores an auto-save write failure (AsyncStorage.setItem rejects for the draft key) without showing an error or losing the in-progress edit (異常系)', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '下書き自動保存失敗確認対象',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      const originalSetItemImpl = (AsyncStorage.setItem as jest.Mock).getMockImplementation();
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementation((key: string, value: string) => {
+        if (key === DRAFT_STORAGE_KEY) {
+          return Promise.reject(new Error('write failed'));
+        }
+        return originalSetItemImpl ? originalSetItemImpl(key, value) : Promise.resolve();
+      });
+
+      const unhandledRejections: unknown[] = [];
+      const onUnhandledRejection = (reason: unknown) => {
+        unhandledRejections.push(reason);
+      };
+      process.on('unhandledRejection', onUnhandledRejection);
+
+      jest.useFakeTimers();
+      try {
+        render(<EditEntryScreen />);
+        const input = await screen.findByDisplayValue('下書き自動保存失敗確認対象');
+        fireEvent.changeText(input, '保存に失敗するはずの下書き');
+
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+        await waitFor(() =>
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+            DRAFT_STORAGE_KEY,
+            '保存に失敗するはずの下書き',
+          ),
+        );
+
+        // 下書きの自動保存(補助的な処理)が失敗しても、本文編集は継続でき、
+        // 更新失敗のエラーメッセージ(本保存用)は表示されない
+        expect(screen.queryByText('更新に失敗しました。もう一度お試しください。')).toBeNull();
+        expect(screen.getByDisplayValue('保存に失敗するはずの下書き')).toBeTruthy();
+        expect(unhandledRejections).toHaveLength(0);
+
+        const stateUpdateWarning = consoleErrorSpy.mock.calls.find(([message]) =>
+          String(message).includes('a component'),
+        );
+        expect(stateUpdateWarning).toBeUndefined();
+      } finally {
+        jest.useRealTimers();
+        process.off('unhandledRejection', onUnhandledRejection);
+        consoleErrorSpy.mockRestore();
+      }
+    });
+  });
 });
