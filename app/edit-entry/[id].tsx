@@ -13,6 +13,7 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { BODY_MAX_LENGTH, splitIntoGraphemes, truncateToBodyMaxLength } from '@/utils/diary-text';
 import { getDiaryEntryById, saveDiaryEntry, type DiaryEntry } from '@/utils/diary-storage';
@@ -37,8 +38,7 @@ export default function EditEntryScreen() {
 
   const [isLoaded, setIsLoaded] = useState(false);
   const [editDraft, setEditDraft] = useState('');
-  const [editError, setEditError] = useState<string | null>(null);
-  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const { isSaving: isSavingEdit, error: editError, save: saveEdit } = useSaveDiaryEntry();
   // 下書き復元が完了したか。完了前に自動保存effectを動かすと、復元中の一時的な内容で
   // 保存済みの下書きを誤って上書き・削除してしまうため、完了までは自動保存の対象外にする
   const [isDraftRestored, setIsDraftRestored] = useState(false);
@@ -152,54 +152,41 @@ export default function EditEntryScreen() {
   }, []);
 
   const handleSaveEdit = useCallback(async () => {
-    // 既に更新処理が進行中であれば、連打による重複更新を防ぐため何もしない
-    if (isSavingEdit) {
-      return;
-    }
-
-    const trimmed = editDraft.trim();
     const targetEntry = entryRef.current;
-    if (!targetEntry || !trimmed || splitIntoGraphemes(trimmed).length > BODY_MAX_LENGTH) {
+    if (!targetEntry) {
       return;
     }
 
-    const updatedEntry: DiaryEntry = { ...targetEntry, text: trimmed };
-    setIsSavingEdit(true);
-    setEditError(null);
+    await saveEdit({
+      text: editDraft,
+      persist: (trimmed) => saveDiaryEntry({ ...targetEntry, text: trimmed }),
+      onSuccess: async (trimmed) => {
+        entryRef.current = { ...targetEntry, text: trimmed };
+        // 保存成功後は「未保存の変更」ではなくなるため、破棄確認の基準を保存後の内容に更新してから戻る
+        // (この後のnavigation.addListener('beforeRemove', ...)がeditDraftと比較する対象)
+        editOriginalTextRef.current = trimmed;
 
-    try {
-      await saveDiaryEntry(updatedEntry);
-      entryRef.current = updatedEntry;
-      // 保存成功後は「未保存の変更」ではなくなるため、破棄確認の基準を保存後の内容に更新してから戻る
-      // (この後のnavigation.addListener('beforeRemove', ...)がeditDraftと比較する対象)
-      editOriginalTextRef.current = trimmed;
-
-      // 保存成功時は自動保存済みの下書きキーも削除する。残したままだと次回この画面を
-      // 開いた際に、既に保存済みの内容を誤って復元してしまう。削除前に保留中のデバウンス
-      // タイマーを明示的にキャンセルし、削除後にタイマーが発火して下書きが復活しないようにする
-      try {
-        if (draftAutoSaveTimerRef.current !== null) {
-          clearTimeout(draftAutoSaveTimerRef.current);
-          draftAutoSaveTimerRef.current = null;
+        // 保存成功時は自動保存済みの下書きキーも削除する。残したままだと次回この画面を
+        // 開いた際に、既に保存済みの内容を誤って復元してしまう。削除前に保留中のデバウンス
+        // タイマーを明示的にキャンセルし、削除後にタイマーが発火して下書きが復活しないようにする
+        try {
+          if (draftAutoSaveTimerRef.current !== null) {
+            clearTimeout(draftAutoSaveTimerRef.current);
+            draftAutoSaveTimerRef.current = null;
+          }
+          await AsyncStorage.removeItem(DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX + targetEntry.id);
+        } catch {
+          // 下書きキーのクリアに失敗しても、日記本体は既に保存済みで致命的ではないため無視する
         }
-        await AsyncStorage.removeItem(DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX + targetEntry.id);
-      } catch {
-        // 下書きキーのクリアに失敗しても、日記本体は既に保存済みで致命的ではないため無視する
-      }
 
-      router.back();
-    } catch {
+        router.back();
+      },
+      errorMessage: '更新に失敗しました。もう一度お試しください。',
       // 保存完了前にアンマウントされていた場合、アンマウント済みコンポーネントへのstate更新
-      // (Reactの警告の原因)を避けるためスキップする
-      if (isMountedRef.current) {
-        setEditError('更新に失敗しました。もう一度お試しください。');
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setIsSavingEdit(false);
-      }
-    }
-  }, [editDraft, isSavingEdit, router]);
+      // (Reactの警告の原因)を避けるため渡す
+      isMountedRef,
+    });
+  }, [editDraft, router, saveEdit]);
 
   // 画面を離れようとした際(ヘッダーの戻る操作・Android物理戻るボタン・スワイプ戻る
   // ジェスチャーのいずれも対象になる)、未保存の変更がある場合のみ破棄確認ダイアログを挟む
