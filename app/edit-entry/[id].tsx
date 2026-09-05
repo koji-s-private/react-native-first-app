@@ -49,6 +49,11 @@ export default function EditEntryScreen() {
   // アンマウント後にstate更新を行わないようにするためのフラグ(保存処理の完了を待つ間に
   // 画面がアンマウントされ得るため、非同期処理のcatch/finallyで参照して安全性を確保する)
   const isMountedRef = useRef(true);
+  // 下書き自動保存のデバウンスタイマーID。保存成功時・破棄確定時にAsyncStorageの下書きキーを
+  // 削除する際、effectのクリーンアップ(=アンマウント)を待たずに明示的にキャンセルするために使う。
+  // アンマウントは遷移アニメーション等の完了まで遅延しうるため、クリーンアップ任せだと
+  // 削除後にタイマーが発火して下書きが復活してしまうrace conditionがある
+  const draftAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     return () => {
@@ -130,12 +135,14 @@ export default function EditEntryScreen() {
     }
     const draftKey = DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX + id;
     const timer = setTimeout(() => {
+      draftAutoSaveTimerRef.current = null;
       const persist = editDraft
         ? AsyncStorage.setItem(draftKey, editDraft)
         : AsyncStorage.removeItem(draftKey);
       // 下書きの自動保存は補助的な処理のため、失敗しても静かに無視する(本保存の失敗はhandleSaveEdit側で伝える)
       persist.catch(() => {});
     }, DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+    draftAutoSaveTimerRef.current = timer;
     return () => clearTimeout(timer);
   }, [editDraft, isDraftRestored, id]);
 
@@ -168,8 +175,13 @@ export default function EditEntryScreen() {
       editOriginalTextRef.current = trimmed;
 
       // 保存成功時は自動保存済みの下書きキーも削除する。残したままだと次回この画面を
-      // 開いた際に、既に保存済みの内容を誤って復元してしまう
+      // 開いた際に、既に保存済みの内容を誤って復元してしまう。削除前に保留中のデバウンス
+      // タイマーを明示的にキャンセルし、削除後にタイマーが発火して下書きが復活しないようにする
       try {
+        if (draftAutoSaveTimerRef.current !== null) {
+          clearTimeout(draftAutoSaveTimerRef.current);
+          draftAutoSaveTimerRef.current = null;
+        }
         await AsyncStorage.removeItem(DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX + targetEntry.id);
       } catch {
         // 下書きキーのクリアに失敗しても、日記本体は既に保存済みで致命的ではないため無視する
@@ -211,8 +223,15 @@ export default function EditEntryScreen() {
           style: 'destructive',
           onPress: () => {
             navigation.dispatch(event.data.action);
-            // 破棄が確定したら、残っている自動保存下書きも削除する。失敗しても既に画面を
-            // 離れる操作自体は成立しているため、致命的ではなく無視する
+            // 破棄が確定したら、残っている自動保存下書きも削除する。実際のアンマウント(effectの
+            // クリーンアップによるclearTimeout)は遷移アニメーション等の完了まで遅延しうるため、
+            // それを待たずここで明示的にタイマーをキャンセルしてから削除する。そうしないと、
+            // 削除後に保留中のデバウンスタイマーが発火し、破棄したはずの内容が再度書き込まれてしまう
+            if (draftAutoSaveTimerRef.current !== null) {
+              clearTimeout(draftAutoSaveTimerRef.current);
+              draftAutoSaveTimerRef.current = null;
+            }
+            // 失敗しても既に画面を離れる操作自体は成立しているため、致命的ではなく無視する
             if (id) {
               AsyncStorage.removeItem(DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX + id).catch(() => {});
             }

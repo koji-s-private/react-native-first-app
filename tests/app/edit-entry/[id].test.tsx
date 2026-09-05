@@ -783,6 +783,84 @@ describe('EditEntryScreen', () => {
       await waitFor(() => expect(AsyncStorage.removeItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY));
     });
 
+    it('does not resurrect the discarded draft when the pending debounce timer fires after "破棄" is confirmed (race condition regression)', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '破棄後タイマー発火確認対象',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      jest.useFakeTimers();
+      try {
+        render(<EditEntryScreen />);
+        const input = await screen.findByDisplayValue('破棄後タイマー発火確認対象');
+        fireEvent.changeText(input, '破棄されるはずの内容');
+
+        // デバウンスタイマーが発火する(1000ms経過する)前に破棄を確定する
+        const preventDefault = jest.fn();
+        getBeforeRemoveListener()(buildBeforeRemoveEvent(preventDefault));
+        const [, , buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+        const discardButton = (buttons as { text: string; onPress?: () => void }[]).find(
+          (b) => b.text === '破棄',
+        );
+        await act(async () => {
+          discardButton?.onPress?.();
+        });
+        await waitFor(() =>
+          expect(AsyncStorage.removeItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY),
+        );
+        (AsyncStorage.setItem as jest.Mock).mockClear();
+
+        // 破棄確定時点で残っていたはずのデバウンスタイマーが発火しても、
+        // 明示的にキャンセルされているため下書きが復活しない
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(
+          DRAFT_STORAGE_KEY,
+          expect.any(String),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('does not re-persist the just-cleared draft when the pending debounce timer fires after a successful save', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '保存後タイマー発火確認対象',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.useFakeTimers();
+      try {
+        render(<EditEntryScreen />);
+        const input = await screen.findByDisplayValue('保存後タイマー発火確認対象');
+        fireEvent.changeText(input, '保存される編集内容');
+
+        // デバウンスタイマーが発火する(1000ms経過する)前に保存する
+        fireEvent.press(screen.getByRole('button', { name: '保存' }));
+        await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+        await waitFor(() =>
+          expect(AsyncStorage.removeItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY),
+        );
+        (AsyncStorage.setItem as jest.Mock).mockClear();
+
+        // 保存完了時点で残っていたはずのデバウンスタイマーが発火しても、
+        // 明示的にキャンセルされているため下書きキーへの書き込みが復活しない
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(
+          DRAFT_STORAGE_KEY,
+          expect.any(String),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('keeps auto-saved drafts separate per entry id so they do not bleed into another entry', async () => {
       const otherEntryId = 'entry-2';
       await seedDiaryEntry({
