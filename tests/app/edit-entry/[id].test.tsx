@@ -622,4 +622,187 @@ describe('EditEntryScreen', () => {
       expect(Alert.alert).not.toHaveBeenCalled();
     });
   });
+
+  describe('編集下書きの自動保存', () => {
+    // 実装(`app/edit-entry/[id].tsx`)の`diary-edit-draft-`接頭辞・デバウンス間隔(1000ms)と対応させる
+    const DRAFT_STORAGE_KEY = `diary-edit-draft-${ENTRY_ID}`;
+    const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
+
+    it('does not immediately persist the edit draft key when the user types (debounced)', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '下書き自動保存確認対象',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      render(<EditEntryScreen />);
+      const input = await screen.findByDisplayValue('下書き自動保存確認対象');
+
+      fireEvent.changeText(input, '書きかけの編集内容');
+
+      // デバウンス時間が経過するまでは、下書きキーへの書き込みはまだ発生しない
+      expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(DRAFT_STORAGE_KEY, expect.any(String));
+    });
+
+    it('auto-saves the edit draft under an entry-id-specific AsyncStorage key once the debounce interval elapses', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '下書き自動保存確認対象',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.useFakeTimers();
+      try {
+        render(<EditEntryScreen />);
+        const input = await screen.findByDisplayValue('下書き自動保存確認対象');
+
+        fireEvent.changeText(input, '書きかけの編集内容');
+
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        await waitFor(() =>
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+            DRAFT_STORAGE_KEY,
+            '書きかけの編集内容',
+          ),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('restores a previously auto-saved draft (prioritized over the saved original text) into the text input on mount', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '保存済みの元の本文',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      await AsyncStorage.setItem(DRAFT_STORAGE_KEY, '前回の続きから復元される下書き');
+
+      render(<EditEntryScreen />);
+
+      expect(await screen.findByDisplayValue('前回の続きから復元される下書き')).toBeTruthy();
+    });
+
+    it('shows the discard confirmation dialog on beforeRemove after restoring a draft that differs from the original text, even without further edits', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '保存済みの元の本文',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      await AsyncStorage.setItem(DRAFT_STORAGE_KEY, '前回の続きから復元される下書き');
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<EditEntryScreen />);
+      await screen.findByDisplayValue('前回の続きから復元される下書き');
+
+      // 下書きを復元しただけで、そこから更に編集していない状態でも、元の本文とは
+      // 異なるため破棄確認が発火する(editOriginalTextRefが下書きではなく元の本文を保持している確認)
+      const preventDefault = jest.fn();
+      getBeforeRemoveListener()(buildBeforeRemoveEvent(preventDefault));
+
+      expect(preventDefault).toHaveBeenCalledTimes(1);
+      expect(Alert.alert).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not prioritize the restored draft and does not trigger the discard confirmation when the auto-saved draft equals the saved original text', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '元の本文と同一の下書き',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      await AsyncStorage.setItem(DRAFT_STORAGE_KEY, '元の本文と同一の下書き');
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<EditEntryScreen />);
+      await screen.findByDisplayValue('元の本文と同一の下書き');
+
+      const preventDefault = jest.fn();
+      getBeforeRemoveListener()(buildBeforeRemoveEvent(preventDefault));
+
+      expect(preventDefault).not.toHaveBeenCalled();
+      expect(Alert.alert).not.toHaveBeenCalled();
+    });
+
+    it('clears the auto-saved edit draft key once the entry is successfully saved', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '下書き削除確認対象',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.useFakeTimers();
+      try {
+        render(<EditEntryScreen />);
+        const input = await screen.findByDisplayValue('下書き削除確認対象');
+
+        fireEvent.changeText(input, '保存される編集内容');
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+        await waitFor(() =>
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+            DRAFT_STORAGE_KEY,
+            '保存される編集内容',
+          ),
+        );
+
+        fireEvent.press(screen.getByRole('button', { name: '保存' }));
+
+        await waitFor(() =>
+          expect(AsyncStorage.removeItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('clears the auto-saved edit draft key once "破棄" is chosen to leave without saving', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '破棄時下書き削除確認対象',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<EditEntryScreen />);
+      const input = await screen.findByDisplayValue('破棄時下書き削除確認対象');
+      fireEvent.changeText(input, '破棄されるはずの編集内容');
+
+      const preventDefault = jest.fn();
+      getBeforeRemoveListener()(buildBeforeRemoveEvent(preventDefault));
+
+      const [, , buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+      const discardButton = (buttons as { text: string; onPress?: () => void }[]).find(
+        (b) => b.text === '破棄',
+      );
+      await act(async () => {
+        discardButton?.onPress?.();
+      });
+
+      await waitFor(() => expect(AsyncStorage.removeItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY));
+    });
+
+    it('keeps auto-saved drafts separate per entry id so they do not bleed into another entry', async () => {
+      const otherEntryId = 'entry-2';
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: 'エントリ1の元の本文',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      await seedDiaryEntry({
+        id: otherEntryId,
+        text: 'エントリ2の元の本文',
+        createdAt: '2026-01-02T00:00:00.000Z',
+      });
+      await AsyncStorage.setItem(DRAFT_STORAGE_KEY, 'エントリ1専用の下書き');
+
+      setMockIdParam(otherEntryId);
+      render(<EditEntryScreen />);
+
+      // エントリ1専用の下書きキーが、無関係なエントリ2の編集画面に混入していないことを確認する
+      expect(await screen.findByDisplayValue('エントリ2の元の本文')).toBeTruthy();
+      expect(screen.queryByDisplayValue('エントリ1専用の下書き')).toBeNull();
+    });
+  });
 });
