@@ -12,6 +12,7 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { BODY_MAX_LENGTH, splitIntoGraphemes, truncateToBodyMaxLength } from '@/utils/diary-text';
 import { getDiaryEntryById, saveDiaryEntry, type DiaryEntry } from '@/utils/diary-storage';
@@ -29,8 +30,7 @@ export default function EditEntryScreen() {
 
   const [isLoaded, setIsLoaded] = useState(false);
   const [editDraft, setEditDraft] = useState('');
-  const [editError, setEditError] = useState<string | null>(null);
-  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const { isSaving: isSavingEdit, error: editError, save: saveEdit } = useSaveDiaryEntry();
   // 編集対象エントリ本体(createdAtを保存時にそのまま引き継ぐため保持する)
   const entryRef = useRef<DiaryEntry | null>(null);
   // 編集開始時点の本文。破棄確認の要否判定(editDraftとの比較)に使う
@@ -88,40 +88,27 @@ export default function EditEntryScreen() {
   }, []);
 
   const handleSaveEdit = useCallback(async () => {
-    // 既に更新処理が進行中であれば、連打による重複更新を防ぐため何もしない
-    if (isSavingEdit) {
-      return;
-    }
-
-    const trimmed = editDraft.trim();
     const targetEntry = entryRef.current;
-    if (!targetEntry || !trimmed || splitIntoGraphemes(trimmed).length > BODY_MAX_LENGTH) {
+    if (!targetEntry) {
       return;
     }
 
-    const updatedEntry: DiaryEntry = { ...targetEntry, text: trimmed };
-    setIsSavingEdit(true);
-    setEditError(null);
-
-    try {
-      await saveDiaryEntry(updatedEntry);
-      entryRef.current = updatedEntry;
-      // 保存成功後は「未保存の変更」ではなくなるため、破棄確認の基準を保存後の内容に更新してから戻る
-      // (この後のnavigation.addListener('beforeRemove', ...)がeditDraftと比較する対象)
-      editOriginalTextRef.current = trimmed;
-      router.back();
-    } catch {
+    await saveEdit({
+      text: editDraft,
+      persist: (trimmed) => saveDiaryEntry({ ...targetEntry, text: trimmed }),
+      onSuccess: (trimmed) => {
+        entryRef.current = { ...targetEntry, text: trimmed };
+        // 保存成功後は「未保存の変更」ではなくなるため、破棄確認の基準を保存後の内容に更新してから戻る
+        // (この後のnavigation.addListener('beforeRemove', ...)がeditDraftと比較する対象)
+        editOriginalTextRef.current = trimmed;
+        router.back();
+      },
+      errorMessage: '更新に失敗しました。もう一度お試しください。',
       // 保存完了前にアンマウントされていた場合、アンマウント済みコンポーネントへのstate更新
-      // (Reactの警告の原因)を避けるためスキップする
-      if (isMountedRef.current) {
-        setEditError('更新に失敗しました。もう一度お試しください。');
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setIsSavingEdit(false);
-      }
-    }
-  }, [editDraft, isSavingEdit, router]);
+      // (Reactの警告の原因)を避けるため渡す
+      isMountedRef,
+    });
+  }, [editDraft, router, saveEdit]);
 
   // 画面を離れようとした際(ヘッダーの戻る操作・Android物理戻るボタン・スワイプ戻る
   // ジェスチャーのいずれも対象になる)、未保存の変更がある場合のみ破棄確認ダイアログを挟む
