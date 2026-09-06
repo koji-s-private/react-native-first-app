@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import React from 'react';
+import { Modal } from 'react-native';
 
 import { AppLockScreen } from '@/components/app-lock-screen';
 
@@ -9,8 +10,52 @@ const FAILURE_GUIDANCE_TEXT =
   '認証に失敗し続ける場合は、端末の設定でパスコード等を再設定してください。';
 const UNSUPPORTED_GUIDANCE_TEXT =
   'この端末に登録されている生体認証・パスコードが見つかりません。端末の設定でパスコード等を再設定するか、下のボタンでアプリロックを解除してください。';
+const TITLE_TEXT = 'ロック中';
+const DESCRIPTION_TEXT = '生体認証、または端末のパスコードでロックを解除してください。';
 
 describe('AppLockScreen', () => {
+  it('renders the Modal with visible=true when the visible prop is true (正常系: 表示制御)', () => {
+    render(
+      <AppLockScreen
+        visible={true}
+        isSupported={true}
+        onAuthenticate={jest.fn().mockResolvedValue(true)}
+        onDisableAppLock={jest.fn()}
+      />,
+    );
+
+    const modal = screen.UNSAFE_getByType(Modal);
+    expect(modal.props.visible).toBe(true);
+  });
+
+  it('renders the Modal with visible=false when the visible prop is false (正常系: 非表示制御)', () => {
+    render(
+      <AppLockScreen
+        visible={false}
+        isSupported={true}
+        onAuthenticate={jest.fn().mockResolvedValue(true)}
+        onDisableAppLock={jest.fn()}
+      />,
+    );
+
+    const modal = screen.UNSAFE_getByType(Modal);
+    expect(modal.props.visible).toBe(false);
+  });
+
+  it('shows the title and description (正常系: タイトル・説明文の表示内容)', () => {
+    render(
+      <AppLockScreen
+        visible={true}
+        isSupported={true}
+        onAuthenticate={jest.fn().mockResolvedValue(true)}
+        onDisableAppLock={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByText(TITLE_TEXT)).toBeTruthy();
+    expect(screen.getByText(DESCRIPTION_TEXT)).toBeTruthy();
+  });
+
   it('shows the "認証する" retry button when the device still supports authentication (正常系: 対応端末)', () => {
     render(
       <AppLockScreen
