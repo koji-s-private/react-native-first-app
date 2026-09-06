@@ -202,5 +202,36 @@ describe('AppLockScreen', () => {
 
       expect(screen.queryByText(FAILURE_GUIDANCE_TEXT)).toBeNull();
     });
+
+    it('shows only the unsupported guidance, not the failure guidance, when isSupported becomes false after repeated failures (境界値: 失敗ガイダンス表示中に非対応端末へ切り替わった場合の排他表示)', async () => {
+      const onAuthenticate = jest.fn().mockResolvedValue(false);
+      const { rerender } = render(
+        <AppLockScreen
+          visible={true}
+          isSupported={true}
+          onAuthenticate={onAuthenticate}
+          onDisableAppLock={jest.fn()}
+        />,
+      );
+      for (let i = 0; i < 3; i += 1) {
+        await act(async () => {
+          fireEvent.press(screen.getByText(AUTHENTICATE_BUTTON_TEXT));
+        });
+      }
+      await waitFor(() => expect(screen.getByText(FAILURE_GUIDANCE_TEXT)).toBeTruthy());
+
+      // 端末側の認証手段が失われてisSupportedがfalseに切り替わった状況を模す
+      rerender(
+        <AppLockScreen
+          visible={true}
+          isSupported={false}
+          onAuthenticate={onAuthenticate}
+          onDisableAppLock={jest.fn()}
+        />,
+      );
+
+      expect(screen.getByText(UNSUPPORTED_GUIDANCE_TEXT)).toBeTruthy();
+      expect(screen.queryByText(FAILURE_GUIDANCE_TEXT)).toBeNull();
+    });
   });
 });
