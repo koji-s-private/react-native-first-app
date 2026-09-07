@@ -40,8 +40,8 @@ const DIARY_DRAFT_STORAGE_KEY = 'diary-draft';
 // 下書きの自動保存をデバウンスする間隔(ミリ秒)
 const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
 
-// カレンダーの日付セルに表示するタイトルの最大文字数(超える場合は省略記号を付ける)
-const TITLE_MAX_LENGTH = 20;
+// getSearchExcerptで通常マッチしないフォールバック時に使う抜粋の最大文字数(超える場合は省略記号を付ける)
+const FALLBACK_EXCERPT_MAX_LENGTH = 20;
 
 const SAVE_SUCCESS_MESSAGE = '保存しました';
 
@@ -120,17 +120,6 @@ LocaleConfig.locales.ja = {
 };
 LocaleConfig.defaultLocale = 'ja';
 
-// 日記本文の最初の行から、カレンダーセル表示用の短いタイトルを作る。
-// 文字数のカウント・切り詰めは書記素クラスタ単位で行い、絵文字等が途中で分断されないようにする
-function getEntryTitle(text: string): string {
-  const firstLine = text.split('\n')[0]?.trim() ?? '';
-  const graphemes = splitIntoGraphemes(firstLine);
-  if (graphemes.length <= TITLE_MAX_LENGTH) {
-    return firstLine;
-  }
-  return `${graphemes.slice(0, TITLE_MAX_LENGTH).join('')}…`;
-}
-
 // 検索結果の抜粋で、マッチ箇所の前後何文字を表示するか
 const SEARCH_EXCERPT_CONTEXT_LENGTH = 20;
 
@@ -196,7 +185,7 @@ type SearchExcerpt = {
 
 // 検索キーワードにマッチした日記本文から、マッチ箇所を中心とした抜粋を作る
 // (改行は見づらいので空白に置換し、前後を切り詰めた場合は省略記号を付ける)。
-// getEntryTitleと異なりgrapheme単位までは厳密にせず、多少のズレは許容する単純な文字列操作で行う
+// マッチ箇所の抜粋はgrapheme単位までは厳密にせず、多少のズレは許容する単純な文字列操作で行う
 function getSearchExcerpt(text: string, query: string): SearchExcerpt {
   const normalizedText = text.replace(/\n+/g, ' ');
   const {
@@ -207,9 +196,17 @@ function getSearchExcerpt(text: string, query: string): SearchExcerpt {
   const lowerQuery = normalizeForSearch(query.toLowerCase()).normalized;
   const matchIndex = lowerText.indexOf(lowerQuery);
 
-  // 通常は到達しないが、念のためのフォールバック(ハイライト対象なしのためmatchは空文字列)
+  // 通常は到達しないが、念のためのフォールバック(ハイライト対象なしのためmatchは空文字列)。
+  // 本文の最初の行を、書記素クラスタ単位で切り詰めて抜粋として使う
+  // (絵文字等が途中で分断されないようにする配慮のためsliceではなくsplitIntoGraphemesを使う)
   if (matchIndex === -1 || lowerQuery.length === 0) {
-    return { prefix: getEntryTitle(normalizedText), match: '', suffix: '' };
+    const firstLine = normalizedText.split('\n')[0]?.trim() ?? '';
+    const graphemes = splitIntoGraphemes(firstLine);
+    const fallbackExcerpt =
+      graphemes.length <= FALLBACK_EXCERPT_MAX_LENGTH
+        ? firstLine
+        : `${graphemes.slice(0, FALLBACK_EXCERPT_MAX_LENGTH).join('')}…`;
+    return { prefix: fallbackExcerpt, match: '', suffix: '' };
   }
 
   // 正規化後の位置(matchIndex)を、startMap/endMap経由で元の文字列上の範囲に変換する
