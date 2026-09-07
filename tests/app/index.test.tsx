@@ -4011,6 +4011,90 @@ describe('HomeScreen', () => {
           }),
         ).toBe(false);
       });
+
+      it('returns the flattened first line as-is when it has exactly FALLBACK_EXCERPT_MAX_LENGTH (20) graphemes (boundary: no truncation)', async () => {
+        // フォールバック時に切り詰め対象となる「1行目」は、getSearchExcerpt内で改行を
+        // 半角スペースに畳んだ後の文字列全体になる(実装コメント参照)。ちょうど20書記素の
+        // 場合は切り詰め・省略記号付与のどちらも発生しないことを検証する境界値テスト
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        const exactlyLimitText = `${'あ'.repeat(17)}x\ny`;
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: exactlyLimitText, createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        // 検索クエリ自体に改行を含めることで、一覧側のフィルタ(改行をそのまま比較)は通過するが
+        // 抜粋側(改行を畳んでから比較)ではマッチしないフォールバック経路を再現する
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'x\ny');
+
+        const expectedFlattened = `${'あ'.repeat(17)}x y`;
+        expect(expectedFlattened.length).toBe(20);
+        await screen.findByText(expectedFlattened);
+        const [excerpt] = getRenderedSearchExcerpts();
+        expect(excerpt.match).toBeNull();
+        expect(excerpt.prefix).toBe(expectedFlattened);
+        expect(excerpt.suffix).toBe('');
+      });
+
+      it('truncates the fallback excerpt to 20 graphemes with an ellipsis when the flattened first line exceeds the limit (boundary: 21 graphemes)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        const overLimitText = `${'あ'.repeat(19)}x\ny`;
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([{ id: '1', text: overLimitText, createdAt: isoAt(now, dayWithEntry) }]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'x\ny');
+
+        // 畳んだ後の1行目は「あ」×19 + "x y" の22書記素になり、20書記素を超えるため
+        // 先頭20書記素("あ"×19 + "x")のみ残して省略記号が付くはず
+        const expectedTruncated = `${'あ'.repeat(19)}x…`;
+        await screen.findByText(expectedTruncated);
+        const [excerpt] = getRenderedSearchExcerpts();
+        expect(excerpt.match).toBeNull();
+        expect(excerpt.prefix).toBe(expectedTruncated);
+        expect(excerpt.suffix).toBe('');
+      });
+
+      it('does not split a surrogate-pair emoji in the middle when truncating the fallback excerpt (boundary)', async () => {
+        // 絵文字がちょうど切り詰め境界(20書記素目)にまたがるケース。UTF-16コード単位で
+        // slice(0, 20)してしまうと絵文字の上位サロゲートだけが残って文字化けするはずの境界を狙う
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        const emoji = '😀';
+        const overLimitText = `${'あ'.repeat(19)}${emoji}x\ny`;
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([{ id: '1', text: overLimitText, createdAt: isoAt(now, dayWithEntry) }]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'x\ny');
+
+        // 畳んだ後の1行目は「あ」×19 + 絵文字 + "x y" の23書記素。先頭20書記素
+        // ("あ"×19 + 絵文字)が壊れずに残り、省略記号が付くはず
+        const expectedTruncated = `${'あ'.repeat(19)}${emoji}…`;
+        await screen.findByText(expectedTruncated);
+        const [excerpt] = getRenderedSearchExcerpts();
+        expect(excerpt.match).toBeNull();
+        expect(excerpt.prefix).toBe(expectedTruncated);
+        expect(excerpt.suffix).toBe('');
+      });
     });
 
     describe('検索欄のクリアボタン', () => {
