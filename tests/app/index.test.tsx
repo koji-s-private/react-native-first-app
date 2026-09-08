@@ -1969,6 +1969,14 @@ describe('HomeScreen', () => {
         const emptyDayCell = screen.getByText(String(dayWithoutEntry));
         fireEvent.press(emptyDayCell);
 
+        // 下書き復元の非同期読み込み(getItem)がact()の外で解決し警告になるのを防ぐため、
+        // 完了を待ってからアサーションへ進む
+        await waitFor(() =>
+          expect(AsyncStorage.getItem).toHaveBeenCalledWith(
+            `diary-new-entry-draft-${toDateKeyForTest(now, dayWithoutEntry)}`,
+          ),
+        );
+
         // 日付一覧画面への遷移ではなく新規作成モーダルが開く
         const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
         expect(newEntryModal.props.visible).toBe(true);
@@ -3102,6 +3110,13 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       openNewEntryModalFor(yesterday);
+      // 下書き復元の非同期読み込み(getItem)がact()の外で解決し警告になるのを防ぐため、
+      // 完了を待ってからアサーションへ進む
+      await waitFor(() =>
+        expect(AsyncStorage.getItem).toHaveBeenCalledWith(
+          `diary-new-entry-draft-${toDateKeyForTest(yesterday, yesterday.getDate())}`,
+        ),
+      );
       const saveButton = getNewEntrySaveButton().parent?.parent?.parent;
       expect(saveButton?.props.accessibilityState?.disabled).toBe(true);
       expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(0.5);
@@ -3243,6 +3258,13 @@ describe('HomeScreen', () => {
         await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
         openNewEntryModalFor(yesterday);
+        // 下書き復元の非同期読み込み(getItem)がact()の外で解決し警告になるのを防ぐため、
+        // 完了を待ってから入力する
+        await waitFor(() =>
+          expect(AsyncStorage.getItem).toHaveBeenCalledWith(
+            `diary-new-entry-draft-${toDateKeyForTest(yesterday, yesterday.getDate())}`,
+          ),
+        );
         fireEvent.changeText(getNewEntryInput(), '入力中に消えては困る下書き');
 
         const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
@@ -3337,7 +3359,9 @@ describe('HomeScreen', () => {
         openNewEntryModalFor(yesterday);
         // 下書き復元の非同期読み込み(getItem)がact()の外で解決し警告になるのを防ぐため、
         // 完了を待ってから入力する
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(draftKeyFor(yesterday)));
+        await waitFor(() =>
+          expect(AsyncStorage.getItem).toHaveBeenCalledWith(draftKeyFor(yesterday)),
+        );
         fireEvent.changeText(getNewEntryInput(), '書きかけの新規下書き');
 
         // デバウンス時間が経過するまでは、下書きキーへの書き込みはまだ発生しない
@@ -3438,7 +3462,9 @@ describe('HomeScreen', () => {
 
         // 無関係な別日(2日前)のモーダルを開いても、昨日専用の下書きは混入しない
         openNewEntryModalFor(twoDaysAgo);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(draftKeyFor(twoDaysAgo)));
+        await waitFor(() =>
+          expect(AsyncStorage.getItem).toHaveBeenCalledWith(draftKeyFor(twoDaysAgo)),
+        );
         expect(getNewEntryInput().props.value).toBe('');
         expect(screen.queryByDisplayValue('昨日専用の下書き')).toBeNull();
       });
