@@ -21,6 +21,7 @@ import {
 } from 'react-native';
 import type { CalendarProps, DateData } from 'react-native-calendars';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SaveToast } from '@/components/save-toast';
 import { TabScreenContainer } from '@/components/tab-screen-container';
@@ -49,6 +50,11 @@ const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
 const FALLBACK_EXCERPT_MAX_LENGTH = 20;
 
 const SAVE_SUCCESS_MESSAGE = '保存しました';
+
+// タブバー(@react-navigation/bottom-tabsのデフォルト、tabBarStyle未カスタマイズ)のおおよその
+// コンテンツ高さ(セーフエリア分は含まない)。ボトムシート系モーダルの下端がタブバーと重ならないよう、
+// insets.bottomと合わせてpaddingBottomに加算する(#282)
+const BOTTOM_TAB_BAR_CONTENT_HEIGHT = 49;
 
 // 外枠の実測高さがまだ取れていない初回レンダー用のフォールバック値
 const DEFAULT_DAY_CELL_HEIGHT = 48;
@@ -339,6 +345,11 @@ export default function HomeScreen() {
   const iconColor = useThemeColor({}, 'icon');
   const errorColor = useThemeColor({}, 'error');
   const searchHighlightBackgroundColor = useThemeColor({}, 'searchHighlightBackground');
+  // ボトムシート系モーダル(新規作成・年月ピッカー)の下端がタブバーと重ならないよう、
+  // セーフエリア下端の分だけ余分にpaddingBottomへ加算する。TabScreenContainerが担うのは
+  // 上端のセーフエリア対応のみで下端は扱わないため、ここでの加算は二重加算にはならない
+  const insets = useSafeAreaInsets();
+  const modalContentBottomPadding = insets.bottom + BOTTOM_TAB_BAR_CONTENT_HEIGHT;
 
   // この画面内の保存処理(新規保存・日付指定の新規作成)を直列化するキュー。
   // 編集・削除は専用画面で直接永続化するため対象外。loadEntriesが参照するため宣言順を前にしている
@@ -1116,7 +1127,12 @@ export default function HomeScreen() {
                     react-native-webのPressableはクリックイベント判定のためonStartShouldSetResponderでは
                     効果が無く(#249)、Pressableのクリックハンドラは内部でstopPropagationするためこの包み方で防げる */}
                 <Pressable onPress={() => {}}>
-                  <ThemedView style={[styles.modalContent, { borderColor: iconColor }]}>
+                  <ThemedView
+                    style={[
+                      styles.modalContent,
+                      { borderColor: iconColor, paddingBottom: modalContentBottomPadding },
+                    ]}
+                  >
                     <View style={styles.modalHeader}>
                       <ThemedText type="subtitle">
                         {newEntryDate ? formatDateHeading(newEntryDate) : ''}の日記を書く
@@ -1208,7 +1224,10 @@ export default function HomeScreen() {
               style={{ transform: [{ translateY: monthPickerTransition.contentTranslateY }] }}
             >
               <ThemedView
-                style={[styles.modalContent, { borderColor: iconColor }]}
+                style={[
+                  styles.modalContent,
+                  { borderColor: iconColor, paddingBottom: modalContentBottomPadding },
+                ]}
                 // オーバーレイへのタップ伝播を防ぐため、modalContent内のタッチ開始をこのViewが引き受ける
                 onStartShouldSetResponder={() => true}
               >
