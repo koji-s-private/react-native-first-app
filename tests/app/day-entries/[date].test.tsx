@@ -185,7 +185,7 @@ describe('DayEntriesScreen', () => {
     const texts = screen.toJSON();
     const flattened = JSON.stringify(texts);
     expect(flattened.indexOf('朝の出来事')).toBeLessThan(flattened.indexOf('夜の出来事'));
-  }, 15000); // フルスイート実行時の負荷でデフォルト5000msを超えるflaky対策(Issue #269)
+  }, 15000); // フルスイート実行時の負荷でデフォルト5000msを超えるflaky対策
 
   it('shows an explicit empty state message when no entries exist for the given date (異常系/境界値: 空の日)', async () => {
     render(<DayEntriesScreen />);
