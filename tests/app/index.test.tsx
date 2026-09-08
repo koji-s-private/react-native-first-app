@@ -1969,6 +1969,14 @@ describe('HomeScreen', () => {
         const emptyDayCell = screen.getByText(String(dayWithoutEntry));
         fireEvent.press(emptyDayCell);
 
+        // 下書き復元の非同期読み込み(getItem)がact()の外で解決し警告になるのを防ぐため、
+        // 完了を待ってからアサーションへ進む
+        await waitFor(() =>
+          expect(AsyncStorage.getItem).toHaveBeenCalledWith(
+            `diary-new-entry-draft-${toDateKeyForTest(now, dayWithoutEntry)}`,
+          ),
+        );
+
         // 日付一覧画面への遷移ではなく新規作成モーダルが開く
         const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
         expect(newEntryModal.props.visible).toBe(true);
@@ -3102,6 +3110,13 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       openNewEntryModalFor(yesterday);
+      // 下書き復元の非同期読み込み(getItem)がact()の外で解決し警告になるのを防ぐため、
+      // 完了を待ってからアサーションへ進む
+      await waitFor(() =>
+        expect(AsyncStorage.getItem).toHaveBeenCalledWith(
+          `diary-new-entry-draft-${toDateKeyForTest(yesterday, yesterday.getDate())}`,
+        ),
+      );
       const saveButton = getNewEntrySaveButton().parent?.parent?.parent;
       expect(saveButton?.props.accessibilityState?.disabled).toBe(true);
       expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(0.5);
@@ -3243,6 +3258,13 @@ describe('HomeScreen', () => {
         await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
         openNewEntryModalFor(yesterday);
+        // 下書き復元の非同期読み込み(getItem)がact()の外で解決し警告になるのを防ぐため、
+        // 完了を待ってから入力する
+        await waitFor(() =>
+          expect(AsyncStorage.getItem).toHaveBeenCalledWith(
+            `diary-new-entry-draft-${toDateKeyForTest(yesterday, yesterday.getDate())}`,
+          ),
+        );
         fireEvent.changeText(getNewEntryInput(), '入力中に消えては困る下書き');
 
         const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
@@ -3301,6 +3323,324 @@ describe('HomeScreen', () => {
       const createdAtMs = new Date(persisted.createdAt).getTime();
       expect(createdAtMs).toBeGreaterThanOrEqual(beforeSave);
       expect(createdAtMs).toBeLessThanOrEqual(afterSave);
+    });
+
+    describe('新規作成モーダルの下書き自動保存', () => {
+      // 実装(`app/(tabs)/index.tsx`)の`diary-new-entry-draft-`接頭辞・デバウンス間隔(1000ms)と対応させる
+      const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
+
+      function getYesterday(): Date {
+        const now = new Date();
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      }
+
+      // toDateKeyForTestは(now, day)の組で'YYYY-MM-DD'を組み立てるヘルパーのため、
+      // 対象日自身をnow・dayの両方に使い回して同じ日付キーを導出する
+      function draftKeyFor(date: Date): string {
+        return `diary-new-entry-draft-${toDateKeyForTest(date, date.getDate())}`;
+      }
+
+      async function pressLatestAlertButton(label: string) {
+        const alertMock = Alert.alert as jest.Mock;
+        const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
+        const buttons = lastCall[2] as { text: string; onPress?: () => void }[];
+        const button = buttons.find((b) => b.text === label);
+        expect(button).toBeDefined();
+        await act(async () => {
+          button?.onPress?.();
+        });
+      }
+
+      it('does not immediately persist the new-entry draft key when the user types (debounced)', async () => {
+        const yesterday = getYesterday();
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        openNewEntryModalFor(yesterday);
+        // 下書き復元の非同期読み込み(getItem)がact()の外で解決し警告になるのを防ぐため、
+        // 完了を待ってから入力する
+        await waitFor(() =>
+          expect(AsyncStorage.getItem).toHaveBeenCalledWith(draftKeyFor(yesterday)),
+        );
+        fireEvent.changeText(getNewEntryInput(), '書きかけの新規下書き');
+
+        // デバウンス時間が経過するまでは、下書きキーへの書き込みはまだ発生しない
+        expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(
+          draftKeyFor(yesterday),
+          expect.any(String),
+        );
+      });
+
+      it('auto-saves the new-entry draft under a date-specific AsyncStorage key once the debounce interval elapses', async () => {
+        const yesterday = getYesterday();
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        jest.clearAllMocks();
+
+        openNewEntryModalFor(yesterday);
+        fireEvent.changeText(getNewEntryInput(), '書きかけの新規下書き');
+
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        await waitFor(() =>
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+            draftKeyFor(yesterday),
+            '書きかけの新規下書き',
+          ),
+        );
+      });
+
+      it('restores a previously auto-saved draft into the modal input when reopened for the same date', async () => {
+        const yesterday = getYesterday();
+        await AsyncStorage.setItem(draftKeyFor(yesterday), '前回の続きから書きかけの下書き');
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        openNewEntryModalFor(yesterday);
+
+        await waitFor(() =>
+          expect(getNewEntryInput().props.value).toBe('前回の続きから書きかけの下書き'),
+        );
+      });
+
+      it('clears the auto-saved draft key once the new entry is successfully saved', async () => {
+        const yesterday = getYesterday();
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        jest.clearAllMocks();
+
+        openNewEntryModalFor(yesterday);
+        fireEvent.changeText(getNewEntryInput(), '保存される新規日記');
+
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+        await waitFor(() =>
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+            draftKeyFor(yesterday),
+            '保存される新規日記',
+          ),
+        );
+
+        fireEvent.press(getNewEntrySaveButton());
+
+        await waitFor(() =>
+          expect(AsyncStorage.removeItem).toHaveBeenCalledWith(draftKeyFor(yesterday)),
+        );
+      });
+
+      it('clears the auto-saved draft key once "破棄" is chosen to close the modal without saving', async () => {
+        const yesterday = getYesterday();
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        jest.clearAllMocks();
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+        openNewEntryModalFor(yesterday);
+        fireEvent.changeText(getNewEntryInput(), '破棄されるはずの新規下書き');
+
+        const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
+        fireEvent.press(getModalOverlayPressable(newEntryModal));
+        await pressLatestAlertButton('破棄');
+
+        await waitFor(() =>
+          expect(AsyncStorage.removeItem).toHaveBeenCalledWith(draftKeyFor(yesterday)),
+        );
+      });
+
+      it("keeps auto-saved drafts separate per date so they do not bleed into another date's modal", async () => {
+        const now = new Date();
+        const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        const twoDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2);
+        await AsyncStorage.setItem(draftKeyFor(yesterday), '昨日専用の下書き');
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        // 無関係な別日(2日前)のモーダルを開いても、昨日専用の下書きは混入しない
+        openNewEntryModalFor(twoDaysAgo);
+        await waitFor(() =>
+          expect(AsyncStorage.getItem).toHaveBeenCalledWith(draftKeyFor(twoDaysAgo)),
+        );
+        expect(getNewEntryInput().props.value).toBe('');
+        expect(screen.queryByDisplayValue('昨日専用の下書き')).toBeNull();
+      });
+
+      it('truncates a restored draft to BODY_MAX_LENGTH when the auto-saved draft itself exceeds the limit (境界値)', async () => {
+        const yesterday = getYesterday();
+        const overLimitDraft = 'あ'.repeat(1010);
+        const truncatedDraft = 'あ'.repeat(1000);
+        await AsyncStorage.setItem(draftKeyFor(yesterday), overLimitDraft);
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        openNewEntryModalFor(yesterday);
+
+        await waitFor(() => expect(getNewEntryInput().props.value).toBe(truncatedDraft));
+        expect(screen.getByText('1000/1000')).toBeTruthy();
+      });
+
+      it('does not resurrect the discarded draft when the pending debounce timer fires after "破棄" is confirmed (race condition regression)', async () => {
+        const yesterday = getYesterday();
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        jest.clearAllMocks();
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+        openNewEntryModalFor(yesterday);
+        fireEvent.changeText(getNewEntryInput(), '破棄されるはずの内容');
+
+        const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
+        fireEvent.press(getModalOverlayPressable(newEntryModal));
+        await pressLatestAlertButton('破棄');
+
+        await waitFor(() =>
+          expect(AsyncStorage.removeItem).toHaveBeenCalledWith(draftKeyFor(yesterday)),
+        );
+        (AsyncStorage.setItem as jest.Mock).mockClear();
+
+        // 破棄確定時点で残っていたはずのデバウンスタイマーが発火しても、
+        // 明示的にキャンセルされているため下書きが復活しない
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(
+          draftKeyFor(yesterday),
+          expect.any(String),
+        );
+      });
+
+      it('does not re-persist the just-cleared draft when the pending debounce timer fires after a successful save (race condition regression)', async () => {
+        const yesterday = getYesterday();
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        jest.clearAllMocks();
+
+        openNewEntryModalFor(yesterday);
+        fireEvent.changeText(getNewEntryInput(), '保存される新規日記2');
+
+        // デバウンスタイマーが発火する(1000ms経過する)前に保存する
+        fireEvent.press(getNewEntrySaveButton());
+        await waitFor(() =>
+          expect(AsyncStorage.removeItem).toHaveBeenCalledWith(draftKeyFor(yesterday)),
+        );
+        (AsyncStorage.setItem as jest.Mock).mockClear();
+
+        // 保存完了時点で残っていたはずのデバウンスタイマーが発火しても、
+        // 明示的にキャンセルされているため下書きキーへの書き込みが復活しない
+        await act(async () => {
+          jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+        });
+
+        expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(
+          draftKeyFor(yesterday),
+          expect.any(String),
+        );
+      });
+
+      it('falls back to an empty input and keeps auto-save working afterward when restoring the draft fails (AsyncStorage.getItem rejects) (異常系)', async () => {
+        const yesterday = getYesterday();
+        const key = draftKeyFor(yesterday);
+        // async-storage-mockは元々jest.fn()のため、jest.spyOnの`mockRestore()`では元の実装に
+        // 戻らない(既知の挙動)。上書き前の実装を保存しておき、finallyで明示的に復元する
+        const originalGetItemImpl = (AsyncStorage.getItem as jest.Mock).getMockImplementation();
+        const getItemSpy = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((k: string) => {
+          if (k === key) {
+            return Promise.reject(new Error('read failed'));
+          }
+          return originalGetItemImpl ? originalGetItemImpl(k) : Promise.resolve(null);
+        });
+
+        // 未処理のPromise rejectionが発生していないことを検知するため、一時的にリスナーを登録する
+        const unhandledRejections: unknown[] = [];
+        const onUnhandledRejection = (reason: unknown) => {
+          unhandledRejections.push(reason);
+        };
+        process.on('unhandledRejection', onUnhandledRejection);
+
+        try {
+          render(<HomeScreen />);
+          await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+          openNewEntryModalFor(yesterday);
+          await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(key));
+
+          // rejectしたPromiseのcatch/finally節が実行されるまでマイクロタスクキューをフラッシュする
+          await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+          });
+
+          expect(unhandledRejections).toHaveLength(0);
+          expect(getNewEntryInput().props.value).toBe('');
+
+          // 復元処理が失敗してもisNewEntryDraftRestoredはtrueになり、以降の自動保存が無効化されたままにならない
+          fireEvent.changeText(getNewEntryInput(), '復元失敗後も自動保存される下書き');
+          await act(async () => {
+            jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+          });
+
+          await waitFor(() =>
+            expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+              key,
+              '復元失敗後も自動保存される下書き',
+            ),
+          );
+        } finally {
+          process.off('unhandledRejection', onUnhandledRejection);
+          if (originalGetItemImpl) {
+            getItemSpy.mockImplementation(originalGetItemImpl);
+          }
+        }
+      });
+
+      it('silently ignores an auto-save write failure (AsyncStorage.setItem rejects for the draft key) without showing an error or losing the in-progress input (異常系)', async () => {
+        const yesterday = getYesterday();
+        const key = draftKeyFor(yesterday);
+        const originalSetItemImpl = (AsyncStorage.setItem as jest.Mock).getMockImplementation();
+        const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        jest.spyOn(AsyncStorage, 'setItem').mockImplementation((k: string, v: string) => {
+          if (k === key) {
+            return Promise.reject(new Error('write failed'));
+          }
+          return originalSetItemImpl ? originalSetItemImpl(k, v) : Promise.resolve();
+        });
+
+        const unhandledRejections: unknown[] = [];
+        const onUnhandledRejection = (reason: unknown) => {
+          unhandledRejections.push(reason);
+        };
+        process.on('unhandledRejection', onUnhandledRejection);
+
+        try {
+          render(<HomeScreen />);
+          await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+          openNewEntryModalFor(yesterday);
+          fireEvent.changeText(getNewEntryInput(), '保存に失敗するはずの下書き');
+
+          await act(async () => {
+            jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
+          });
+          await waitFor(() =>
+            expect(AsyncStorage.setItem).toHaveBeenCalledWith(key, '保存に失敗するはずの下書き'),
+          );
+
+          // 下書きの自動保存(補助的な処理)が失敗しても、入力は継続でき、
+          // 本保存用のエラーメッセージは表示されない
+          expect(screen.queryByText('保存に失敗しました。もう一度お試しください。')).toBeNull();
+          expect(getNewEntryInput().props.value).toBe('保存に失敗するはずの下書き');
+          expect(unhandledRejections).toHaveLength(0);
+        } finally {
+          process.off('unhandledRejection', onUnhandledRejection);
+          consoleErrorSpy.mockRestore();
+        }
+      });
     });
   });
 
