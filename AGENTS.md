@@ -7,7 +7,9 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
 ## コミット・PR
 - コミットメッセージは Conventional Commits(feat:, fix:, test: など)を厳守
 - PRの本文に必ず `Closes #<issue番号>` を入れて Issue と自動リンクさせる
-- 1PRの変更ファイルは目安5枚以内。大きくなりそうなら Issue を分割する
+- 1PRの変更ファイルは目安10枚以内(1タスクの粒度が狭すぎると1日1タスクの着手ペースでは
+  進みが遅くなるため、従来の5枚から緩和)。どうしても切り分けられない場合は15枚程度までは
+  許容するが、それでも収まらない規模になりそうなら Issue を分割する
 
 ## mainブランチの運用
 - mainブランチへの直接コミット・pushは禁止。人間(オーナー)を含め全員、必ずfeatureブランチを作成し
@@ -143,8 +145,14 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
   Claude Code の利用(CLAUDE_CODE_OAUTH_TOKEN)は引き続きPro契約の枠内で追加課金なし
 
 ## スコープ外の発見事項の扱い
-- coder / qa-engineer の報告、および reviewer・designer(呼び出した場合)が実際に投稿したPRレビュー本文中の「スコープ外の発見事項」に、
-  今回のIssueと無関係な問題(バグ、技術的負債、改善点)が含まれていた場合、PMがそれを拾う
-- PMはそれを新しいIssueとして作成し、`found-in-review` ラベルを付けてProjectに追加する(Statusは `Todo`)
+- coder / qa-engineer / reviewer / designer が作業中(reviewer・designerは実際に投稿したPRレビュー本文)で
+  気づいた問題(バグ、デグレ、技術的負債、改善点)は、「今回のPRでのコード修正・機能追加が原因で発生した
+  (または発生しうる)もの」か「今回の変更とは全く関係のない既存コードの問題にたまたま気づいたもの」かで
+  扱いを分ける
+  - 前者(このPRの修正・追加に付随して新たに生じた不具合・デグレ)は、スコープ外扱いにせず同じPR内で
+    coderが修正し、qa-engineerが検証する(CI失敗時の扱いと同様の考え方)
+  - 後者(このPRの変更内容とは無関係な既存コードの問題)のみ、コード修正では対応せず「スコープ外の発見事項」
+    としてPMへの報告・PRレビュー本文に含める
+- PMは後者についてのみ新しいIssueとして作成し、`found-in-review` ラベルを付けてProjectに追加する(Statusは `Todo`)
 - 優先度ラベルは `next` を基本とする(緊急性が本当に高い場合のみ `now`)。`now` を付けた場合、
   次回の ai-team-scheduler.yml 実行で通常のIssueと同じく自動的に選定対象になる
