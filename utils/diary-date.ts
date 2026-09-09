@@ -23,7 +23,7 @@ export function formatDateHeading(dateKey: string): string {
   return `${year}年${Number(month)}月${Number(day)}日`;
 }
 
-// 週表示カレンダー(#283)のヘッダー1マス分の情報
+// 週表示カレンダーのヘッダー1マス分の情報
 export type WeekDayInfo = {
   /** 'YYYY-MM-DD'形式の日付キー */
   dateKey: string;
