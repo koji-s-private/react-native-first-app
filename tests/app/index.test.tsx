@@ -5095,5 +5095,157 @@ describe('HomeScreen', () => {
         ).toBeNull();
       });
     });
+
+    describe('スワイプ操作によるフォーカス移動(#284: PanResponderによる左右スワイプ)', () => {
+      afterEach(() => {
+        jest.useRealTimers();
+      });
+
+      // PanResponderは実際のタッチイベント系列(touchHistory)からgestureStateのdx/dyを内部で
+      // 累積計算するため、fireEventで単純にdx/dyを渡すことはできない。react-native本体の
+      // TouchHistoryMathの計算式に沿って、start(0,0)からend(dx,dy)へ移動した単一タッチの履歴を
+      // 組み立て、実際のジェスチャーレスポンダーシステムがPanResponderの内部gestureStateを
+      // 更新するのに使う捕捉フェーズハンドラ(onMoveShouldSetResponderCapture)経由でdx/dyを
+      // 反映させたうえで、リリース(onResponderRelease)を発火させる
+      function buildSingleTouchHistory(dx: number, dy: number) {
+        return {
+          touchBank: [
+            {
+              touchActive: true,
+              currentTimeStamp: 100,
+              currentPageX: dx,
+              currentPageY: dy,
+              previousPageX: 0,
+              previousPageY: 0,
+            },
+          ],
+          numberActiveTouches: 1,
+          indexOfSingleActiveTouch: 0,
+          mostRecentTimeStamp: 100,
+        };
+      }
+
+      // WeekCalendarViewの外枠View(PanResponder.panHandlersがスプレッドされている)を、
+      // onMoveShouldSetResponderCapture/onResponderReleaseを両方持つホストViewであることを
+      // 目印に特定する(Pressable内部の実装はこの2つを同時には持たないため一意に絞り込める)
+      function getWeekSwipeResponderView() {
+        const candidates = screen.root.findAll(
+          (node: TestNode) =>
+            node.type === View &&
+            typeof node.props.onMoveShouldSetResponderCapture === 'function' &&
+            typeof node.props.onResponderRelease === 'function',
+        );
+        if (candidates.length !== 1) {
+          throw new Error(
+            `expected exactly one week swipe responder view, found ${candidates.length}`,
+          );
+        }
+        return candidates[0];
+      }
+
+      function simulateWeekSwipe(dx: number, dy: number) {
+        const responderView = getWeekSwipeResponderView();
+        const touchHistory = buildSingleTouchHistory(dx, dy);
+        act(() => {
+          responderView.props.onMoveShouldSetResponderCapture({ touchHistory });
+        });
+        act(() => {
+          responderView.props.onResponderRelease({ touchHistory });
+        });
+      }
+
+      it('moves focus to the next day on a leftward swipe past the threshold (正常系)', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date(2026, 8, 9, 12, 0, 0));
+
+        await renderInWeekLayout();
+
+        simulateWeekSwipe(-50, 0);
+
+        expect(getFocusedDayHeading()).toHaveTextContent(formatDateHeading('2026-09-10'));
+      });
+
+      it('moves focus to the previous day on a rightward swipe past the threshold (正常系)', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date(2026, 8, 9, 12, 0, 0));
+
+        await renderInWeekLayout();
+
+        simulateWeekSwipe(50, 0);
+
+        expect(getFocusedDayHeading()).toHaveTextContent(formatDateHeading('2026-09-08'));
+      });
+
+      it('does not move focus when the horizontal swipe distance is below the threshold (境界値)', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date(2026, 8, 9, 12, 0, 0));
+
+        await renderInWeekLayout();
+
+        simulateWeekSwipe(-20, 0);
+
+        expect(getFocusedDayHeading()).toHaveTextContent(formatDateHeading('2026-09-09'));
+      });
+
+      it('does not move focus when the vertical movement is greater than or equal to the horizontal movement, to avoid conflicting with vertical scrolling (境界値)', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date(2026, 8, 9, 12, 0, 0));
+
+        await renderInWeekLayout();
+
+        simulateWeekSwipe(-50, 60);
+
+        expect(getFocusedDayHeading()).toHaveTextContent(formatDateHeading('2026-09-09'));
+      });
+
+      it('switches to the next week on a leftward swipe that crosses the end of the current week, and shows the diary entry that belongs to the newly focused day (境界値: 週をまたぐスワイプ移動)', async () => {
+        // 2026-09-12は週の最終日(土曜日)。スワイプで次の日(2026-09-13、日曜日、次の週)へ移動する
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date(2026, 8, 12, 12, 0, 0));
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '次の週の日記', createdAt: buildCreatedAtForDateKey('2026-09-13') },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        await renderInWeekLayout();
+        expect(getWeekDayFocusButton('2026-09-06')).toBeTruthy();
+        expect(queryWeekEntryButtons()).toHaveLength(0);
+
+        simulateWeekSwipe(-50, 0);
+
+        expect(getFocusedDayHeading()).toHaveTextContent(formatDateHeading('2026-09-13'));
+        expect(getWeekDayFocusButton('2026-09-13').props.accessibilityState.selected).toBe(true);
+        expect(getWeekDayFocusButton('2026-09-19')).toBeTruthy();
+        expect(
+          screen.queryByLabelText(`${formatDateHeading('2026-09-06')}にフォーカスを移動`),
+        ).toBeNull();
+        // 週が切り替わったことで、新しい週に属する日記が一覧に表示されるようになる
+        const entryButtons = queryWeekEntryButtons();
+        expect(entryButtons).toHaveLength(1);
+        expect(entryButtons[0].props.accessibilityLabel).toBe(
+          `${formatDateHeading('2026-09-13')}の日記: 次の週の日記`,
+        );
+      });
+
+      it('switches to the previous week on a rightward swipe that crosses the start of the current week (境界値: 週をまたぐスワイプ移動)', async () => {
+        // 2026-09-06は週の最初の日(日曜日)。スワイプで前の日(2026-09-05、土曜日、前の週)へ移動する
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date(2026, 8, 6, 12, 0, 0));
+
+        await renderInWeekLayout();
+
+        simulateWeekSwipe(50, 0);
+
+        expect(getFocusedDayHeading()).toHaveTextContent(formatDateHeading('2026-09-05'));
+        expect(getWeekDayFocusButton('2026-09-05').props.accessibilityState.selected).toBe(true);
+        expect(getWeekDayFocusButton('2026-08-30')).toBeTruthy();
+        expect(
+          screen.queryByLabelText(`${formatDateHeading('2026-09-12')}にフォーカスを移動`),
+        ).toBeNull();
+      });
+    });
   });
 });
