@@ -28,6 +28,16 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { decryptText, encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
 import { buildDiaryEntryKey, type DiaryEntry } from '@/utils/diary-storage';
+import {
+  CALENDAR_LAYOUT_PREFERENCE_STORAGE_KEY,
+  CalendarLayoutPreferenceProvider,
+} from '@/contexts/calendar-layout-preference-context';
+import {
+  buildCreatedAtForDateKey,
+  formatDateHeading,
+  getWeekDays,
+  toDateKey,
+} from '@/utils/diary-date';
 
 // `expo-router`の`Link`(Trigger/Preview/Menuを伴う複合API)はナビゲーション/routerコンテキストを
 // 要求するため、単体レンダリングでも動くよう単純なパススルーコンポーネントに差し替える。
@@ -4821,6 +4831,183 @@ describe('HomeScreen', () => {
         expect(excerpt.match).toBe('123');
         expect(excerpt.suffix).toBe(`${'い'.repeat(20)}…`);
       });
+    });
+  });
+
+  describe('週表示レイアウト(#283)', () => {
+    // カレンダー表示レイアウトの設定は`app/_layout.tsx`で`CalendarLayoutPreferenceProvider`が
+    // ルートに配線されているが、単体レンダリングではそのラップが無いため、
+    // 明示的に`CalendarLayoutPreferenceProvider`でラップして実機と同じ構成を再現する
+    // (tests/app/settings.test.tsxの外観セクションのテストと同じ方針)。
+    function renderHomeScreenWithLayoutProvider() {
+      return render(
+        <CalendarLayoutPreferenceProvider>
+          <HomeScreen />
+        </CalendarLayoutPreferenceProvider>,
+      );
+    }
+
+    async function renderInWeekLayout() {
+      await AsyncStorage.setItem(CALENDAR_LAYOUT_PREFERENCE_STORAGE_KEY, 'week');
+      renderHomeScreenWithLayoutProvider();
+      // CalendarLayoutPreferenceProviderの起動時読み込み(既定値'month'→'week')が
+      // 反映されるのを待つ
+      await waitFor(() => expect(screen.UNSAFE_queryAllByType(Calendar)).toHaveLength(0));
+    }
+
+    // 週表示カレンダーの日記項目Pressableを、実装側が付与する
+    // `accessibilityLabel="<見出し>の日記: <本文>"`を目印に絞り込むヘルパー
+    function queryWeekEntryButtons() {
+      return screen
+        .queryAllByRole('button')
+        .filter((button) =>
+          (button.props.accessibilityLabel as string | undefined)?.includes('の日記:'),
+        );
+    }
+
+    it('renders the week-view weekday header (日 月 火 水 木 金 土) instead of the month Calendar when the layout preference is "week" (正常系)', async () => {
+      await renderInWeekLayout();
+
+      expect(screen.UNSAFE_queryAllByType(Calendar)).toHaveLength(0);
+      for (const dayName of ['日', '月', '火', '水', '木', '金', '土']) {
+        expect(screen.getByText(dayName)).toBeTruthy();
+      }
+    });
+
+    it('shows all 7 day numbers of the week containing today, including today itself (正常系: 初回表示は当日を含む週)', async () => {
+      const now = new Date();
+      const weekDays = getWeekDays(now);
+      await renderInWeekLayout();
+
+      for (const weekDay of weekDays) {
+        expect(screen.getByText(String(weekDay.day))).toBeTruthy();
+      }
+    });
+
+    it("keeps rendering the month Calendar (existing behavior unaffected) when the layout preference is the default 'month' (回帰: 既存の月表示に影響がない)", async () => {
+      renderHomeScreenWithLayoutProvider();
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      expect(screen.UNSAFE_queryAllByType(Calendar)).toHaveLength(1);
+      expect(queryWeekEntryButtons()).toHaveLength(0);
+    });
+
+    it("shows a diary entry under today's column and navigates to the day-entries screen for today's date when it is pressed (正常系)", async () => {
+      const now = new Date();
+      const todayKey = toDateKey(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '今日の出来事', createdAt: buildCreatedAtForDateKey(todayKey) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      await renderInWeekLayout();
+
+      const entryButtons = queryWeekEntryButtons();
+      expect(entryButtons).toHaveLength(1);
+      expect(entryButtons[0].props.accessibilityLabel).toBe(
+        `${formatDateHeading(todayKey)}の日記: 今日の出来事`,
+      );
+
+      fireEvent.press(entryButtons[0]);
+      expect(mockPush).toHaveBeenCalledWith(`/day-entries/${todayKey}`);
+    });
+
+    it('sorts multiple diary entries on the same day within the week in ascending order of createdAt (正常系: 作成日時昇順)', async () => {
+      const now = new Date();
+      const todayKey = toDateKey(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: 'late', text: '夜の日記', createdAt: isoAt(now, now.getDate(), 21, 0) },
+          { id: 'early', text: '朝の日記', createdAt: isoAt(now, now.getDate(), 7, 0) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      await renderInWeekLayout();
+
+      const entryButtons = queryWeekEntryButtons().filter((button) =>
+        (button.props.accessibilityLabel as string).startsWith(formatDateHeading(todayKey)),
+      );
+      expect(entryButtons).toHaveLength(2);
+      expect(entryButtons[0].props.accessibilityLabel).toBe(
+        `${formatDateHeading(todayKey)}の日記: 朝の日記`,
+      );
+      expect(entryButtons[1].props.accessibilityLabel).toBe(
+        `${formatDateHeading(todayKey)}の日記: 夜の日記`,
+      );
+    });
+
+    it('does not show a diary entry under a day of the week that has no entries, even when another day in the same week has one (境界値: entriesByDateにキーが無い日付)', async () => {
+      const now = new Date();
+      const weekDays = getWeekDays(now);
+      const todayKey = toDateKey(now);
+      // 今日以外の週内の日付を1つ選ぶ(週は7日あるため必ず1つ以上存在する)
+      const otherDay = weekDays.find((day) => day.dateKey !== todayKey);
+      if (!otherDay) {
+        throw new Error('expected at least one other day in the week');
+      }
+
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '今日の日記', createdAt: buildCreatedAtForDateKey(todayKey) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      await renderInWeekLayout();
+
+      const entryButtons = queryWeekEntryButtons();
+      // otherDay列には日記が無いため、週全体で表示される日記項目は1件のみ
+      expect(entryButtons).toHaveLength(1);
+      expect(
+        entryButtons.some((button) =>
+          (button.props.accessibilityLabel as string).startsWith(
+            formatDateHeading(otherDay.dateKey),
+          ),
+        ),
+      ).toBe(false);
+    });
+
+    it('shows diary entries grouped under the correct day column across different days within the same week (正常系)', async () => {
+      const now = new Date();
+      const weekDays = getWeekDays(now);
+      const todayKey = toDateKey(now);
+      const otherDay = weekDays.find((day) => day.dateKey !== todayKey);
+      if (!otherDay) {
+        throw new Error('expected at least one other day in the week');
+      }
+
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '今日の日記', createdAt: buildCreatedAtForDateKey(todayKey) },
+          { id: '2', text: '別の日の日記', createdAt: buildCreatedAtForDateKey(otherDay.dateKey) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      await renderInWeekLayout();
+
+      const entryButtons = queryWeekEntryButtons();
+      expect(entryButtons).toHaveLength(2);
+      expect(
+        entryButtons.some(
+          (button) =>
+            button.props.accessibilityLabel === `${formatDateHeading(todayKey)}の日記: 今日の日記`,
+        ),
+      ).toBe(true);
+      expect(
+        entryButtons.some(
+          (button) =>
+            button.props.accessibilityLabel ===
+            `${formatDateHeading(otherDay.dateKey)}の日記: 別の日の日記`,
+        ),
+      ).toBe(true);
     });
   });
 });
