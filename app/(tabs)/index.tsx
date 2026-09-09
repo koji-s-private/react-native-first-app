@@ -15,6 +15,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   TextInput,
   View,
@@ -28,10 +29,16 @@ import { TabScreenContainer } from '@/components/tab-screen-container';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useCalendarLayoutPreference } from '@/contexts/calendar-layout-preference-context';
 import { useThemePreference } from '@/contexts/theme-preference-context';
 import { useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { buildCreatedAtForDateKey, formatDateHeading, toDateKey } from '@/utils/diary-date';
+import {
+  buildCreatedAtForDateKey,
+  formatDateHeading,
+  getWeekDays,
+  toDateKey,
+} from '@/utils/diary-date';
 import { BODY_MAX_LENGTH, splitIntoGraphemes, truncateToBodyMaxLength } from '@/utils/diary-text';
 import { getAllDiaryEntries, saveDiaryEntry, type DiaryEntry } from '@/utils/diary-storage';
 
@@ -130,6 +137,9 @@ LocaleConfig.locales.ja = {
   today: '今日',
 };
 LocaleConfig.defaultLocale = 'ja';
+
+// 週表示カレンダー(#283)のヘッダーで使う曜日の短縮名(getWeekDaysのdayOfWeek(0:日〜6:土)に対応する並び)
+const JA_WEEKDAY_SHORT_NAMES = ['日', '月', '火', '水', '木', '金', '土'];
 
 // 検索結果の抜粋で、マッチ箇所の前後何文字を表示するか
 const SEARCH_EXCERPT_CONTEXT_LENGTH = 20;
@@ -282,6 +292,75 @@ function useModalSlideTransition(isOpen: boolean) {
   return { isMounted, overlayOpacity, contentTranslateY };
 }
 
+// 週表示レイアウト(#283)のカレンダー部分。当日を含む週(日曜始まり)の7日分を1行のヘッダーとして
+// 表示し、各日付の下にその日の日記を作成日時の昇順で並べる。日付タップによるフォーカス切り替えや
+// 前後の週への移動は今回のスコープ外のため、常に「今日を含む週」を固定表示する
+function WeekCalendarView({
+  entriesByDate,
+  onEntryPress,
+}: {
+  entriesByDate: Record<string, DiaryEntry[]>;
+  onEntryPress: (dateKey: string) => void;
+}) {
+  const textColor = useThemeColor({}, 'text');
+  const tintColor = useThemeColor({}, 'tint');
+  const backgroundColor = useThemeColor({}, 'background');
+  const iconColor = useThemeColor({}, 'icon');
+
+  // 表示対象の週は起動中に変化しないため、マウント時の「今日」を基準に一度だけ計算する
+  const weekDays = useMemo(() => getWeekDays(new Date()), []);
+  const todayDateKey = useMemo(() => toDateKey(new Date()), []);
+
+  return (
+    <View style={[styles.weekWrapper, { borderColor: iconColor, backgroundColor }]}>
+      <ScrollView contentContainerStyle={styles.weekScrollContent}>
+        <View style={styles.weekRow}>
+          {weekDays.map((weekDay) => {
+            const isToday = weekDay.dateKey === todayDateKey;
+            const dayEntries = entriesByDate[weekDay.dateKey] ?? [];
+            return (
+              <View key={weekDay.dateKey} style={styles.weekColumn}>
+                <ThemedText style={[styles.weekDayName, { color: textColor }]}>
+                  {JA_WEEKDAY_SHORT_NAMES[weekDay.dayOfWeek]}
+                </ThemedText>
+                {isToday ? (
+                  <View style={[styles.todayBadge, { backgroundColor: tintColor }]}>
+                    <ThemedText
+                      style={[styles.dayNumber, { color: backgroundColor, fontWeight: '700' }]}
+                    >
+                      {weekDay.day}
+                    </ThemedText>
+                  </View>
+                ) : (
+                  <ThemedText style={styles.dayNumber}>{weekDay.day}</ThemedText>
+                )}
+                <View style={styles.weekColumnEntries}>
+                  {dayEntries.map((entry) => (
+                    <Pressable
+                      key={entry.id}
+                      onPress={() => onEntryPress(weekDay.dateKey)}
+                      style={[styles.weekEntryItem, { backgroundColor: tintColor }]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${formatDateHeading(weekDay.dateKey)}の日記: ${entry.text}`}
+                    >
+                      <ThemedText
+                        numberOfLines={2}
+                        style={[styles.weekEntryText, { color: backgroundColor }]}
+                      >
+                        {entry.text || '(内容なし)'}
+                      </ThemedText>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
 export default function HomeScreen() {
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
   // 初回のloadEntries完了までtrueの読み込み中フラグ。useFocusEffectで再フォーカス時にも
@@ -339,6 +418,8 @@ export default function HomeScreen() {
 
   const router = useRouter();
   const { colorScheme } = useThemePreference();
+  // 月表示/週表示のどちらでホーム画面のカレンダー部分を表示するかの設定(#283)
+  const { layout: calendarLayout } = useCalendarLayoutPreference();
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
   const backgroundColor = useThemeColor({}, 'background');
@@ -684,6 +765,14 @@ export default function HomeScreen() {
   const handleSearchResultPress = useCallback(
     (entry: DiaryEntry) => {
       router.push(`/day-entries/${toDateKey(new Date(entry.createdAt))}`);
+    },
+    [router],
+  );
+
+  // 週表示カレンダーの日記項目がタップされたら、その日の一覧画面へ遷移する(検索結果と同じ導線)
+  const handleWeekEntryPress = useCallback(
+    (dateKey: string) => {
+      router.push(`/day-entries/${dateKey}`);
     },
     [router],
   );
@@ -1055,38 +1144,47 @@ export default function HomeScreen() {
                 </ThemedView>
               ) : null}
 
-              <View
-                style={[styles.calendarWrapper, { borderColor: iconColor, backgroundColor }]}
-                onLayout={(event) => setWrapperHeight(event.nativeEvent.layout.height)}
-              >
-                <Calendar
-                  // react-native-calendarsはtheme propのスタイルをuseRefで初回計算しキャッシュするため、
-                  // マウント後のテーマ変更に追従しない。colorSchemeをkeyにして変化のたびに強制再マウントさせる
-                  key={colorScheme}
-                  theme={{
-                    backgroundColor,
-                    calendarBackground: backgroundColor,
-                    // 曜日行はtextColorを使い、アイコン色より高いコントラストで視認性を確保する
-                    textSectionTitleColor: textColor,
-                    textDayHeaderFontWeight: '600',
-                    dayTextColor: textColor,
-                    arrowColor: tintColor,
-                    todayTextColor: tintColor,
-                  }}
-                  dayComponent={renderDay}
-                  onDayPress={handleDayPress}
-                  // 見出しを日本語語順で表示しつつ、タップで年月ピッカーを開くボタンに差し替える
-                  renderHeader={renderCalendarHeader}
-                  enableSwipeMonths
-                  // ピッカーから任意の年月へジャンプするための制御用prop(詳細はcalendarInitialDateを参照)
-                  initialDate={calendarInitialDate}
-                  onMonthChange={handleMonthChange}
-                  // 未来日を新規作成の対象外にするため、今日より後の日付をタップ不可(state: 'disabled')にする
-                  maxDate={toDateKey(new Date())}
-                  // 月によって行数(4〜6週)が変わって高さがガタつかないよう、常に6週分の高さで揃える
-                  showSixWeeks
+              {calendarLayout === 'week' ? (
+                // 週表示(#283): 1ヶ月分をまとめて表示する月表示だと情報が細かすぎるという
+                // フィードバックに対応した、当日を含む週のみを表示するレイアウト
+                <WeekCalendarView
+                  entriesByDate={entriesByDate}
+                  onEntryPress={handleWeekEntryPress}
                 />
-              </View>
+              ) : (
+                <View
+                  style={[styles.calendarWrapper, { borderColor: iconColor, backgroundColor }]}
+                  onLayout={(event) => setWrapperHeight(event.nativeEvent.layout.height)}
+                >
+                  <Calendar
+                    // react-native-calendarsはtheme propのスタイルをuseRefで初回計算しキャッシュするため、
+                    // マウント後のテーマ変更に追従しない。colorSchemeをkeyにして変化のたびに強制再マウントさせる
+                    key={colorScheme}
+                    theme={{
+                      backgroundColor,
+                      calendarBackground: backgroundColor,
+                      // 曜日行はtextColorを使い、アイコン色より高いコントラストで視認性を確保する
+                      textSectionTitleColor: textColor,
+                      textDayHeaderFontWeight: '600',
+                      dayTextColor: textColor,
+                      arrowColor: tintColor,
+                      todayTextColor: tintColor,
+                    }}
+                    dayComponent={renderDay}
+                    onDayPress={handleDayPress}
+                    // 見出しを日本語語順で表示しつつ、タップで年月ピッカーを開くボタンに差し替える
+                    renderHeader={renderCalendarHeader}
+                    enableSwipeMonths
+                    // ピッカーから任意の年月へジャンプするための制御用prop(詳細はcalendarInitialDateを参照)
+                    initialDate={calendarInitialDate}
+                    onMonthChange={handleMonthChange}
+                    // 未来日を新規作成の対象外にするため、今日より後の日付をタップ不可(state: 'disabled')にする
+                    maxDate={toDateKey(new Date())}
+                    // 月によって行数(4〜6週)が変わって高さがガタつかないよう、常に6週分の高さで揃える
+                    showSixWeeks
+                  />
+                </View>
+              )}
             </>
           )}
         </Pressable>
@@ -1429,6 +1527,41 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     // 実測に多少の誤差があっても、日付グリッドが外枠からはみ出して見えないようにする保険
     overflow: 'hidden',
+  },
+  // 週表示(#283)のカレンダー部分。calendarWrapperと同様に残りスペースを使い切る
+  weekWrapper: {
+    flex: 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  weekScrollContent: {
+    padding: 8,
+  },
+  weekRow: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  weekColumn: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+  },
+  weekDayName: {
+    fontSize: 12,
+  },
+  weekColumnEntries: {
+    width: '100%',
+    gap: 4,
+  },
+  weekEntryItem: {
+    width: '100%',
+    borderRadius: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+  },
+  weekEntryText: {
+    fontSize: 10,
   },
   calendarHeaderButton: {
     flexDirection: 'row',

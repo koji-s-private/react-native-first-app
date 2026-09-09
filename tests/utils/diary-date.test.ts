@@ -2,6 +2,7 @@ import {
   buildCreatedAtForDateKey,
   formatDateHeading,
   formatEntryDateTime,
+  getWeekDays,
   toDateKey,
 } from '@/utils/diary-date';
 
@@ -40,6 +41,55 @@ describe('formatDateHeading', () => {
 
   it('does not zero-pad the month/day in the heading (境界値)', () => {
     expect(formatDateHeading('2026-09-03')).toBe('2026年9月3日');
+  });
+});
+
+describe('getWeekDays', () => {
+  it('returns the 7 days of the week (Sunday-start) containing the given date (正常系)', () => {
+    // 2026-09-09は水曜日
+    const days = getWeekDays(new Date(2026, 8, 9));
+
+    expect(days).toHaveLength(7);
+    expect(days.map((d) => d.dateKey)).toEqual([
+      '2026-09-06',
+      '2026-09-07',
+      '2026-09-08',
+      '2026-09-09',
+      '2026-09-10',
+      '2026-09-11',
+      '2026-09-12',
+    ]);
+    expect(days.map((d) => d.dayOfWeek)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(days.map((d) => d.day)).toEqual([6, 7, 8, 9, 10, 11, 12]);
+  });
+
+  it('returns the same week when the given date is already a Sunday (境界値: 週の開始日)', () => {
+    const days = getWeekDays(new Date(2026, 8, 6));
+
+    expect(days[0].dateKey).toBe('2026-09-06');
+    expect(days[6].dateKey).toBe('2026-09-12');
+  });
+
+  it('returns the same week when the given date is a Saturday (境界値: 週の最終日)', () => {
+    const days = getWeekDays(new Date(2026, 8, 12));
+
+    expect(days[0].dateKey).toBe('2026-09-06');
+    expect(days[6].dateKey).toBe('2026-09-12');
+  });
+
+  it('correctly spans a month boundary (境界値: 月をまたぐ週)', () => {
+    // 2026-08-31は月曜日で、その週は8月と9月にまたがる
+    const days = getWeekDays(new Date(2026, 7, 31));
+
+    expect(days.map((d) => d.dateKey)).toEqual([
+      '2026-08-30',
+      '2026-08-31',
+      '2026-09-01',
+      '2026-09-02',
+      '2026-09-03',
+      '2026-09-04',
+      '2026-09-05',
+    ]);
   });
 });
 

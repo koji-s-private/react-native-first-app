@@ -9,6 +9,7 @@ import { AppLockScreen } from '@/components/app-lock-screen';
 import { Onboarding } from '@/components/onboarding';
 import { ThemedView } from '@/components/themed-view';
 import { AppLockProvider, useAppLock } from '@/contexts/app-lock-context';
+import { CalendarLayoutPreferenceProvider } from '@/contexts/calendar-layout-preference-context';
 import { DiaryReminderProvider } from '@/contexts/diary-reminder-context';
 import { ThemePreferenceProvider, useThemePreference } from '@/contexts/theme-preference-context';
 import { hasCompletedOnboarding, markOnboardingCompleted } from '@/utils/onboarding-storage';
@@ -121,14 +122,16 @@ function RootLayoutContent() {
 
 export default function RootLayout() {
   // アプリ内で選択されたテーマ設定(#91)、日記リマインダー通知の設定(#92)、
-  // アプリロックの設定(#155)を全体に配線するため、最上位でラップする
+  // アプリロックの設定(#155)、カレンダー表示レイアウトの設定(#283)を全体に配線するため、最上位でラップする
   return (
     <ThemePreferenceProvider>
-      <DiaryReminderProvider>
-        <AppLockProvider>
-          <RootLayoutContent />
-        </AppLockProvider>
-      </DiaryReminderProvider>
+      <CalendarLayoutPreferenceProvider>
+        <DiaryReminderProvider>
+          <AppLockProvider>
+            <RootLayoutContent />
+          </AppLockProvider>
+        </DiaryReminderProvider>
+      </CalendarLayoutPreferenceProvider>
     </ThemePreferenceProvider>
   );
 }
