@@ -4864,6 +4864,17 @@ describe('HomeScreen', () => {
         );
     }
 
+    // 週ヘッダーの日付フォーカス切り替えボタン(`accessibilityLabel="<見出し>にフォーカスを移動"`)を、
+    // 対象の日付キーで1件取得するヘルパー
+    function getWeekDayFocusButton(dateKey: string) {
+      return screen.getByLabelText(`${formatDateHeading(dateKey)}にフォーカスを移動`);
+    }
+
+    // フォーカス中の日の見出し(ナビゲーションバー中央のテキスト)を取得するヘルパー
+    function getFocusedDayHeading() {
+      return screen.getByText(/^\d{4}年\d{1,2}月\d{1,2}日$/);
+    }
+
     it('renders the week-view weekday header (日 月 火 水 木 金 土) instead of the month Calendar when the layout preference is "week" (正常系)', async () => {
       await renderInWeekLayout();
 
@@ -5007,6 +5018,82 @@ describe('HomeScreen', () => {
             `${formatDateHeading(otherDay.dateKey)}の日記: 別の日の日記`,
         ),
       ).toBe(true);
+    });
+
+    describe('日付フォーカスの移動(#284: ヘッダーの日付タップ・前後日ボタンのタップ・週をまたぐ移動)', () => {
+      afterEach(() => {
+        jest.useRealTimers();
+      });
+
+      it('focuses today by default, and moves focus to the tapped date when a different day in the week header is pressed (正常系)', async () => {
+        // 2026-09-09は水曜日で、週は2026-09-06(日)〜2026-09-12(土)
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date(2026, 8, 9, 12, 0, 0));
+
+        await renderInWeekLayout();
+
+        expect(getFocusedDayHeading()).toHaveTextContent(formatDateHeading('2026-09-09'));
+        expect(getWeekDayFocusButton('2026-09-09').props.accessibilityState.selected).toBe(true);
+        expect(getWeekDayFocusButton('2026-09-07').props.accessibilityState.selected).toBe(false);
+
+        fireEvent.press(getWeekDayFocusButton('2026-09-07'));
+
+        expect(getFocusedDayHeading()).toHaveTextContent(formatDateHeading('2026-09-07'));
+        expect(getWeekDayFocusButton('2026-09-07').props.accessibilityState.selected).toBe(true);
+        expect(getWeekDayFocusButton('2026-09-09').props.accessibilityState.selected).toBe(false);
+      });
+
+      it('moves the focused date forward/backward by one day when the next/previous day buttons are tapped (正常系)', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date(2026, 8, 9, 12, 0, 0));
+
+        await renderInWeekLayout();
+
+        fireEvent.press(screen.getByLabelText('次の日へ移動'));
+        expect(getFocusedDayHeading()).toHaveTextContent(formatDateHeading('2026-09-10'));
+
+        fireEvent.press(screen.getByLabelText('前の日へ移動'));
+        fireEvent.press(screen.getByLabelText('前の日へ移動'));
+        expect(getFocusedDayHeading()).toHaveTextContent(formatDateHeading('2026-09-08'));
+      });
+
+      it('switches to the next week (without breaking) when the next-day button crosses the end of the current week (境界値: 週をまたぐ移動)', async () => {
+        // 2026-09-12は週の最終日(土曜日)。次の日(2026-09-13、日曜日)は次の週に属する
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date(2026, 8, 12, 12, 0, 0));
+
+        await renderInWeekLayout();
+        // 移動前は2026-09-06(日)〜2026-09-12(土)の週が表示されている
+        expect(getWeekDayFocusButton('2026-09-06')).toBeTruthy();
+
+        fireEvent.press(screen.getByLabelText('次の日へ移動'));
+
+        expect(getFocusedDayHeading()).toHaveTextContent(formatDateHeading('2026-09-13'));
+        expect(getWeekDayFocusButton('2026-09-13').props.accessibilityState.selected).toBe(true);
+        // 表示週が次の週(2026-09-13〜2026-09-19)に切り替わっている
+        expect(getWeekDayFocusButton('2026-09-19')).toBeTruthy();
+        expect(
+          screen.queryByLabelText(`${formatDateHeading('2026-09-06')}にフォーカスを移動`),
+        ).toBeNull();
+      });
+
+      it('switches to the previous week (without breaking) when the previous-day button crosses the start of the current week (境界値: 週をまたぐ移動)', async () => {
+        // 2026-09-06は週の最初の日(日曜日)。前の日(2026-09-05、土曜日)は前の週に属する
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date(2026, 8, 6, 12, 0, 0));
+
+        await renderInWeekLayout();
+
+        fireEvent.press(screen.getByLabelText('前の日へ移動'));
+
+        expect(getFocusedDayHeading()).toHaveTextContent(formatDateHeading('2026-09-05'));
+        expect(getWeekDayFocusButton('2026-09-05').props.accessibilityState.selected).toBe(true);
+        // 表示週が前の週(2026-08-30〜2026-09-05)に切り替わっている
+        expect(getWeekDayFocusButton('2026-08-30')).toBeTruthy();
+        expect(
+          screen.queryByLabelText(`${formatDateHeading('2026-09-12')}にフォーカスを移動`),
+        ).toBeNull();
+      });
     });
   });
 });

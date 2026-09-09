@@ -23,6 +23,13 @@ export function formatDateHeading(dateKey: string): string {
   return `${year}年${Number(month)}月${Number(day)}日`;
 }
 
+// 'YYYY-MM-DD'形式の日付キーを、その日のローカル日時0時を表すDateに変換する
+// (週表示カレンダーの日付タップ・前後日移動で、日付キーをDate演算に戻すために使う)
+export function dateKeyToDate(dateKey: string): Date {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
 // 週表示カレンダーのヘッダー1マス分の情報
 export type WeekDayInfo = {
   /** 'YYYY-MM-DD'形式の日付キー */
@@ -42,6 +49,21 @@ export function getWeekDays(date: Date): WeekDayInfo[] {
     current.setDate(startOfWeek.getDate() + index);
     return { dateKey: toDateKey(current), dayOfWeek: current.getDay(), day: current.getDate() };
   });
+}
+
+// 週表示カレンダーのスワイプ操作でフォーカス移動と判定する最小水平移動量(px)
+const WEEK_SWIPE_HORIZONTAL_THRESHOLD_PX = 40;
+
+// PanResponderのgestureState(dx: 水平方向の移動量, dy: 垂直方向の移動量)から、
+// スワイプによるフォーカス移動量(日数、前日: -1 / 翌日: +1)を判定する。縦スクロールとの
+// 誤判定を避けるため、水平移動が閾値を超え、かつ垂直移動より大きい場合のみスワイプとして扱う。
+// PanResponder自体は実際のタッチイベント系列に依存し単体テストしづらいため、判定ロジックを
+// 純粋関数として切り出している
+export function getSwipeDayDelta(dx: number, dy: number): -1 | 0 | 1 {
+  if (Math.abs(dx) < WEEK_SWIPE_HORIZONTAL_THRESHOLD_PX || Math.abs(dx) <= Math.abs(dy)) {
+    return 0;
+  }
+  return dx < 0 ? 1 : -1;
 }
 
 // 日記エントリの日時を'YYYY/MM/DD HH:mm'形式で整形する(端末のロケール設定に依存する
