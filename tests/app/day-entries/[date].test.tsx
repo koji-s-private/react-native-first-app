@@ -23,6 +23,16 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
+// 実機では`expo-router`の`ExpoRoot`が自動的に`SafeAreaProvider`で全体をラップするが、
+// 単体レンダリングではそのラップが無く`useSafeAreaInsets`がエラーを投げるため、
+// 公式のjestモック(SafeAreaProvider無しでも既定値を返す)に差し替える(tests/app/index.test.tsxと同じ方式)。
+jest.mock(
+  'react-native-safe-area-context',
+  () =>
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('react-native-safe-area-context/jest/mock').default,
+);
+
 // jest-expoのオートモックは`getRandomBytes`を提供しないため、Node標準の`crypto`モジュールで代替する
 // (tests/utils/diary-storage.test.tsと同じ方式。getAllDiaryEntries/deleteDiaryEntryが内部で
 // 暗号鍵の生成・取得を経由するために必要)。
@@ -220,7 +230,11 @@ describe('DayEntriesScreen', () => {
   it('sets the navigation title to the formatted date heading via navigation.setOptions', async () => {
     render(<DayEntriesScreen />);
 
-    await waitFor(() => expect(mockSetOptions).toHaveBeenCalledWith({ title: '2026年8月15日' }));
+    await waitFor(() =>
+      expect(mockSetOptions).toHaveBeenCalledWith(
+        expect.objectContaining({ title: '2026年8月15日' }),
+      ),
+    );
   });
 
   it('reloads the list when the screen regains focus (e.g. after returning from the edit screen)', async () => {
