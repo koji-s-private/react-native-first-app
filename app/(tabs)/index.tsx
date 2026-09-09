@@ -13,6 +13,7 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -35,7 +36,9 @@ import { useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import {
   buildCreatedAtForDateKey,
+  dateKeyToDate,
   formatDateHeading,
+  getSwipeDayDelta,
   getWeekDays,
   toDateKey,
 } from '@/utils/diary-date';
@@ -292,9 +295,10 @@ function useModalSlideTransition(isOpen: boolean) {
   return { isMounted, overlayOpacity, contentTranslateY };
 }
 
-// 週表示レイアウトのカレンダー部分。当日を含む週(日曜始まり)の7日分を1行のヘッダーとして
-// 表示し、各日付の下にその日の日記を作成日時の昇順で並べる。日付タップによるフォーカス切り替えや
-// 前後の週への移動は今回のスコープ外のため、常に「今日を含む週」を固定表示する
+// 週表示レイアウトのカレンダー部分。フォーカス中の日を含む週(日曜始まり)の7日分を1行の
+// ヘッダーとして表示し、各日付の下にその日の日記を作成日時の昇順で並べる(初期フォーカスは今日)。
+// ヘッダーの日付タップ・専用の前後日ボタンのタップ・左右スワイプでフォーカスを前後の日へ移動でき、
+// フォーカスが週の外に出た場合は表示する週ごと自動的に切り替わる(#284)
 function WeekCalendarView({
   entriesByDate,
   onEntryPress,
@@ -307,33 +311,99 @@ function WeekCalendarView({
   const backgroundColor = useThemeColor({}, 'background');
   const iconColor = useThemeColor({}, 'icon');
 
-  // 表示対象の週は起動中に変化しないため、マウント時の「今日」を基準に一度だけ計算する
-  const weekDays = useMemo(() => getWeekDays(new Date()), []);
   const todayDateKey = useMemo(() => toDateKey(new Date()), []);
+  // フォーカス中の日。初期値は今日で、タップ/スワイプ操作で前後に移動する
+  const [focusedDate, setFocusedDate] = useState(() => new Date());
+  const focusedDateKey = useMemo(() => toDateKey(focusedDate), [focusedDate]);
+  // 表示する週はフォーカス中の日を基準に毎回計算し直すため、週の外へフォーカスが
+  // 移動した場合も自動的に隣の週へ表示が切り替わる
+  const weekDays = useMemo(() => getWeekDays(focusedDate), [focusedDate]);
+
+  // フォーカスをdelta日分(前日: -1 / 翌日: +1)移動する。前後日ボタンのタップ・スワイプ操作の共通処理
+  const moveFocusByDays = useCallback((delta: number) => {
+    setFocusedDate((current) => {
+      const next = new Date(current);
+      next.setDate(next.getDate() + delta);
+      return next;
+    });
+  }, []);
+
+  // 週ヘッダーの日付タップで、その日へフォーカスを移す
+  const handleFocusDate = useCallback((dateKey: string) => {
+    setFocusedDate(dateKeyToDate(dateKey));
+  }, []);
+
+  // 左右スワイプでフォーカスを前後の日へ移動するジェスチャー(追加ライブラリ不要なPanResponderを使用)。
+  // 移動量の判定自体はgetSwipeDayDeltaに切り出しており、ここでは結果に応じてフォーカスを動かすだけ
+  const panResponderRef = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_event, gestureState) =>
+        getSwipeDayDelta(gestureState.dx, gestureState.dy) !== 0,
+      onPanResponderRelease: (_event, gestureState) => {
+        const delta = getSwipeDayDelta(gestureState.dx, gestureState.dy);
+        if (delta !== 0) {
+          moveFocusByDays(delta);
+        }
+      },
+    }),
+  );
 
   return (
-    <View style={[styles.weekWrapper, { borderColor: iconColor, backgroundColor }]}>
+    <View
+      style={[styles.weekWrapper, { borderColor: iconColor, backgroundColor }]}
+      {...panResponderRef.current.panHandlers}
+    >
+      <View style={styles.weekFocusNav}>
+        <Pressable
+          onPress={() => moveFocusByDays(-1)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="前の日へ移動"
+        >
+          <IconSymbol name="chevron.left" size={20} color={tintColor} />
+        </Pressable>
+        <ThemedText type="subtitle" style={{ color: textColor }}>
+          {formatDateHeading(focusedDateKey)}
+        </ThemedText>
+        <Pressable
+          onPress={() => moveFocusByDays(1)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="次の日へ移動"
+        >
+          <IconSymbol name="chevron.right" size={20} color={tintColor} />
+        </Pressable>
+      </View>
       <ScrollView contentContainerStyle={styles.weekScrollContent}>
         <View style={styles.weekRow}>
           {weekDays.map((weekDay) => {
             const isToday = weekDay.dateKey === todayDateKey;
+            const isFocused = weekDay.dateKey === focusedDateKey;
             const dayEntries = entriesByDate[weekDay.dateKey] ?? [];
             return (
               <View key={weekDay.dateKey} style={styles.weekColumn}>
-                <ThemedText style={[styles.weekDayName, { color: textColor }]}>
-                  {JA_WEEKDAY_SHORT_NAMES[weekDay.dayOfWeek]}
-                </ThemedText>
-                {isToday ? (
-                  <View style={[styles.todayBadge, { backgroundColor: tintColor }]}>
-                    <ThemedText
-                      style={[styles.dayNumber, { color: backgroundColor, fontWeight: '700' }]}
-                    >
-                      {weekDay.day}
-                    </ThemedText>
-                  </View>
-                ) : (
-                  <ThemedText style={styles.dayNumber}>{weekDay.day}</ThemedText>
-                )}
+                <Pressable
+                  onPress={() => handleFocusDate(weekDay.dateKey)}
+                  style={[styles.weekColumnHeader, isFocused && { borderColor: tintColor }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${formatDateHeading(weekDay.dateKey)}にフォーカスを移動`}
+                  accessibilityState={{ selected: isFocused }}
+                >
+                  <ThemedText style={[styles.weekDayName, { color: textColor }]}>
+                    {JA_WEEKDAY_SHORT_NAMES[weekDay.dayOfWeek]}
+                  </ThemedText>
+                  {isToday ? (
+                    <View style={[styles.todayBadge, { backgroundColor: tintColor }]}>
+                      <ThemedText
+                        style={[styles.dayNumber, { color: backgroundColor, fontWeight: '700' }]}
+                      >
+                        {weekDay.day}
+                      </ThemedText>
+                    </View>
+                  ) : (
+                    <ThemedText style={styles.dayNumber}>{weekDay.day}</ThemedText>
+                  )}
+                </Pressable>
                 <View style={styles.weekColumnEntries}>
                   {dayEntries.map((entry) => (
                     <Pressable
@@ -1538,6 +1608,14 @@ const styles = StyleSheet.create({
   weekScrollContent: {
     padding: 8,
   },
+  // フォーカス中の日の見出しと、タップで前後日へ移動するボタンを並べるナビゲーションバー
+  weekFocusNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    paddingTop: 8,
+  },
   weekRow: {
     flexDirection: 'row',
     gap: 4,
@@ -1546,6 +1624,16 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     gap: 4,
+  },
+  // フォーカス中の日を枠線で強調するため、常に(透明の)枠線を確保しておきレイアウトのガタつきを防ぐ
+  weekColumnHeader: {
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
   },
   weekDayName: {
     fontSize: 12,

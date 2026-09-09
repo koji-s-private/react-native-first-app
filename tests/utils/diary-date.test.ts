@@ -1,7 +1,9 @@
 import {
   buildCreatedAtForDateKey,
+  dateKeyToDate,
   formatDateHeading,
   formatEntryDateTime,
+  getSwipeDayDelta,
   getWeekDays,
   toDateKey,
 } from '@/utils/diary-date';
@@ -90,6 +92,41 @@ describe('getWeekDays', () => {
       '2026-09-04',
       '2026-09-05',
     ]);
+  });
+});
+
+describe('dateKeyToDate', () => {
+  it("converts a 'YYYY-MM-DD' date key into a Date at local midnight (正常系)", () => {
+    const date = dateKeyToDate('2026-09-09');
+    expect(date.getFullYear()).toBe(2026);
+    expect(date.getMonth()).toBe(8);
+    expect(date.getDate()).toBe(9);
+    expect(date.getHours()).toBe(0);
+  });
+
+  it('round-trips back to the same date key via toDateKey (regression)', () => {
+    expect(toDateKey(dateKeyToDate('2026-01-05'))).toBe('2026-01-05');
+  });
+});
+
+describe('getSwipeDayDelta', () => {
+  it('returns 0 (no swipe) when the horizontal movement is below the threshold (境界値)', () => {
+    expect(getSwipeDayDelta(39, 0)).toBe(0);
+  });
+
+  it('returns 1 (move to the next day) for a leftward swipe at/above the threshold (正常系)', () => {
+    expect(getSwipeDayDelta(-40, 0)).toBe(1);
+    expect(getSwipeDayDelta(-100, 10)).toBe(1);
+  });
+
+  it('returns -1 (move to the previous day) for a rightward swipe at/above the threshold (正常系)', () => {
+    expect(getSwipeDayDelta(40, 0)).toBe(-1);
+    expect(getSwipeDayDelta(100, -10)).toBe(-1);
+  });
+
+  it('returns 0 (no swipe) when the vertical movement is greater than or equal to the horizontal movement, even above the threshold (境界値: 縦スクロールとの誤判定防止)', () => {
+    expect(getSwipeDayDelta(50, 50)).toBe(0);
+    expect(getSwipeDayDelta(50, 60)).toBe(0);
   });
 });
 
