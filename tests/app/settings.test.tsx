@@ -14,6 +14,10 @@ import { SETTINGS_SECTIONS } from '@/constants/settings-menu';
 import { Colors } from '@/constants/theme';
 import { AppLockProvider } from '@/contexts/app-lock-context';
 import {
+  CALENDAR_LAYOUT_PREFERENCE_STORAGE_KEY,
+  CalendarLayoutPreferenceProvider,
+} from '@/contexts/calendar-layout-preference-context';
+import {
   DIARY_REMINDER_STORAGE_KEY,
   DiaryReminderProvider,
 } from '@/contexts/diary-reminder-context';
@@ -1382,6 +1386,133 @@ describe('外観セクション(ライト/ダーク/端末に合わせるの切�
 
     // 保存(永続化)に失敗しても、目の前の選択状態(見た目)は更新されたまま
     expect(screen.getByRole('button', { name: LIGHT_LABEL }).props.accessibilityState).toEqual(
+      expect.objectContaining({ selected: true }),
+    );
+  });
+});
+
+describe('カレンダー表示レイアウトセクション(月表示/週表示の切り替え #283)', () => {
+  const SECTION_TITLE = 'カレンダー表示レイアウト';
+  const MONTH_LABEL = '月表示';
+  const WEEK_LABEL = '週表示';
+
+  // useCalendarLayoutPreference()はProvider配下でない場合setLayoutがno-opにフォールバックする仕様
+  // (tests/contexts/calendar-layout-preference-context.test.tsx参照)のため、実機と同じ構成を
+  // 再現するために明示的にCalendarLayoutPreferenceProviderでラップする(外観セクションのテストと同じ方針)。
+  function renderSettingsScreen() {
+    return render(
+      <CalendarLayoutPreferenceProvider>
+        <SettingsScreen />
+      </CalendarLayoutPreferenceProvider>,
+    );
+  }
+
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    jest.clearAllMocks();
+  });
+
+  it('renders the "カレンダー表示レイアウト" section with both choices (月表示/週表示) (操作導線の存在確認)', () => {
+    renderSettingsScreen();
+
+    expect(screen.getByText(SECTION_TITLE)).toBeTruthy();
+    expect(screen.getByRole('button', { name: MONTH_LABEL })).toBeTruthy();
+    expect(screen.getByRole('button', { name: WEEK_LABEL })).toBeTruthy();
+  });
+
+  it('selects "月表示" by default when nothing has been saved yet (正常系: 既定の選択状態)', () => {
+    renderSettingsScreen();
+
+    expect(screen.getByRole('button', { name: MONTH_LABEL }).props.accessibilityState).toEqual(
+      expect.objectContaining({ selected: true }),
+    );
+    expect(screen.getByRole('button', { name: WEEK_LABEL }).props.accessibilityState).toEqual(
+      expect.objectContaining({ selected: false }),
+    );
+  });
+
+  it('calls setLayout("week") (persists to AsyncStorage) and marks "週表示" as selected when pressed (正常系)', async () => {
+    renderSettingsScreen();
+
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: WEEK_LABEL }));
+    });
+
+    expect(screen.getByRole('button', { name: WEEK_LABEL }).props.accessibilityState).toEqual(
+      expect.objectContaining({ selected: true }),
+    );
+    expect(screen.getByRole('button', { name: MONTH_LABEL }).props.accessibilityState).toEqual(
+      expect.objectContaining({ selected: false }),
+    );
+    await waitFor(() =>
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+        CALENDAR_LAYOUT_PREFERENCE_STORAGE_KEY,
+        'week',
+      ),
+    );
+  });
+
+  it('switches selection back to "月表示" when pressed after choosing "週表示" (正常系: 月表示への再切り替え)', async () => {
+    renderSettingsScreen();
+
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: WEEK_LABEL }));
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: MONTH_LABEL }));
+    });
+
+    expect(screen.getByRole('button', { name: MONTH_LABEL }).props.accessibilityState).toEqual(
+      expect.objectContaining({ selected: true }),
+    );
+    expect(screen.getByRole('button', { name: WEEK_LABEL }).props.accessibilityState).toEqual(
+      expect.objectContaining({ selected: false }),
+    );
+    await waitFor(() =>
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+        CALENDAR_LAYOUT_PREFERENCE_STORAGE_KEY,
+        'month',
+      ),
+    );
+  });
+
+  it('reflects a layout that was already saved in AsyncStorage as the selected choice on mount (正常系: 起動時の復元/設定の永続化)', async () => {
+    await AsyncStorage.setItem(CALENDAR_LAYOUT_PREFERENCE_STORAGE_KEY, 'week');
+
+    renderSettingsScreen();
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: WEEK_LABEL }).props.accessibilityState).toEqual(
+        expect.objectContaining({ selected: true }),
+      ),
+    );
+    expect(screen.getByRole('button', { name: MONTH_LABEL }).props.accessibilityState).toEqual(
+      expect.objectContaining({ selected: false }),
+    );
+  });
+
+  it('ignores an invalid value stored in AsyncStorage and keeps the default "月表示" selected (境界値: 不正な保存値)', async () => {
+    await AsyncStorage.setItem(CALENDAR_LAYOUT_PREFERENCE_STORAGE_KEY, 'not-a-valid-layout');
+
+    renderSettingsScreen();
+
+    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: MONTH_LABEL }).props.accessibilityState).toEqual(
+      expect.objectContaining({ selected: true }),
+    );
+  });
+
+  it('keeps "週表示" selected in the UI (does not crash) even when AsyncStorage.setItem rejects (異常系: 保存失敗)', async () => {
+    jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('storage write error'));
+
+    renderSettingsScreen();
+
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: WEEK_LABEL }));
+    });
+
+    // 保存(永続化)に失敗しても、目の前の選択状態(見た目)は更新されたまま
+    expect(screen.getByRole('button', { name: WEEK_LABEL }).props.accessibilityState).toEqual(
       expect.objectContaining({ selected: true }),
     );
   });

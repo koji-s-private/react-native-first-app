@@ -23,6 +23,27 @@ export function formatDateHeading(dateKey: string): string {
   return `${year}年${Number(month)}月${Number(day)}日`;
 }
 
+// 週表示カレンダーのヘッダー1マス分の情報
+export type WeekDayInfo = {
+  /** 'YYYY-MM-DD'形式の日付キー */
+  dateKey: string;
+  /** 曜日(0:日曜〜6:土曜。react-native-calendarsの既定に合わせた並び) */
+  dayOfWeek: number;
+  /** 日にち(1〜31) */
+  day: number;
+};
+
+// 指定した日付を含む週(日曜始まり)の7日分の情報を返す。
+// react-native-calendarsの既定(週の開始が日曜)に合わせている
+export function getWeekDays(date: Date): WeekDayInfo[] {
+  const startOfWeek = new Date(date.getFullYear(), date.getMonth(), date.getDate() - date.getDay());
+  return Array.from({ length: 7 }, (_, index) => {
+    const current = new Date(startOfWeek);
+    current.setDate(startOfWeek.getDate() + index);
+    return { dateKey: toDateKey(current), dayOfWeek: current.getDay(), day: current.getDate() };
+  });
+}
+
 // 日記エントリの日時を'YYYY/MM/DD HH:mm'形式で整形する(端末のロケール設定に依存する
 // toLocaleString()は使わず、日本語UIで一貫した表記になるよう手動でフォーマットする)
 export function formatEntryDateTime(isoString: string): string {

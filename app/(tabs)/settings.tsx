@@ -11,6 +11,10 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { SETTINGS_SECTIONS, type SettingsMenuItem } from '@/constants/settings-menu';
 import { useAppLock } from '@/contexts/app-lock-context';
+import {
+  useCalendarLayoutPreference,
+  type CalendarLayoutPreference,
+} from '@/contexts/calendar-layout-preference-context';
 import { useDiaryReminder } from '@/contexts/diary-reminder-context';
 import { useThemePreference, type ThemePreference } from '@/contexts/theme-preference-context';
 import { useThemeColor } from '@/hooks/use-theme-color';
@@ -51,6 +55,58 @@ function AppearanceSection() {
             <Pressable
               key={option.value}
               onPress={() => setPreference(option.value)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isSelected }}
+              style={[
+                styles.themeOptionButton,
+                { borderColor: tintColor },
+                isSelected && { backgroundColor: tintColor },
+              ]}
+            >
+              <ThemedText
+                style={[
+                  styles.themeOptionText,
+                  isSelected ? { color: selectedTextColor } : { color: tintColor },
+                ]}
+              >
+                {option.label}
+              </ThemedText>
+            </Pressable>
+          );
+        })}
+      </ThemedView>
+    </ThemedView>
+  );
+}
+
+// ホーム画面のカレンダー部分で選べる表示レイアウトの選択肢。表示順もこの配列の並び順に従う
+const CALENDAR_LAYOUT_OPTIONS: { value: CalendarLayoutPreference; label: string }[] = [
+  { value: 'month', label: '月表示' },
+  { value: 'week', label: '週表示' },
+];
+
+// ホーム画面のカレンダー部分を1ヶ月分まとめて表示するか、1週間分のみ表示するかを選ぶ操作導線。
+// モバイル用アプリとしては月表示の情報量が細かすぎるというフィードバックに対応するもので、
+// 無料ユーザーも利用可能(Pro限定にはしない)。
+function CalendarLayoutSection() {
+  const { layout, setLayout } = useCalendarLayoutPreference();
+  const tintColor = useThemeColor({}, 'tint');
+  // 選択中のボタンはtintColorを背景に敷くため、文字色は背景色(ライト/ダークで反転する色)を使い
+  // コントラストを確保する(AppearanceSectionと同じ配色方針)
+  const selectedTextColor = useThemeColor({}, 'background');
+
+  return (
+    <ThemedView style={styles.section}>
+      <ThemedText type="subtitle" style={styles.sectionTitle}>
+        カレンダー表示レイアウト
+      </ThemedText>
+      <ThemedView style={styles.themeOptionsRow}>
+        {CALENDAR_LAYOUT_OPTIONS.map((option) => {
+          const isSelected = layout === option.value;
+          return (
+            <Pressable
+              key={option.value}
+              onPress={() => setLayout(option.value)}
               accessibilityRole="button"
               accessibilityState={{ selected: isSelected }}
               style={[
@@ -542,6 +598,7 @@ export default function SettingsScreen() {
     // セーフエリア上端インセットぶんの余白を自動的に加算する
     <TabScreenContainer style={styles.container}>
       <AppearanceSection />
+      <CalendarLayoutSection />
       <DiaryReminderSection />
       <AppLockSection />
 
