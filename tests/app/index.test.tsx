@@ -42,7 +42,7 @@ import {
 // `expo-router`の`Link`(Trigger/Preview/Menuを伴う複合API)はナビゲーション/routerコンテキストを
 // 要求するため、単体レンダリングでも動くよう単純なパススルーコンポーネントに差し替える。
 // `useRouter`も同様にナビゲーションコンテキストを要求するため、`push`呼び出しをテストから
-// 検証できるjest.fnに差し替える(Issue #221: 日付タップ/検索結果タップでの画面遷移の検証に使う)。
+// 検証できるjest.fnに差し替える(日付タップ/検索結果タップでの画面遷移の検証に使う)。
 jest.mock('expo-router', () => {
   const PassThrough = ({ children }: PropsWithChildren) => children;
 
@@ -267,7 +267,7 @@ function isoAt(now: Date, day: number, hour = 9, minute = 0): string {
 
 // 実装側の`toDateKey`と同じ'YYYY-MM-DD'形式のキーを組み立てるテスト用ヘルパー。
 // 日付タップ/検索結果タップ時に`router.push`へ渡される遷移先パスを検証するために使う
-// (Issue #221: 日付一覧モーダルを day-entries/[date] 画面への遷移に置き換えたことに伴う)
+// (日付一覧モーダルを day-entries/[date] 画面への遷移に置き換えたことに伴う)
 function toDateKeyForTest(now: Date, day: number): string {
   const year = now.getFullYear();
   const month = `${now.getMonth() + 1}`.padStart(2, '0');
@@ -327,7 +327,7 @@ function getModalCloseButton(modal: TestNode): TestNode {
 }
 
 // モーダル本文コンテナ(ThemedView)を包む、タップ伝播を止めるためだけのPressable
-// (onPress={() => {}})を特定するヘルパー(Issue #249の修正で追加された)。他のPressable
+// (onPress={() => {}})を特定するヘルパー。他のPressable
 // (背景オーバーレイ・閉じるボタン・保存ボタン)は`style`・`testID`・`accessibilityRole`の
 // いずれかを必ず持つのに対し、このPressableだけは`onPress`と`children`しか持たないため、
 // その組み合わせで一意に特定する。
@@ -427,7 +427,7 @@ describe('HomeScreen', () => {
     expect(StyleSheet.flatten(title.props.style).marginTop).toBe(8);
   });
 
-  describe('ボトムシート系モーダル(新規作成・年月ピッカー)のpaddingBottom (#282)', () => {
+  describe('ボトムシート系モーダル(新規作成・年月ピッカー)のpaddingBottom', () => {
     // タブバーのおおよそのコンテンツ高さ(セーフエリア分は含まない)。実装側の
     // BOTTOM_TAB_BAR_CONTENT_HEIGHTと同じ値(app/(tabs)/index.tsx参照)
     const BOTTOM_TAB_BAR_CONTENT_HEIGHT = 49;
@@ -631,8 +631,7 @@ describe('HomeScreen', () => {
     });
 
     // FlatListはメモ化されていない素のクラスコンポーネントのため`screen.UNSAFE_queryAllByType(FlatList)`
-    // で直接特定できる。日付一覧はIssue #221で専用画面(day-entries/[date].tsx)へ遷移する方式に
-    // 変わったため、この画面(HomeScreen)に残るFlatListは検索結果一覧のみになった。
+    // で直接特定できる。
     function queryAllFlatLists() {
       return screen.UNSAFE_queryAllByType(FlatList);
     }
@@ -2236,7 +2235,7 @@ describe('HomeScreen', () => {
 
       // 新規作成モーダル・年月ピッカーモーダルの2つが常にツリーに存在する
       // (visibleプロパティで表示/非表示を切り替えているだけで、条件付きレンダリングではないため。
-      // 日付一覧・編集は専用画面への遷移(Issue #221)に置き換えたため対象外になった)
+      // 日付一覧・編集は専用画面への遷移に置き換えたため対象外になった)
       const modals = screen.UNSAFE_getAllByType(Modal);
       expect(modals).toHaveLength(2);
       for (const modal of modals) {
@@ -2274,7 +2273,7 @@ describe('HomeScreen', () => {
     // モーダルは[日付一覧, 編集, 新規作成, 年月ピッカー]の順でJSXに並んでいる
     // (実装側app/(tabs)/index.tsx参照)
     function getMonthPickerModal() {
-      // 日付一覧・編集は専用画面への遷移(Issue #221)に置き換えたため、この画面に残る
+      // 日付一覧・編集は専用画面への遷移に置き換えたため、この画面に残る
       // モーダルは新規作成モーダル(index 0)・年月ピッカーモーダル(index 1)の2つのみになった
       return screen.UNSAFE_getAllByType(Modal)[1];
     }
@@ -3371,7 +3370,7 @@ describe('HomeScreen', () => {
         expect(getNewEntryInput().props.value).toBe('キャンセルで残るはずの下書き');
       });
 
-      it('does not show the discard confirmation dialog or close the modal when a tap lands inside the modal content area (e.g. around the TextInput), unlike tapping the background overlay (回帰: Issue #249 - モーダル内タップで意図せず閉じてしまう不具合の再発防止)', async () => {
+      it('does not show the discard confirmation dialog or close the modal when a tap lands inside the modal content area (e.g. around the TextInput), unlike tapping the background overlay (回帰: モーダル内タップで意図せず閉じてしまう不具合の再発防止)', async () => {
         const now = new Date();
         const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
         jest.spyOn(Alert, 'alert').mockImplementation(() => {});
@@ -3391,7 +3390,7 @@ describe('HomeScreen', () => {
 
         const [newEntryModal] = screen.UNSAFE_getAllByType(Modal);
 
-        // 本文コンテナを包むタップ吸収用Pressable(Issue #249の修正で追加)へのタップは、
+        // 本文コンテナを包むタップ吸収用Pressableへのタップは、
         // 背景オーバーレイのPressable(handleCancelNewEntry)まで伝播しないため、
         // 未保存の下書きがあっても破棄確認ダイアログは出ず、モーダルも閉じない
         const contentTouchAbsorber = getModalContentTouchAbsorber(newEntryModal);
@@ -3926,9 +3925,9 @@ describe('HomeScreen', () => {
     });
 
     // 編集失敗時のエラーメッセージ・削除リンクのダークモード配色は、それぞれ専用画面へ移動したため
-    // tests/app/edit-entry/[id].test.tsx・tests/app/day-entries/[date].test.tsxで検証する(Issue #221)
+    // tests/app/edit-entry/[id].test.tsx・tests/app/day-entries/[date].test.tsxで検証する
 
-    // Issue #232の回帰テスト。react-native-calendarsの`Calendar`はtheme由来のスタイル
+    // 回帰テスト。react-native-calendarsの`Calendar`はtheme由来のスタイル
     // (曜日ヘッダー行の色など、dayComponentで差し替えていない部分)をマウント時に一度だけ
     // `useRef`で計算してキャッシュし、マウント後にtheme propが変わっても再計算しない実装のため、
     // マウント後に配色設定(ダークモード)が変わってもカレンダー本体だけ元の配色のまま
@@ -4267,7 +4266,7 @@ describe('HomeScreen', () => {
       expect(searchInput.props.maxLength).toBe(1000);
     });
 
-    describe('検索結果のマッチ箇所ハイライト表示(Issue #237)', () => {
+    describe('検索結果のマッチ箇所ハイライト表示', () => {
       // ダークモードをシミュレートするためのuseColorSchemeモック(「テーマに応じたエラー色」describe内と
       // 同様の理由・同様の使い方)。このdescribe専用に局所的に上書き・復元する
       const mockedUseColorScheme = useColorScheme as jest.Mock;
@@ -4834,7 +4833,7 @@ describe('HomeScreen', () => {
     });
   });
 
-  describe('週表示レイアウト(#283)', () => {
+  describe('週表示レイアウト', () => {
     // カレンダー表示レイアウトの設定は`app/_layout.tsx`で`CalendarLayoutPreferenceProvider`が
     // ルートに配線されているが、単体レンダリングではそのラップが無いため、
     // 明示的に`CalendarLayoutPreferenceProvider`でラップして実機と同じ構成を再現する
