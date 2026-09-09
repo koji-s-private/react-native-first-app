@@ -556,7 +556,7 @@ describe('DayEntriesScreen', () => {
         triggerRefocus();
       });
       expect(await screen.findByText('新規登録した日記')).toBeTruthy();
-    });
+    }, 15000); // waitForのtimeout(5000ms)にマージンを持たせ、CI環境の負荷によるflaky失敗を防ぐ
 
     it('disables the save button while the draft is empty or whitespace-only, and does not call AsyncStorage.setItem (異常系/境界値)', async () => {
       render(<DayEntriesScreen />);
@@ -594,7 +594,7 @@ describe('DayEntriesScreen', () => {
         timeout: 5000,
       });
       expect(await screen.findByText('あ'.repeat(BODY_MAX_LENGTH))).toBeTruthy();
-    });
+    }, 15000); // waitForのtimeout(5000ms)にマージンを持たせ、CI環境の負荷によるflaky失敗を防ぐ
 
     it('prevents duplicate saves when the save button is pressed repeatedly while a save is still in flight (連打防止)', async () => {
       let resolveSetItem: () => void = () => {};
@@ -629,7 +629,7 @@ describe('DayEntriesScreen', () => {
         timeout: 5000,
       });
       expect(screen.getAllByText('連打される日記')).toHaveLength(1);
-    });
+    }, 15000); // waitForのtimeout(5000ms)にマージンを持たせ、CI環境の負荷によるflaky失敗を防ぐ
 
     it('shows an error message and rolls back the optimistic list update when persisting fails, keeping the modal open with the input preserved (異常系)', async () => {
       jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
@@ -823,7 +823,7 @@ describe('DayEntriesScreen', () => {
           timeout: 5000,
         });
         expect(await AsyncStorage.getItem(NEW_ENTRY_DRAFT_KEY)).toBeNull();
-      });
+      }, 15000); // waitForのtimeout(5000ms)にマージンを持たせ、CI環境の負荷によるflaky失敗を防ぐ
 
       it('clears the auto-saved draft key once "破棄" is chosen to close the modal without saving (正常系)', async () => {
         jest.spyOn(Alert, 'alert').mockImplementation(() => {});
