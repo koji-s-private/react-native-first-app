@@ -138,7 +138,7 @@ LocaleConfig.locales.ja = {
 };
 LocaleConfig.defaultLocale = 'ja';
 
-// 週表示カレンダー(#283)のヘッダーで使う曜日の短縮名(getWeekDaysのdayOfWeek(0:日〜6:土)に対応する並び)
+// 週表示カレンダーのヘッダーで使う曜日の短縮名(getWeekDaysのdayOfWeek(0:日〜6:土)に対応する並び)
 const JA_WEEKDAY_SHORT_NAMES = ['日', '月', '火', '水', '木', '金', '土'];
 
 // 検索結果の抜粋で、マッチ箇所の前後何文字を表示するか
@@ -292,7 +292,7 @@ function useModalSlideTransition(isOpen: boolean) {
   return { isMounted, overlayOpacity, contentTranslateY };
 }
 
-// 週表示レイアウト(#283)のカレンダー部分。当日を含む週(日曜始まり)の7日分を1行のヘッダーとして
+// 週表示レイアウトのカレンダー部分。当日を含む週(日曜始まり)の7日分を1行のヘッダーとして
 // 表示し、各日付の下にその日の日記を作成日時の昇順で並べる。日付タップによるフォーカス切り替えや
 // 前後の週への移動は今回のスコープ外のため、常に「今日を含む週」を固定表示する
 function WeekCalendarView({
@@ -418,7 +418,7 @@ export default function HomeScreen() {
 
   const router = useRouter();
   const { colorScheme } = useThemePreference();
-  // 月表示/週表示のどちらでホーム画面のカレンダー部分を表示するかの設定(#283)
+  // 月表示/週表示のどちらでホーム画面のカレンダー部分を表示するかの設定
   const { layout: calendarLayout } = useCalendarLayoutPreference();
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
@@ -1145,7 +1145,7 @@ export default function HomeScreen() {
               ) : null}
 
               {calendarLayout === 'week' ? (
-                // 週表示(#283): 1ヶ月分をまとめて表示する月表示だと情報が細かすぎるという
+                // 週表示: 1ヶ月分をまとめて表示する月表示だと情報が細かすぎるという
                 // フィードバックに対応した、当日を含む週のみを表示するレイアウト
                 <WeekCalendarView
                   entriesByDate={entriesByDate}
@@ -1528,7 +1528,7 @@ const styles = StyleSheet.create({
     // 実測に多少の誤差があっても、日付グリッドが外枠からはみ出して見えないようにする保険
     overflow: 'hidden',
   },
-  // 週表示(#283)のカレンダー部分。calendarWrapperと同様に残りスペースを使い切る
+  // 週表示のカレンダー部分。calendarWrapperと同様に残りスペースを使い切る
   weekWrapper: {
     flex: 1,
     borderWidth: StyleSheet.hairlineWidth,
