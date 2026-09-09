@@ -23,6 +23,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import HomeScreen from '@/app/(tabs)/index';
 import { TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID } from '@/components/tab-screen-container';
 import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { decryptText, encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
@@ -414,6 +415,117 @@ describe('HomeScreen', () => {
 
     const title = screen.getByText('日記');
     expect(StyleSheet.flatten(title.props.style).marginTop).toBe(8);
+  });
+
+  describe('ボトムシート系モーダル(新規作成・年月ピッカー)のpaddingBottom (#282)', () => {
+    // タブバーのおおよそのコンテンツ高さ(セーフエリア分は含まない)。実装側の
+    // BOTTOM_TAB_BAR_CONTENT_HEIGHTと同じ値(app/(tabs)/index.tsx参照)
+    const BOTTOM_TAB_BAR_CONTENT_HEIGHT = 49;
+
+    // モーダルは[新規作成, 年月ピッカー]の順でJSXに並んでいる(実装側app/(tabs)/index.tsx参照)
+    function getNewEntryModal() {
+      return screen.UNSAFE_getAllByType(Modal)[0];
+    }
+
+    function getMonthPickerModal() {
+      return screen.UNSAFE_getAllByType(Modal)[1];
+    }
+
+    // 各モーダル配下にある本文コンテナ(ThemedView、styles.modalContent)を特定するヘルパー。
+    // どちらのモーダルもThemedViewを1つだけ含む(実装側app/(tabs)/index.tsx参照)。
+    function getModalContent(modal: TestNode): TestNode {
+      const [modalContent] = modal.findAllByType(ThemedView);
+      if (!modalContent) {
+        throw new Error('modal content (ThemedView) not found');
+      }
+      return modalContent;
+    }
+
+    async function openNewEntryModalForToday(now: Date) {
+      const label = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日、日記なし、タップして新規作成`;
+      fireEvent.press(screen.getByLabelText(label));
+      await screen.findByText(
+        `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日の日記を書く`,
+      );
+    }
+
+    async function openMonthPicker(now: Date) {
+      const headerText = await screen.findByText(`${now.getFullYear()}年${now.getMonth() + 1}月`, {
+        includeHiddenElements: true,
+      });
+      fireEvent.press(headerText);
+      await screen.findByText('年月を選択');
+    }
+
+    it('adds only the bottom tab bar height as paddingBottom on the new-entry modal content when the safe area bottom inset is zero (default mock)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openNewEntryModalForToday(now);
+
+      const modalContent = getModalContent(getNewEntryModal());
+      expect(StyleSheet.flatten(modalContent.props.style).paddingBottom).toBe(
+        BOTTOM_TAB_BAR_CONTENT_HEIGHT,
+      );
+    });
+
+    it('adds the safe area bottom inset plus the bottom tab bar height as paddingBottom on the new-entry modal content, so it does not overlap the tab bar', async () => {
+      const now = new Date();
+      render(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 393, height: 852 },
+            insets: { top: 59, left: 0, right: 0, bottom: 34 },
+          }}
+        >
+          <HomeScreen />
+        </SafeAreaProvider>,
+      );
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openNewEntryModalForToday(now);
+
+      const modalContent = getModalContent(getNewEntryModal());
+      expect(StyleSheet.flatten(modalContent.props.style).paddingBottom).toBe(
+        34 + BOTTOM_TAB_BAR_CONTENT_HEIGHT,
+      );
+    });
+
+    it('adds only the bottom tab bar height as paddingBottom on the month picker modal content when the safe area bottom inset is zero (default mock)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+
+      const modalContent = getModalContent(getMonthPickerModal());
+      expect(StyleSheet.flatten(modalContent.props.style).paddingBottom).toBe(
+        BOTTOM_TAB_BAR_CONTENT_HEIGHT,
+      );
+    });
+
+    it('adds the safe area bottom inset plus the bottom tab bar height as paddingBottom on the month picker modal content, so it does not overlap the tab bar', async () => {
+      const now = new Date();
+      render(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 393, height: 852 },
+            insets: { top: 59, left: 0, right: 0, bottom: 34 },
+          }}
+        >
+          <HomeScreen />
+        </SafeAreaProvider>,
+      );
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+
+      const modalContent = getModalContent(getMonthPickerModal());
+      expect(StyleSheet.flatten(modalContent.props.style).paddingBottom).toBe(
+        34 + BOTTOM_TAB_BAR_CONTENT_HEIGHT,
+      );
+    });
   });
 
   describe('KeyboardAvoidingView のプラットフォーム別挙動', () => {
