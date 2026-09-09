@@ -85,7 +85,7 @@ const CALENDAR_LAYOUT_OPTIONS: { value: CalendarLayoutPreference; label: string 
   { value: 'week', label: '週表示' },
 ];
 
-// ホーム画面のカレンダー部分を1ヶ月分まとめて表示するか、1週間分のみ表示するかを選ぶ操作導線(#283)。
+// ホーム画面のカレンダー部分を1ヶ月分まとめて表示するか、1週間分のみ表示するかを選ぶ操作導線。
 // モバイル用アプリとしては月表示の情報量が細かすぎるというフィードバックに対応するもので、
 // 無料ユーザーも利用可能(Pro限定にはしない)。
 function CalendarLayoutSection() {
