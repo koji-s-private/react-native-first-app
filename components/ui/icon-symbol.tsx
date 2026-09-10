@@ -22,6 +22,7 @@ const MAPPING = {
   // Material Iconsに'chevron-down'は存在しないため、視覚的に近い'expand-more'を使う
   'chevron.down': 'expand-more',
   'gearshape.fill': 'settings',
+  plus: 'add',
 } as IconMapping;
 
 /**

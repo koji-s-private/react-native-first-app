@@ -6,6 +6,7 @@
 
 ```
 components/
+  diary-entry-composer-modal.tsx  対象日付の日記を新規登録する入力モーダル(アニメーション・下書き自動保存つき)
   external-link.tsx        外部URLを開くリンクコンポーネント
   haptic-tab.tsx            タップ時に触覚フィードバックを伴うタブボタン
   onboarding.tsx             初回起動時に表示する使い方説明のオンボーディング画面

@@ -9,6 +9,7 @@ import DayEntriesScreen from '@/app/day-entries/[date]';
 import { Colors } from '@/constants/theme';
 import { encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
 import { buildDiaryEntryKey, type DiaryEntry } from '@/utils/diary-storage';
+import { BODY_MAX_LENGTH } from '@/utils/diary-text';
 
 // jest-expoのオートモックだと`setStringAsync`が実際のPromiseを返さず呼び出し引数の検証や
 // reject時の異常系テストが行えないため、明示的なモックへ差し替える(tests/app/index.test.tsxと同様)。
@@ -21,6 +22,16 @@ jest.mock('expo-clipboard', () => ({
 jest.mock('@react-native-async-storage/async-storage', () =>
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+);
+
+// 実機では`expo-router`の`ExpoRoot`が自動的に`SafeAreaProvider`で全体をラップするが、
+// 単体レンダリングではそのラップが無く`useSafeAreaInsets`がエラーを投げるため、
+// 公式のjestモック(SafeAreaProvider無しでも既定値を返す)に差し替える(tests/app/index.test.tsxと同じ方式)。
+jest.mock(
+  'react-native-safe-area-context',
+  () =>
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('react-native-safe-area-context/jest/mock').default,
 );
 
 // jest-expoのオートモックは`getRandomBytes`を提供しないため、Node標準の`crypto`モジュールで代替する
@@ -132,6 +143,18 @@ const EDIT_BUTTON_LABEL = 'この日記を編集';
 const DELETE_BUTTON_LABEL = 'この日記を削除';
 const EMPTY_STATE_MESSAGE = 'この日の日記はまだありません';
 
+// 新規登録モーダル(components/diary-entry-composer-modal.tsx)関連のテストで使う定数。
+// 下書きの自動保存キー接頭辞はホーム画面(diary-new-entry-draft-)と衝突しないよう
+// 実装側で別の接頭辞にしているため、その値と対応させる
+const NEW_ENTRY_HEADER_BUTTON_LABEL = 'この日の日記を新規作成';
+const NEW_ENTRY_HEADING = '2026年8月15日の日記を書く';
+const NEW_ENTRY_INPUT_PLACEHOLDER = 'その日の出来事や気持ちを書いてみましょう';
+const NEW_ENTRY_INPUT_LABEL = '日記本文';
+const NEW_ENTRY_SAVE_LABEL = '保存';
+const NEW_ENTRY_CLOSE_LABEL = '閉じる';
+const NEW_ENTRY_DRAFT_KEY = `diary-day-entries-new-entry-draft-${DATE_KEY}`;
+const HOME_SCREEN_DRAFT_KEY = `diary-new-entry-draft-${DATE_KEY}`;
+
 // テストの事前状態として、指定したエントリ群をエントリ単位の個別キーへ暗号化して直接書き込むヘルパー
 // (tests/app/index.test.tsxのseedDiaryEntriesと同じ方式)
 async function seedDiaryEntries(entries: DiaryEntry[]): Promise<void> {
@@ -150,6 +173,36 @@ async function seedDiaryEntries(entries: DiaryEntry[]): Promise<void> {
 function localIso(day: string, hour: number, minute: number): string {
   const [year, month, date] = day.split('-').map(Number);
   return new Date(year, month - 1, date, hour, minute, 0, 0).toISOString();
+}
+
+// ヘッダーの「+」ボタンはnavigation.setOptionsのheaderRightオプションとして渡されるだけで、
+// このテスト用のnavigationモックはheaderRightを実際には描画しない。setOptionsへの呼び出し引数から
+// headerRightを取り出し、その戻り値(Pressable要素)を直接扱うことで押下操作を再現する
+type HeaderNewEntryButtonElement = React.ReactElement<{
+  onPress: () => void;
+  accessibilityRole?: string;
+  accessibilityLabel?: string;
+  children: React.ReactElement<{ name: string }>;
+}>;
+
+function getHeaderNewEntryButtonElement(): HeaderNewEntryButtonElement {
+  const calls = mockSetOptions.mock.calls as [
+    { headerRight?: () => HeaderNewEntryButtonElement },
+  ][];
+  const [options] = calls[calls.length - 1];
+  expect(typeof options.headerRight).toBe('function');
+  return options.headerRight!();
+}
+
+// ヘッダーボタンを押下し、その結果開く新規登録モーダルの下書き復元(AsyncStorage.getItemの完了)まで待つ。
+// 復元完了前に入力を始めるとact()外での state 更新警告につながるため、他の多くのテストと同様に
+// 復元完了を待ってから後続の操作に進む
+async function openNewEntryComposer(): Promise<void> {
+  const headerButton = getHeaderNewEntryButtonElement();
+  await act(async () => {
+    headerButton.props.onPress();
+  });
+  await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(NEW_ENTRY_DRAFT_KEY));
 }
 
 describe('DayEntriesScreen', () => {
@@ -220,7 +273,11 @@ describe('DayEntriesScreen', () => {
   it('sets the navigation title to the formatted date heading via navigation.setOptions', async () => {
     render(<DayEntriesScreen />);
 
-    await waitFor(() => expect(mockSetOptions).toHaveBeenCalledWith({ title: '2026年8月15日' }));
+    await waitFor(() =>
+      expect(mockSetOptions).toHaveBeenCalledWith(
+        expect.objectContaining({ title: '2026年8月15日' }),
+      ),
+    );
   });
 
   it('reloads the list when the screen regains focus (e.g. after returning from the edit screen)', async () => {
@@ -448,6 +505,350 @@ describe('DayEntriesScreen', () => {
 
       const deleteButton = screen.getByRole('button', { name: DELETE_BUTTON_LABEL });
       expect(deleteButton.props.accessibilityLabel).toBe(DELETE_BUTTON_LABEL);
+    });
+  });
+
+  describe('新規登録モーダル(ヘッダーの「+」ボタン)', () => {
+    it('renders the header "+" button with a plus icon and correct accessibility attributes, and it is initially closed (正常系)', async () => {
+      render(<DayEntriesScreen />);
+      await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+
+      const headerButton = getHeaderNewEntryButtonElement();
+      expect(headerButton.props.accessibilityRole).toBe('button');
+      expect(headerButton.props.accessibilityLabel).toBe(NEW_ENTRY_HEADER_BUTTON_LABEL);
+      expect(headerButton.props.children.props.name).toBe('plus');
+
+      expect(screen.queryByText(NEW_ENTRY_HEADING)).toBeNull();
+    });
+
+    it('opens the composer modal with a heading and placeholder for the displayed date when the "+" button is pressed (正常系)', async () => {
+      render(<DayEntriesScreen />);
+      await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+
+      await openNewEntryComposer();
+
+      expect(screen.getByText(NEW_ENTRY_HEADING)).toBeTruthy();
+      expect(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.placeholder).toBe(
+        NEW_ENTRY_INPUT_PLACEHOLDER,
+      );
+    });
+
+    it('saves a new entry anchored to local noon of the displayed date, immediately reflects it in the list, persists it, and closes the modal (正常系)', async () => {
+      render(<DayEntriesScreen />);
+      await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+      await openNewEntryComposer();
+
+      fireEvent.changeText(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL), '新規登録した日記');
+      fireEvent.press(screen.getByText(NEW_ENTRY_SAVE_LABEL));
+
+      // 永続化(AsyncStorage.setItem)の完了を待たず、楽観的更新により即座に一覧へ反映される
+      expect(await screen.findByText('新規登録した日記')).toBeTruthy();
+      // createdAtは実行時刻ではなく、この画面が表示している日付のローカル正午になる
+      expect(screen.getByText('2026/08/15 12:00')).toBeTruthy();
+
+      // 実機の暗号化処理はテスト環境でも一定の実時間を要するため、既定の待機時間(1000ms)を延長する
+      await waitFor(() => expect(screen.queryByText(NEW_ENTRY_HEADING)).toBeNull(), {
+        timeout: 5000,
+      });
+
+      // 再フォーカスによりAsyncStorageから読み直しても消えないことで、永続化されたことを確認する
+      act(() => {
+        triggerRefocus();
+      });
+      expect(await screen.findByText('新規登録した日記')).toBeTruthy();
+    }, 15000); // waitForのtimeout(5000ms)にマージンを持たせ、CI環境の負荷によるflaky失敗を防ぐ
+
+    it('disables the save button while the draft is empty or whitespace-only, and does not call AsyncStorage.setItem (異常系/境界値)', async () => {
+      render(<DayEntriesScreen />);
+      await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+      await openNewEntryComposer();
+
+      const saveButton = screen.getByRole('button', { name: NEW_ENTRY_SAVE_LABEL });
+      expect(saveButton.props.accessibilityState?.disabled).toBe(true);
+      expect(StyleSheet.flatten(saveButton.props.style).opacity).toBe(0.5);
+
+      fireEvent.changeText(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL), '   \n   ');
+      expect(saveButton.props.accessibilityState?.disabled).toBe(true);
+
+      fireEvent.press(saveButton);
+      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+
+      fireEvent.changeText(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL), '空でなくなった');
+      expect(saveButton.props.accessibilityState?.disabled).toBe(false);
+      expect(StyleSheet.flatten(saveButton.props.style).opacity).toBe(1);
+    });
+
+    it('truncates input exceeding BODY_MAX_LENGTH via onChangeText (grapheme-based), shows the counter, and allows saving exactly at the limit (境界値)', async () => {
+      render(<DayEntriesScreen />);
+      await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+      await openNewEntryComposer();
+
+      const input = screen.getByLabelText(NEW_ENTRY_INPUT_LABEL);
+      fireEvent.changeText(input, 'あ'.repeat(BODY_MAX_LENGTH + 1));
+      expect(input.props.value).toBe('あ'.repeat(BODY_MAX_LENGTH));
+      expect(screen.getByText(`${BODY_MAX_LENGTH}/${BODY_MAX_LENGTH}`)).toBeTruthy();
+
+      // 上限ちょうどの文字数は切り詰められず、そのまま保存できる
+      fireEvent.press(screen.getByText(NEW_ENTRY_SAVE_LABEL));
+      await waitFor(() => expect(screen.queryByText(NEW_ENTRY_HEADING)).toBeNull(), {
+        timeout: 5000,
+      });
+      expect(await screen.findByText('あ'.repeat(BODY_MAX_LENGTH))).toBeTruthy();
+    }, 15000); // waitForのtimeout(5000ms)にマージンを持たせ、CI環境の負荷によるflaky失敗を防ぐ
+
+    it('prevents duplicate saves when the save button is pressed repeatedly while a save is still in flight (連打防止)', async () => {
+      let resolveSetItem: () => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSetItem = resolve;
+          }),
+      );
+
+      render(<DayEntriesScreen />);
+      await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+      await openNewEntryComposer();
+
+      fireEvent.changeText(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL), '連打される日記');
+      const saveButton = screen.getByText(NEW_ENTRY_SAVE_LABEL);
+      fireEvent.press(saveButton);
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      // 1回目の保存がpendingの間に連打しても、追加でAsyncStorage.setItemは呼ばれない
+      fireEvent.press(saveButton);
+      fireEvent.press(saveButton);
+      expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+      expect(screen.getAllByText('連打される日記')).toHaveLength(1);
+
+      await act(async () => {
+        resolveSetItem();
+        await Promise.resolve();
+      });
+
+      await waitFor(() => expect(screen.queryByText(NEW_ENTRY_HEADING)).toBeNull(), {
+        timeout: 5000,
+      });
+      expect(screen.getAllByText('連打される日記')).toHaveLength(1);
+    }, 15000); // waitForのtimeout(5000ms)にマージンを持たせ、CI環境の負荷によるflaky失敗を防ぐ
+
+    it('shows an error message and rolls back the optimistic list update when persisting fails, keeping the modal open with the input preserved (異常系)', async () => {
+      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
+
+      render(<DayEntriesScreen />);
+      await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+      await openNewEntryComposer();
+
+      fireEvent.changeText(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL), '保存失敗する日記');
+      fireEvent.press(screen.getByText(NEW_ENTRY_SAVE_LABEL));
+
+      expect(await screen.findByText('保存に失敗しました。もう一度お試しください。')).toBeTruthy();
+      // ロールバックにより一覧には反映されない
+      expect(screen.queryByText('保存失敗する日記')).toBeNull();
+
+      // モーダルは開いたままで、入力内容も保持されている
+      expect(screen.getByText(NEW_ENTRY_HEADING)).toBeTruthy();
+      expect(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.value).toBe('保存失敗する日記');
+    });
+
+    it('closes the modal immediately without a confirmation dialog via the close button when the draft is still empty (正常系)', async () => {
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<DayEntriesScreen />);
+      await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+      await openNewEntryComposer();
+
+      fireEvent.press(screen.getByText(NEW_ENTRY_CLOSE_LABEL));
+
+      await waitFor(() => expect(screen.queryByText(NEW_ENTRY_HEADING)).toBeNull());
+      expect(Alert.alert).not.toHaveBeenCalled();
+    });
+
+    it('sets accessibilityRole="button" and accessibilityLabel="閉じる" on the composer modal\'s close button (アクセシビリティ)', async () => {
+      render(<DayEntriesScreen />);
+      await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+      await openNewEntryComposer();
+
+      const closeButton = screen.getByRole('button', { name: NEW_ENTRY_CLOSE_LABEL });
+      expect(closeButton.props.accessibilityRole).toBe('button');
+      expect(closeButton.props.accessibilityLabel).toBe(NEW_ENTRY_CLOSE_LABEL);
+    });
+
+    describe('未保存入力の破棄確認ダイアログ', () => {
+      async function pressAlertButton(label: string): Promise<void> {
+        const alertMock = Alert.alert as jest.Mock;
+        const lastCall = alertMock.mock.calls[alertMock.mock.calls.length - 1];
+        const buttons = lastCall[2] as { text: string; onPress?: () => void }[];
+        const button = buttons.find((b) => b.text === label);
+        expect(button).toBeDefined();
+        await act(async () => {
+          button?.onPress?.();
+        });
+      }
+
+      it('shows the discard confirmation dialog when the close button is pressed after typing, and keeps the modal open until "破棄" is chosen (正常系)', async () => {
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+        render(<DayEntriesScreen />);
+        await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+        await openNewEntryComposer();
+
+        fireEvent.changeText(
+          screen.getByLabelText(NEW_ENTRY_INPUT_LABEL),
+          '破棄されるはずの下書き',
+        );
+        fireEvent.press(screen.getByText(NEW_ENTRY_CLOSE_LABEL));
+
+        expect(Alert.alert).toHaveBeenCalledWith(
+          '変更を破棄しますか?',
+          '入力中の内容は保存されません。',
+          expect.any(Array),
+        );
+        expect(screen.getByText(NEW_ENTRY_HEADING)).toBeTruthy();
+        expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(
+          buildDiaryEntryKey(expect.any(String)),
+          expect.any(String),
+        );
+
+        await pressAlertButton('破棄');
+
+        await waitFor(() => expect(screen.queryByText(NEW_ENTRY_HEADING)).toBeNull());
+      });
+
+      it('keeps the modal open and preserves the unsaved draft when "キャンセル" is chosen in the discard confirmation dialog (異常系)', async () => {
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+        render(<DayEntriesScreen />);
+        await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+        await openNewEntryComposer();
+
+        fireEvent.changeText(
+          screen.getByLabelText(NEW_ENTRY_INPUT_LABEL),
+          'キャンセルで残るはずの下書き',
+        );
+        fireEvent.press(screen.getByText(NEW_ENTRY_CLOSE_LABEL));
+        await pressAlertButton('キャンセル');
+
+        expect(screen.getByText(NEW_ENTRY_HEADING)).toBeTruthy();
+        expect(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.value).toBe(
+          'キャンセルで残るはずの下書き',
+        );
+      });
+
+      it('also shows the discard confirmation dialog when the background overlay is tapped with unsaved input (正常系)', async () => {
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+        render(<DayEntriesScreen />);
+        await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+        await openNewEntryComposer();
+
+        fireEvent.changeText(
+          screen.getByLabelText(NEW_ENTRY_INPUT_LABEL),
+          'オーバーレイタップで破棄確認',
+        );
+        fireEvent.press(screen.getByTestId('modal-overlay-pressable'));
+
+        expect(Alert.alert).toHaveBeenCalledTimes(1);
+        expect(screen.getByText(NEW_ENTRY_HEADING)).toBeTruthy();
+      });
+    });
+
+    describe('下書きの自動保存', () => {
+      it("auto-saves the draft under this screen's own key prefix, distinct from the home screen's, once the debounce interval elapses (正常系)", async () => {
+        jest.useFakeTimers();
+        try {
+          render(<DayEntriesScreen />);
+          await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+          await openNewEntryComposer();
+
+          fireEvent.changeText(
+            screen.getByLabelText(NEW_ENTRY_INPUT_LABEL),
+            '一日一覧画面での書きかけの下書き',
+          );
+
+          // デバウンス時間が経過するまでは、下書きキーへの書き込みはまだ発生しない
+          expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(
+            NEW_ENTRY_DRAFT_KEY,
+            expect.any(String),
+          );
+
+          await act(async () => {
+            jest.advanceTimersByTime(1000);
+          });
+
+          await waitFor(() =>
+            expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+              NEW_ENTRY_DRAFT_KEY,
+              '一日一覧画面での書きかけの下書き',
+            ),
+          );
+          // ホーム画面の新規作成モーダルと同じ日付でも、別キーのため混ざらない
+          expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(
+            HOME_SCREEN_DRAFT_KEY,
+            expect.any(String),
+          );
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('restores a previously auto-saved draft into the input when the composer modal is reopened for the same date (正常系)', async () => {
+        await AsyncStorage.setItem(NEW_ENTRY_DRAFT_KEY, '前回の続きから書きかけの下書き');
+
+        render(<DayEntriesScreen />);
+        await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+        await openNewEntryComposer();
+
+        await waitFor(() =>
+          expect(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.value).toBe(
+            '前回の続きから書きかけの下書き',
+          ),
+        );
+      });
+
+      it('clears the auto-saved draft key once the entry is successfully saved (正常系)', async () => {
+        await AsyncStorage.setItem(NEW_ENTRY_DRAFT_KEY, '保存後に消えるはずの下書き');
+
+        render(<DayEntriesScreen />);
+        await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+        await openNewEntryComposer();
+        await waitFor(() =>
+          expect(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.value).toBe(
+            '保存後に消えるはずの下書き',
+          ),
+        );
+
+        fireEvent.press(screen.getByText(NEW_ENTRY_SAVE_LABEL));
+
+        await waitFor(() => expect(screen.queryByText(NEW_ENTRY_HEADING)).toBeNull(), {
+          timeout: 5000,
+        });
+        expect(await AsyncStorage.getItem(NEW_ENTRY_DRAFT_KEY)).toBeNull();
+      }, 15000); // waitForのtimeout(5000ms)にマージンを持たせ、CI環境の負荷によるflaky失敗を防ぐ
+
+      it('clears the auto-saved draft key once "破棄" is chosen to close the modal without saving (正常系)', async () => {
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+        await AsyncStorage.setItem(NEW_ENTRY_DRAFT_KEY, '破棄されるはずの下書き');
+
+        render(<DayEntriesScreen />);
+        await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+        await openNewEntryComposer();
+        await waitFor(() =>
+          expect(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.value).toBe(
+            '破棄されるはずの下書き',
+          ),
+        );
+
+        fireEvent.press(screen.getByText(NEW_ENTRY_CLOSE_LABEL));
+        const alertMock = Alert.alert as jest.Mock;
+        const [, , buttons] = alertMock.mock.calls[alertMock.mock.calls.length - 1];
+        const discardButton = buttons.find((b: { text: string }) => b.text === '破棄');
+        await act(async () => {
+          discardButton.onPress();
+        });
+
+        await waitFor(() => expect(screen.queryByText(NEW_ENTRY_HEADING)).toBeNull());
+        expect(await AsyncStorage.getItem(NEW_ENTRY_DRAFT_KEY)).toBeNull();
+      });
     });
   });
 
