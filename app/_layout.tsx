@@ -85,8 +85,9 @@ function RootLayoutContent() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="oss-licenses" options={{ title: 'OSSライセンス' }} />
         {/* タイトルはpush先の日付に応じて画面側(day-entries/[date].tsx)がnavigation.setOptionsで
-            動的に設定するため、ここでは指定しない */}
-        <Stack.Screen name="day-entries/[date]" />
+            動的に設定するため、ここでは指定しない。戻るボタンのラベルは、遷移元の(tabs)が
+            タイトル未設定でExpo Routerがルート名をそのまま使ってしまうため、明示的に指定する */}
+        <Stack.Screen name="day-entries/[date]" options={{ headerBackTitle: 'カレンダー' }} />
         <Stack.Screen name="edit-entry/[id]" options={{ title: '日記を編集' }} />
       </Stack>
       {/* `style="auto"`はOSのカラースキーム(Appearance)を見て自動判定するため、
