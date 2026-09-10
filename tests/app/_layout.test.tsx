@@ -27,9 +27,20 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 // within a LinkPreviewContextProvider`のようなエラーになる)、この画面を単体でレンダリング
 // するこのテストではそのコンテキストが存在しない。他のテスト(`tests/app/settings.test.tsx`等)と
 // 同じ方針で、実際の画面遷移を検証しない薄いパススルーのモックに差し替える。
+// 各`Stack.Screen`に渡された`name`/`options`を検証できるよう、外側の変数に記録しておく
+// (`tests/app/tabs-layout.test.tsx`と同じ方針)。
+const mockStackScreenOptionsByName = new Map<string, { headerBackTitle?: string }>();
+
 jest.mock('expo-router', () => {
   const PassThrough = ({ children }: PropsWithChildren) => children ?? null;
-  function StackScreen() {
+  function StackScreen({
+    name,
+    options,
+  }: {
+    name: string;
+    options?: { headerBackTitle?: string };
+  }) {
+    mockStackScreenOptionsByName.set(name, options ?? {});
     return null;
   }
   const Stack = PassThrough as unknown as typeof PassThrough & { Screen: typeof StackScreen };
@@ -74,6 +85,17 @@ function getAppStateChangeListener(): (nextAppState: string) => void {
 
 const SKIP_BUTTON_TEXT = 'スキップ';
 const START_BUTTON_TEXT = 'はじめる';
+
+describe('RootLayout の一日日記一覧画面(day-entries/[date])の戻るボタンラベル', () => {
+  it('sets an explicit headerBackTitle instead of falling back to the "(tabs)" route name', async () => {
+    render(<RootLayout />);
+
+    await waitFor(() => expect(mockStackScreenOptionsByName.has('day-entries/[date]')).toBe(true));
+    expect(mockStackScreenOptionsByName.get('day-entries/[date]')?.headerBackTitle).toBe(
+      'カレンダー',
+    );
+  });
+});
 
 describe('RootLayout のオンボーディング表示制御(Issue #104)', () => {
   beforeEach(async () => {
