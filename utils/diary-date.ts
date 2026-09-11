@@ -17,6 +17,22 @@ export function buildCreatedAtForDateKey(dateKey: string): string {
   return new Date(year, month - 1, day, 12, 0, 0, 0).toISOString();
 }
 
+// 'YYYY-MM-DD'形式の日付キーと基準時刻から、日付キーの年月日と基準時刻の時分秒を組み合わせた
+// ISO文字列を作る。時分秒は基準時刻のものを使うため日付境界(0時台・23時台)でも日付部分は
+// 選択した日付のまま変わらない(ドロワー等、実際に保存した時刻をcreatedAtへ反映したい場合に使用)
+export function buildCreatedAtForDateKeyAtTime(dateKey: string, time: Date = new Date()): string {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(
+    year,
+    month - 1,
+    day,
+    time.getHours(),
+    time.getMinutes(),
+    time.getSeconds(),
+    time.getMilliseconds(),
+  ).toISOString();
+}
+
 // 'YYYY-MM-DD'形式の日付キーを画面の見出し用に整形する
 export function formatDateHeading(dateKey: string): string {
   const [year, month, day] = dateKey.split('-');

@@ -1,5 +1,6 @@
 import {
   buildCreatedAtForDateKey,
+  buildCreatedAtForDateKeyAtTime,
   dateKeyToDate,
   formatDateHeading,
   formatEntryDateTime,
@@ -33,6 +34,54 @@ describe('buildCreatedAtForDateKey', () => {
   it('round-trips back to the same date key via toDateKey (regression: local noon avoids day-boundary drift)', () => {
     const dateKey = '2026-12-31';
     expect(toDateKey(new Date(buildCreatedAtForDateKey(dateKey)))).toBe(dateKey);
+  });
+});
+
+describe('buildCreatedAtForDateKeyAtTime', () => {
+  it('combines the year/month/day of the date key with the hour/minute/second/millisecond of the given time (正常系)', () => {
+    const time = new Date(2020, 0, 1, 8, 45, 12, 345);
+    const iso = buildCreatedAtForDateKeyAtTime('2026-03-15', time);
+    const date = new Date(iso);
+    expect(date.getFullYear()).toBe(2026);
+    expect(date.getMonth()).toBe(2);
+    expect(date.getDate()).toBe(15);
+    expect(date.getHours()).toBe(8);
+    expect(date.getMinutes()).toBe(45);
+    expect(date.getSeconds()).toBe(12);
+    expect(date.getMilliseconds()).toBe(345);
+  });
+
+  it('uses the current time when the time argument is omitted (正常系)', () => {
+    // dateKeyに実行時点の日付そのものを渡すことで、結果のタイムスタンプをDate.now()と直接比較できる
+    const todayKey = toDateKey(new Date());
+    const before = Date.now();
+    const iso = buildCreatedAtForDateKeyAtTime(todayKey);
+    const after = Date.now();
+
+    const createdAtMs = new Date(iso).getTime();
+    expect(createdAtMs).toBeGreaterThanOrEqual(before);
+    expect(createdAtMs).toBeLessThanOrEqual(after);
+  });
+
+  it('does not let the day-boundary time-of-day shift the date part away from the given date key (境界値: 0時台)', () => {
+    const dateKey = '2026-12-31';
+    const time = new Date(2020, 0, 1, 0, 5, 0, 0);
+    const iso = buildCreatedAtForDateKeyAtTime(dateKey, time);
+    expect(toDateKey(new Date(iso))).toBe(dateKey);
+  });
+
+  it('does not let the day-boundary time-of-day shift the date part away from the given date key (境界値: 23時台)', () => {
+    const dateKey = '2026-01-01';
+    const time = new Date(2020, 0, 1, 23, 55, 0, 0);
+    const iso = buildCreatedAtForDateKeyAtTime(dateKey, time);
+    expect(toDateKey(new Date(iso))).toBe(dateKey);
+  });
+
+  it('produces different createdAt values for the same date key when given different times (正常系)', () => {
+    const dateKey = '2026-05-10';
+    const first = buildCreatedAtForDateKeyAtTime(dateKey, new Date(2020, 0, 1, 9, 0, 0));
+    const second = buildCreatedAtForDateKeyAtTime(dateKey, new Date(2020, 0, 1, 21, 30, 0));
+    expect(first).not.toBe(second);
   });
 });
 

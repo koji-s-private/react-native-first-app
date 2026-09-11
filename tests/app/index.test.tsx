@@ -3101,7 +3101,8 @@ describe('HomeScreen', () => {
     // 「昨日」の計算に実行時のシステム時刻をそのまま使うため、月初にCIが実行されると
     // 「昨日」が前月末になりカレンダー(当月分のみ描画)からセルが見つからず失敗する。
     // 月またぎの影響を受けない月の中頃を基準日として固定する。
-    const FIXED_NOW = new Date(2026, 5, 15, 12, 0, 0);
+    // 実際の保存時刻がcreatedAtに使われることを正午固定と区別して検証できるよう、あえて正午以外の時刻にする
+    const FIXED_NOW = new Date(2026, 5, 15, 9, 34, 17);
 
     beforeEach(() => {
       jest.useFakeTimers();
@@ -3159,7 +3160,7 @@ describe('HomeScreen', () => {
       expect(mockPush).not.toHaveBeenCalled();
     });
 
-    it("saves a new entry anchored to local noon of the tapped date as createdAt (regardless of the current time-of-day), persists it encrypted, closes the modal, and reflects the entry in that day's calendar cell", async () => {
+    it("saves a new entry anchored to the tapped date but with the actual save-time time-of-day as createdAt, persists it encrypted, closes the modal, and reflects the entry in that day's calendar cell", async () => {
       const now = new Date();
       const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
 
@@ -3178,14 +3179,15 @@ describe('HomeScreen', () => {
       const persisted = (await decryptPersistedEntry(value)) as DiaryEntry;
       expect(persisted.text).toBe('過去日の新規日記');
 
-      // createdAtはタップした日付の「ローカル正午」になっており、現在時刻(now)には依存しない
+      // createdAtの日付部分はタップした日付に固定されるが、時分秒は正午固定ではなく
+      // 実際に保存した瞬間(FIXED_NOW)の時刻になる
       const createdAt = new Date(persisted.createdAt);
       expect(createdAt.getFullYear()).toBe(yesterday.getFullYear());
       expect(createdAt.getMonth()).toBe(yesterday.getMonth());
       expect(createdAt.getDate()).toBe(yesterday.getDate());
-      expect(createdAt.getHours()).toBe(12);
-      expect(createdAt.getMinutes()).toBe(0);
-      expect(createdAt.getSeconds()).toBe(0);
+      expect(createdAt.getHours()).toBe(FIXED_NOW.getHours());
+      expect(createdAt.getMinutes()).toBe(FIXED_NOW.getMinutes());
+      expect(createdAt.getSeconds()).toBe(FIXED_NOW.getSeconds());
 
       // 保存に成功するとモーダルが閉じる
       await waitFor(() => {
@@ -3196,6 +3198,39 @@ describe('HomeScreen', () => {
       // entriesByDateはcreatedAtの日付(=タップした日付)をキーにするため、
       // 対象日のカレンダーセルに日記件数インジケーターとして反映される
       expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
+    });
+
+    it('uses the save-moment time-of-day (not a fixed noon) for createdAt on each save, so consecutive saves at different times produce different createdAt values (境界値)', async () => {
+      const now = new Date();
+      const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      const twoDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2);
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      jest.clearAllMocks();
+
+      openNewEntryModalFor(yesterday);
+      fireEvent.changeText(getNewEntryInput(), '1件目の新規日記');
+      fireEvent.press(getNewEntrySaveButton());
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+      const [, firstValue] = (AsyncStorage.setItem as jest.Mock).mock.calls[0];
+      const firstPersisted = (await decryptPersistedEntry(firstValue)) as DiaryEntry;
+
+      // 別日付に、異なる時刻で2件目を保存する
+      jest.setSystemTime(new Date(2026, 5, 15, 21, 12, 3));
+
+      openNewEntryModalFor(twoDaysAgo);
+      fireEvent.changeText(getNewEntryInput(), '2件目の新規日記');
+      fireEvent.press(getNewEntrySaveButton());
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(2));
+      const [, secondValue] = (AsyncStorage.setItem as jest.Mock).mock.calls[1];
+      const secondPersisted = (await decryptPersistedEntry(secondValue)) as DiaryEntry;
+
+      expect(secondPersisted.createdAt).not.toBe(firstPersisted.createdAt);
+      const secondCreatedAt = new Date(secondPersisted.createdAt);
+      expect(secondCreatedAt.getHours()).toBe(21);
+      expect(secondCreatedAt.getMinutes()).toBe(12);
+      expect(secondCreatedAt.getSeconds()).toBe(3);
     });
 
     it('shows an error message and rolls back the optimistic calendar update when persisting the new entry fails, keeping the modal open with the input preserved (異常系)', async () => {
