@@ -35,7 +35,7 @@ import { useModalSlideTransition } from '@/hooks/use-modal-slide-transition';
 import { useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import {
-  buildCreatedAtForDateKey,
+  buildCreatedAtForDateKeyAtTime,
   dateKeyToDate,
   formatDateHeading,
   getSwipeDayDelta,
@@ -692,8 +692,8 @@ export default function HomeScreen() {
     ]);
   }, [newEntryDraft, closeNewEntryModal]);
 
-  // 日記の無い日をタップして開いたモーダルからの新規保存。handleSaveと異なり、
-  // createdAtはその瞬間ではなく選択された日付基準(buildCreatedAtForDateKey)にする
+  // 日記の無い日をタップして開いたモーダルからの新規保存。createdAtの日付部分は選択日付に
+  // 固定しつつ、時分秒は実際に保存した瞬間の時刻にする(buildCreatedAtForDateKeyAtTime)
   const handleSaveNewEntry = useCallback(async () => {
     // 対象日付が未確定(モーダルが閉じている状態)であれば何もしない
     if (!newEntryDate) {
@@ -709,7 +709,7 @@ export default function HomeScreen() {
         const newEntry: DiaryEntry = {
           id: randomUUID(),
           text: trimmed,
-          createdAt: buildCreatedAtForDateKey(targetDateKey),
+          createdAt: buildCreatedAtForDateKeyAtTime(targetDateKey),
         };
         previousEntries = entries;
         // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
