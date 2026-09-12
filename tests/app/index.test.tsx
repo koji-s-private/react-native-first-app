@@ -2855,6 +2855,40 @@ describe('HomeScreen', () => {
           jest.useRealTimers();
         }
       });
+
+      it('enables the right arrow and calls the passed callback once the calendar has moved one month earlier than the upper bound, since it is no longer exactly at the boundary (境界値)', async () => {
+        jest.useFakeTimers();
+        try {
+          const now = new Date(2026, 7, 25, 12, 0, 0);
+          jest.setSystemTime(now);
+
+          render(<HomeScreen />);
+          await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+          const [calendar] = screen.UNSAFE_getAllByType(Calendar);
+          act(() => {
+            calendar.props.onMonthChange({
+              year: 2026,
+              month: 7,
+              day: 1,
+              timestamp: new Date(2026, 6, 1).getTime(),
+              dateString: '2026-07-01',
+            });
+          });
+          expect(
+            await screen.findByText('2026年7月', { includeHiddenElements: true }),
+          ).toBeTruthy();
+          expect(calendar.props.disableArrowRight).toBe(false);
+
+          const addMonth = jest.fn();
+          act(() => {
+            calendar.props.onPressArrowRight(addMonth);
+          });
+          expect(addMonth).toHaveBeenCalledTimes(1);
+        } finally {
+          jest.useRealTimers();
+        }
+      });
     });
   });
 
