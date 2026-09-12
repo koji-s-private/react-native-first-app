@@ -2697,12 +2697,9 @@ describe('HomeScreen', () => {
       expect(calendar.props.minDate).toBe(`${minYear}-${`${minMonth}`.padStart(2, '0')}-01`);
     });
 
-    // Issue #289の回帰テスト。minDate導入前はenableSwipeMonthsにより最古エントリの月より
-    // 過去へ無制限にスワイプでき、その状態でヘッダーをタップして開く年月ピッカーの初期選択年
-    // (pickerMinYearでクランプ)と実際に表示中の年が食い違っていた。minDateにより、最古エントリの
-    // 月より1日でも過去の日付セルは(未来日のmaxDateと同様に)タップ不可・アクセシビリティdisabled
-    // になるため、そもそもその月より過去へスワイプできなくなる
-    it('disables the day cell immediately before the oldest diary entry month once the calendar is moved there, matching the same disabled treatment already used for future dates via maxDate (回帰: #289)', async () => {
+    // minDateにより、最古エントリの月より1日でも過去の日付セルは(未来日のmaxDateと同様に)
+    // タップ不可・アクセシビリティdisabledになることを、スワイプ相当の移動後にも検証する
+    it('disables the day cell immediately before the oldest diary entry month once the calendar is moved there, matching the same disabled treatment already used for future dates via maxDate', async () => {
       jest.useFakeTimers();
       try {
         const now = new Date(2026, 7, 25, 12, 0, 0);
