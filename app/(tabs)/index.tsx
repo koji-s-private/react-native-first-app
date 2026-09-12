@@ -1213,6 +1213,24 @@ export default function HomeScreen() {
                       pickerMinYear,
                       getMonthFromMonthIndex(pickerMinMonthIndex),
                     )}
+                    // minDate/maxDateは日付セルの見た目にのみ影響し、矢印タップ・スワイプによる
+                    // 月送り自体はブロックしないため、範囲外への移動はここで直接止める
+                    onPressArrowLeft={(subtractMonth) => {
+                      if (getMonthIndex(displayedYear, displayedMonth) > pickerMinMonthIndex) {
+                        subtractMonth();
+                      }
+                    }}
+                    onPressArrowRight={(addMonth) => {
+                      if (getMonthIndex(displayedYear, displayedMonth) < pickerMaxMonthIndex) {
+                        addMonth();
+                      }
+                    }}
+                    disableArrowLeft={
+                      getMonthIndex(displayedYear, displayedMonth) <= pickerMinMonthIndex
+                    }
+                    disableArrowRight={
+                      getMonthIndex(displayedYear, displayedMonth) >= pickerMaxMonthIndex
+                    }
                     // 月によって行数(4〜6週)が変わって高さがガタつかないよう、常に6週分の高さで揃える
                     showSixWeeks
                   />
