@@ -2752,6 +2752,110 @@ describe('HomeScreen', () => {
         jest.useRealTimers();
       }
     });
+
+    // react-native-calendarsのminDate/maxDateは日付セルの見た目にのみ影響し、ヘッダー矢印タップ・
+    // enableSwipeMonthsによるスワイプでの月送り自体はブロックしないため、範囲境界の実際の
+    // 移動可否はonPressArrowLeft/onPressArrowRight/disableArrowLeft/disableArrowRightで検証する
+    describe('カレンダーヘッダー矢印(タップ・スワイプ)による月送りの範囲制限', () => {
+      it('disables the left arrow and blocks moving to the previous month when there are no diary entries yet, since the displayed month is exactly the lower bound (境界値)', async () => {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        const [calendar] = screen.UNSAFE_getAllByType(Calendar);
+        expect(calendar.props.disableArrowLeft).toBe(true);
+
+        const subtractMonth = jest.fn();
+        act(() => {
+          calendar.props.onPressArrowLeft(subtractMonth);
+        });
+
+        expect(subtractMonth).not.toHaveBeenCalled();
+      });
+
+      it('disables the right arrow and blocks moving to a future month when the calendar is showing the current month, since it is exactly the upper bound (境界値)', async () => {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        const [calendar] = screen.UNSAFE_getAllByType(Calendar);
+        expect(calendar.props.disableArrowRight).toBe(true);
+
+        const addMonth = jest.fn();
+        act(() => {
+          calendar.props.onPressArrowRight(addMonth);
+        });
+
+        expect(addMonth).not.toHaveBeenCalled();
+      });
+
+      it('disables the left arrow and blocks moving past the oldest diary entry month, while allowing it once the calendar has moved one month later than that boundary (境界値)', async () => {
+        jest.useFakeTimers();
+        try {
+          const now = new Date(2026, 7, 25, 12, 0, 0);
+          jest.setSystemTime(now);
+          const minYear = 2024;
+          const minMonth = 3;
+          await AsyncStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify([
+              {
+                id: 'oldest',
+                text: '最古の日記',
+                createdAt: new Date(minYear, minMonth - 1, 15, 9, 0, 0).toISOString(),
+              },
+            ]),
+          );
+
+          render(<HomeScreen />);
+          await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+          const [calendar] = screen.UNSAFE_getAllByType(Calendar);
+          act(() => {
+            calendar.props.onMonthChange({
+              year: minYear,
+              month: minMonth,
+              day: 1,
+              timestamp: new Date(minYear, minMonth - 1, 1).getTime(),
+              dateString: `${minYear}-${`${minMonth}`.padStart(2, '0')}-01`,
+            });
+          });
+          expect(
+            await screen.findByText(`${minYear}年${minMonth}月`, { includeHiddenElements: true }),
+          ).toBeTruthy();
+          expect(calendar.props.disableArrowLeft).toBe(true);
+
+          const subtractMonth = jest.fn();
+          act(() => {
+            calendar.props.onPressArrowLeft(subtractMonth);
+          });
+          expect(subtractMonth).not.toHaveBeenCalled();
+
+          // 最古月より1ヶ月新しい月へ移動すると、範囲の内側なので通常どおり左矢印が動作する
+          act(() => {
+            calendar.props.onMonthChange({
+              year: minYear,
+              month: minMonth + 1,
+              day: 1,
+              timestamp: new Date(minYear, minMonth, 1).getTime(),
+              dateString: `${minYear}-${`${minMonth + 1}`.padStart(2, '0')}-01`,
+            });
+          });
+          expect(
+            await screen.findByText(`${minYear}年${minMonth + 1}月`, {
+              includeHiddenElements: true,
+            }),
+          ).toBeTruthy();
+          expect(calendar.props.disableArrowLeft).toBe(false);
+
+          const secondSubtractMonth = jest.fn();
+          act(() => {
+            calendar.props.onPressArrowLeft(secondSubtractMonth);
+          });
+          expect(secondSubtractMonth).toHaveBeenCalledTimes(1);
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+    });
   });
 
   describe('カレンダーセルの日記件数インジケーター(ドット/バッジ)', () => {
