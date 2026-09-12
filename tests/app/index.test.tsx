@@ -2660,6 +2660,101 @@ describe('HomeScreen', () => {
       const minMonthButton = screen.getByLabelText(`${minYear}年${minMonth}月へ移動`);
       expect(minMonthButton.props.accessibilityState?.disabled).toBe(false);
     });
+
+    it('sets minDate to the first day of the current month on the underlying Calendar component when there are no diary entries yet (正常系)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const [calendar] = screen.UNSAFE_getAllByType(Calendar);
+      const expectedMinDate = `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-01`;
+      expect(calendar.props.minDate).toBe(expectedMinDate);
+    });
+
+    it('sets minDate to the first day of the oldest diary entry month on the underlying Calendar component, not just the current month (境界値)', async () => {
+      const now = new Date();
+      const minYear = now.getFullYear() - 2;
+      const minMonth = 4;
+      const storedEntries = [
+        {
+          id: 'oldest',
+          text: '最古の日記',
+          createdAt: new Date(minYear, minMonth - 1, 15, 9, 0, 0).toISOString(),
+        },
+        {
+          id: 'newer',
+          text: '新しい日記',
+          createdAt: new Date(now.getFullYear(), now.getMonth(), 15, 9, 0, 0).toISOString(),
+        },
+      ];
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      const [calendar] = screen.UNSAFE_getAllByType(Calendar);
+      expect(calendar.props.minDate).toBe(`${minYear}-${`${minMonth}`.padStart(2, '0')}-01`);
+    });
+
+    // Issue #289の回帰テスト。minDate導入前はenableSwipeMonthsにより最古エントリの月より
+    // 過去へ無制限にスワイプでき、その状態でヘッダーをタップして開く年月ピッカーの初期選択年
+    // (pickerMinYearでクランプ)と実際に表示中の年が食い違っていた。minDateにより、最古エントリの
+    // 月より1日でも過去の日付セルは(未来日のmaxDateと同様に)タップ不可・アクセシビリティdisabled
+    // になるため、そもそもその月より過去へスワイプできなくなる
+    it('disables the day cell immediately before the oldest diary entry month once the calendar is moved there, matching the same disabled treatment already used for future dates via maxDate (回帰: #289)', async () => {
+      jest.useFakeTimers();
+      try {
+        const now = new Date(2026, 7, 25, 12, 0, 0);
+        jest.setSystemTime(now);
+        const minYear = 2024;
+        const minMonth = 3;
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            {
+              id: 'oldest',
+              text: '最古の日記',
+              createdAt: new Date(minYear, minMonth - 1, 15, 9, 0, 0).toISOString(),
+            },
+          ]),
+        );
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        // 実際のスワイプ/矢印操作と同じ経路(onMonthChange)で最古エントリの月まで表示を移動する。
+        // enableSwipeMonthsによる実際のジェスチャー自体はテストで再現できないため、
+        // Calendar本体が発火するコールバックを直接呼ぶことで移動後の状態を再現する
+        const [calendar] = screen.UNSAFE_getAllByType(Calendar);
+        act(() => {
+          calendar.props.onMonthChange({
+            year: minYear,
+            month: minMonth,
+            day: 1,
+            timestamp: new Date(minYear, minMonth - 1, 1).getTime(),
+            dateString: `${minYear}-${`${minMonth}`.padStart(2, '0')}-01`,
+          });
+        });
+
+        expect(
+          await screen.findByText(`${minYear}年${minMonth}月`, { includeHiddenElements: true }),
+        ).toBeTruthy();
+
+        // 2024年3月1日(金曜)の直前、はみ出しセルとして描画される2024年2月29日はminDateにより
+        // 過去日として無効化される(以前はタップ可能だった)
+        const beforeMinDateCell = screen.getByLabelText(`${minYear}年2月29日、日記なし`);
+        expect(beforeMinDateCell.props.accessibilityState?.disabled).toBe(true);
+
+        // minDate当日(3月1日)自体は無効化されない
+        const minDateCell = screen.getByLabelText(
+          `${minYear}年${minMonth}月1日、日記なし、タップして新規作成`,
+        );
+        expect(minDateCell.props.accessibilityState?.disabled).toBe(false);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
   });
 
   describe('カレンダーセルの日記件数インジケーター(ドット/バッジ)', () => {
