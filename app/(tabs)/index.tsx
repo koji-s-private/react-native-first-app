@@ -106,6 +106,10 @@ function getYearFromMonthIndex(monthIndex: number): number {
   return Math.floor((monthIndex - 1) / 12);
 }
 
+function getMonthFromMonthIndex(monthIndex: number): number {
+  return ((monthIndex - 1) % 12) + 1;
+}
+
 // 指定した年月の1日を表す'YYYY-MM-DD'キーを組み立てる
 function getFirstDayOfMonthKey(year: number, month: number): string {
   return `${year}-${`${month}`.padStart(2, '0')}-01`;
@@ -1203,6 +1207,12 @@ export default function HomeScreen() {
                     onMonthChange={handleMonthChange}
                     // 未来日を新規作成の対象外にするため、今日より後の日付をタップ不可(state: 'disabled')にする
                     maxDate={toDateKey(new Date())}
+                    // 年月ピッカーで選択可能な最古月より過去へスワイプできてしまうと、
+                    // ピッカーのクランプ処理と表示中の月が食い違うため下限を揃える
+                    minDate={getFirstDayOfMonthKey(
+                      pickerMinYear,
+                      getMonthFromMonthIndex(pickerMinMonthIndex),
+                    )}
                     // 月によって行数(4〜6週)が変わって高さがガタつかないよう、常に6週分の高さで揃える
                     showSixWeeks
                   />
