@@ -516,7 +516,7 @@ export default function HomeScreen() {
     (async () => {
       try {
         const storedDraft = await AsyncStorage.getItem(DIARY_DRAFT_STORAGE_KEY);
-        if (!isCancelled && storedDraft) {
+        if (!isCancelled && storedDraft && !draftEditedRef.current) {
           setDraft(storedDraft);
         }
       } catch {
