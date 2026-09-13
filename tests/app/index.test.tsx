@@ -1476,6 +1476,43 @@ describe('HomeScreen', () => {
       await waitFor(() => expect(input.props.value).toBe('前回の続きから書きかけの下書き'));
     });
 
+    it('does not overwrite in-progress user input with an older auto-saved draft when the user starts typing before the initial restore resolves', async () => {
+      let resolveDraftRead: (value: string | null) => void = () => {};
+      // async-storage-mockは元々jest.fn()のため、jest.spyOnの`mockRestore()`では元の実装に
+      // 戻らない(既知の挙動)。上書き前の実装を保存しておき、finallyで明示的に復元する
+      const originalGetItemImpl = (AsyncStorage.getItem as jest.Mock).getMockImplementation();
+      const getItemSpy = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key: string) => {
+        if (key === DRAFT_STORAGE_KEY) {
+          return new Promise<string | null>((resolve) => {
+            resolveDraftRead = resolve;
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      try {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY));
+
+        const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+        fireEvent.changeText(input, 'ユーザーが入力中の新しい内容');
+
+        // 復元処理未解決の間にユーザーが入力を始めた後、保存済みの古い下書きの読み込みが解決する
+        await act(async () => {
+          resolveDraftRead('保存済みの古い下書き');
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        // draftEditedRefにより、入力済みの内容が古い下書きで上書きされない
+        expect(input.props.value).toBe('ユーザーが入力中の新しい内容');
+      } finally {
+        if (originalGetItemImpl) {
+          getItemSpy.mockImplementation(originalGetItemImpl);
+        }
+      }
+    });
+
     it('clears the auto-saved draft key once the entry is successfully saved', async () => {
       jest.useFakeTimers();
       try {
