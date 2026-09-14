@@ -932,7 +932,7 @@ export default function HomeScreen() {
   );
 
   const renderDay = useCallback(
-    ({ date, state, onPress }: DayComponentProps) => {
+    ({ date, state }: DayComponentProps) => {
       if (!date) {
         return null;
       }
@@ -957,7 +957,9 @@ export default function HomeScreen() {
       return (
         <Pressable
           style={[styles.dayCell, { height: dayCellHeight }]}
-          onPress={() => onPress?.(date)}
+          // react-native-calendars内部のonPressはmaxDateを超える日付で発火しないため、
+          // isPressableの判定と遷移処理を一致させるためhandleDayPressを直接呼び出す
+          onPress={() => handleDayPress(date)}
           disabled={!isPressable}
           accessibilityRole={isPressable ? 'button' : undefined}
           accessibilityLabel={accessibilityLabel}
@@ -999,7 +1001,7 @@ export default function HomeScreen() {
         </Pressable>
       );
     },
-    [entriesByDate, tintColor, backgroundColor, dayCellHeight],
+    [entriesByDate, tintColor, backgroundColor, dayCellHeight, handleDayPress],
   );
 
   // 文字数カウンター表示用に、grapheme単位で数え直す(絵文字などでUTF-16の.lengthとずれるため)
