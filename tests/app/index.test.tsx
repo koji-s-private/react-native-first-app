@@ -2266,6 +2266,42 @@ describe('HomeScreen', () => {
       }
     });
 
+    // 未来日に日記エントリが存在する場合(通常はあり得ないが端末時計変更などで発生しうる)、
+    // そのセルは`hasEntries`によりisPressableがtrueになる。ライブラリ内部のonPress
+    // (maxDate超過日では発火しない)ではなくhandleDayPressを直接呼ぶことで、見た目の
+    // 操作可否と実際の遷移可否を一致させている
+    it('navigates to the day-entries screen when tapping a future day cell that unexpectedly has a diary entry', async () => {
+      jest.useFakeTimers();
+      try {
+        // 2026年8月は1日が土曜日で自然に6週間ぴったり(showSixWeeksによる前後月のはみ出しが
+        // 最小)になり、5日を「今日」にすることで10〜20日の範囲を確実に未来日にできる
+        const now = new Date(2026, 7, 5, 12, 0, 0);
+        jest.setSystemTime(now);
+        const { dayWithEntry: futureDay } = pickTestDays(now);
+        const futureDateKey = toDateKeyForTest(now, futureDay);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([{ id: '1', text: '未来の日記', createdAt: isoAt(now, futureDay) }]),
+        );
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        const dayCell = screen.getByLabelText(
+          `${now.getFullYear()}年${now.getMonth() + 1}月${futureDay}日、日記あり(1件)`,
+        );
+        // hasEntriesがtrueのため、ライブラリ側のmaxDateによる'disabled'状態に関わらず
+        // isPressableはtrueになり、アクセシビリティ上も操作可能として扱われる
+        expect(dayCell.props.accessibilityState?.disabled).toBe(false);
+
+        fireEvent.press(dayCell);
+
+        expect(mockPush).toHaveBeenCalledWith(`/day-entries/${futureDateKey}`);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('sets statusBarTranslucent and navigationBarTranslucent on the new-entry creation modal and the month picker modal, so they match the edge-to-edge display of the screen behind them', async () => {
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
