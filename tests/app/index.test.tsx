@@ -4797,6 +4797,57 @@ describe('HomeScreen', () => {
         expect(excerpt.match).toBe('a b');
         expect(excerpt.suffix).toBe('残り');
       });
+
+      it('shows no results when the entry text and the query have a different number of consecutive line breaks at the same position, because entries.filter itself compares the raw (un-folded) strings (境界値)', async () => {
+        // getSearchExcerptは本文・クエリ双方の改行を畳むが、一覧側のentries.filterは改行を
+        // 畳まずそのまま比較するため、改行の「本数」自体は依然として完全一致が必要になる。
+        // このケースはentries.filterの時点で弾かれ、getSearchExcerptには到達しない
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: 'メモa\n\n\nb残り', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'a\nb');
+
+        await screen.findByText('見つかりませんでした');
+      });
+
+      it('matches when the query contains multiple separate line-break runs at different positions (境界値)', async () => {
+        const now = new Date();
+        const { dayWithEntry } = pickTestDays(now);
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: 'メモa\nb\n\nc残り', createdAt: isoAt(now, dayWithEntry) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'a\nb\n\nc');
+
+        await screen.findByText('a b c');
+        const [excerpt] = getRenderedSearchExcerpts();
+        expect(excerpt.prefix).toBe('メモ');
+        expect(excerpt.match).toBe('a b c');
+        expect(excerpt.suffix).toBe('残り');
+      });
+
+      // getSearchExcerptのフォールバック分岐(実装コード側のコメント参照、20書記素での切り詰め・
+      // 絵文字分断回避を含む)は、呼び出し元でtrim済みのクエリを使う限り、entries.filterを通過した
+      // エントリに対しては到達しないことを、改行以外の入力パターンも含めた網羅的な検証で確認済み。
+      // 到達手段が無い以上、この統合テストのスタイルで無理にフォールバック分岐を再現することはせず、
+      // (関数を個別exportするなどのコード構造変更なしには)テスト対象から意図的に外している
     });
 
     describe('検索欄のクリアボタン', () => {
