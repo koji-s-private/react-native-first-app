@@ -216,15 +216,18 @@ type SearchExcerpt = {
 // マッチ箇所の抜粋はgrapheme単位までは厳密にせず、多少のズレは許容する単純な文字列操作で行う
 function getSearchExcerpt(text: string, query: string): SearchExcerpt {
   const normalizedText = text.replace(/\n+/g, ' ');
+  // クエリ側にも本文と同じ改行畳み込みを適用し、entries.filter側の一致判定とズレないようにする
+  const normalizedQuery = query.replace(/\n+/g, ' ');
   const {
     normalized: lowerText,
     startMap,
     endMap,
   } = normalizeForSearch(normalizedText.toLowerCase());
-  const lowerQuery = normalizeForSearch(query.toLowerCase()).normalized;
+  const lowerQuery = normalizeForSearch(normalizedQuery.toLowerCase()).normalized;
   const matchIndex = lowerText.indexOf(lowerQuery);
 
-  // 通常は到達しないが、念のためのフォールバック(ハイライト対象なしのためmatchは空文字列)。
+  // 本文・クエリ双方を同じ規則で折り畳んでいるため、entries.filterを通過したエントリでは
+  // 実質的に到達しない、念のためのフォールバック(ハイライト対象なしのためmatchは空文字列)。
   // 本文の最初の行を、書記素クラスタ単位で切り詰めて抜粋として使う
   // (絵文字等が途中で分断されないようにする配慮のためsliceではなくsplitIntoGraphemesを使う)
   if (matchIndex === -1 || lowerQuery.length === 0) {
