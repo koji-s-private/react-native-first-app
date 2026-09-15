@@ -4444,6 +4444,30 @@ describe('HomeScreen', () => {
       expect(mockPush).toHaveBeenCalledWith(`/day-entries/${toDateKeyForTest(now, dayWithEntry)}`);
     });
 
+    it('sets accessibilityRole="button" and an accessibilityLabel combining the date heading and full text on each search result item, so screen readers can identify it (アクセシビリティ)', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: '今日は公園を散歩した', createdAt: isoAt(now, dayWithEntry) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
+      await screen.findByText(/公園/);
+
+      const dateKey = toDateKeyForTest(now, dayWithEntry);
+      const resultButton = screen.getByLabelText(
+        `${formatDateHeading(dateKey)}の日記: 今日は公園を散歩した`,
+      );
+      expect(resultButton.props.accessibilityRole).toBe('button');
+    });
+
     it('excerpts the matched portion of the entry text (with surrounding context) rather than only the first line, unlike the calendar cell title', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
