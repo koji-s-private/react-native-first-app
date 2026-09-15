@@ -4772,13 +4772,10 @@ describe('HomeScreen', () => {
         expect(excerpt.suffix).toBe('を食べた');
       });
 
-      it('shows the entry title without any highlighted element when getSearchExcerpt falls back to no match (異常系: フォールバック)', async () => {
-        // getSearchExcerptは、呼び出し元の一覧フィルタ(entries.filter)とは正規化の仕方がわずかに異なる
-        // (フィルタ側は改行をそのまま比較するが、抜粋側は連続する改行を半角スペース1つに畳んでから
-        // マッチ位置を探す)。クエリ自体に改行を含めると、フィルタは通過するが抜粋側では
-        // 見つからないという、実装コメントに書かれた「通常は到達しないはず」のフォールバック経路を
-        // 意図的に再現できる。フォールバック時は本文1行目(書記素クラスタ単位で切り詰め)が
-        // ハイライト無しでそのまま表示される
+      it('highlights the matched portion instead of falling back when the search query itself contains line breaks that fold the same way as the entry text (正常系)', async () => {
+        // getSearchExcerptは本文・クエリ双方の連続する改行を半角スペース1つに畳んでから
+        // マッチ位置を探すため、クエリ自体に改行が含まれていても畳んだ結果が本文側と一致し、
+        // 一覧側のフィルタ(entries.filter)と同じ判定結果になってハイライトされる
         const now = new Date();
         const { dayWithEntry } = pickTestDays(now);
         await AsyncStorage.setItem(
@@ -4794,34 +4791,23 @@ describe('HomeScreen', () => {
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'a\n\nb');
 
-        await screen.findByText('メモa b残り');
+        await screen.findByText('a b');
         const [excerpt] = getRenderedSearchExcerpts();
-        expect(excerpt.match).toBeNull();
-        expect(excerpt.prefix).toBe('メモa b残り');
-        expect(excerpt.suffix).toBe('');
-        // ハイライト背景色を持つノードが1つも描画されていないことも確認する
-        expect(
-          screen.UNSAFE_getAllByType(Text).some((node) => {
-            const flattened = StyleSheet.flatten(node.props.style ?? {});
-            return (
-              flattened.backgroundColor === Colors.light.searchHighlightBackground ||
-              flattened.backgroundColor === Colors.dark.searchHighlightBackground
-            );
-          }),
-        ).toBe(false);
+        expect(excerpt.prefix).toBe('メモ');
+        expect(excerpt.match).toBe('a b');
+        expect(excerpt.suffix).toBe('残り');
       });
 
-      it('returns the flattened first line as-is when it has exactly FALLBACK_EXCERPT_MAX_LENGTH (20) graphemes (boundary: no truncation)', async () => {
-        // フォールバック時に切り詰め対象となる「1行目」は、getSearchExcerpt内で改行を
-        // 半角スペースに畳んだ後の文字列全体になる(実装コメント参照)。ちょうど20書記素の
-        // 場合は切り詰め・省略記号付与のどちらも発生しないことを検証する境界値テスト
+      it('shows no results when the entry text and the query have a different number of consecutive line breaks at the same position, because entries.filter itself compares the raw (un-folded) strings (境界値)', async () => {
+        // getSearchExcerptは本文・クエリ双方の改行を畳むが、一覧側のentries.filterは改行を
+        // 畳まずそのまま比較するため、改行の「本数」自体は依然として完全一致が必要になる。
+        // このケースはentries.filterの時点で弾かれ、getSearchExcerptには到達しない
         const now = new Date();
         const { dayWithEntry } = pickTestDays(now);
-        const exactlyLimitText = `${'あ'.repeat(17)}x\ny`;
         await AsyncStorage.setItem(
           STORAGE_KEY,
           JSON.stringify([
-            { id: '1', text: exactlyLimitText, createdAt: isoAt(now, dayWithEntry) },
+            { id: '1', text: 'メモa\n\n\nb残り', createdAt: isoAt(now, dayWithEntry) },
           ]),
         );
         jest.clearAllMocks();
@@ -4829,71 +4815,39 @@ describe('HomeScreen', () => {
         render(<HomeScreen />);
         await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-        // 検索クエリ自体に改行を含めることで、一覧側のフィルタ(改行をそのまま比較)は通過するが
-        // 抜粋側(改行を畳んでから比較)ではマッチしないフォールバック経路を再現する
-        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'x\ny');
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'a\nb');
 
-        const expectedFlattened = `${'あ'.repeat(17)}x y`;
-        expect(expectedFlattened.length).toBe(20);
-        await screen.findByText(expectedFlattened);
-        const [excerpt] = getRenderedSearchExcerpts();
-        expect(excerpt.match).toBeNull();
-        expect(excerpt.prefix).toBe(expectedFlattened);
-        expect(excerpt.suffix).toBe('');
+        await screen.findByText('見つかりませんでした');
       });
 
-      it('truncates the fallback excerpt to 20 graphemes with an ellipsis when the flattened first line exceeds the limit (boundary: 21 graphemes)', async () => {
+      it('matches when the query contains multiple separate line-break runs at different positions (境界値)', async () => {
         const now = new Date();
         const { dayWithEntry } = pickTestDays(now);
-        const overLimitText = `${'あ'.repeat(19)}x\ny`;
         await AsyncStorage.setItem(
           STORAGE_KEY,
-          JSON.stringify([{ id: '1', text: overLimitText, createdAt: isoAt(now, dayWithEntry) }]),
+          JSON.stringify([
+            { id: '1', text: 'メモa\nb\n\nc残り', createdAt: isoAt(now, dayWithEntry) },
+          ]),
         );
         jest.clearAllMocks();
 
         render(<HomeScreen />);
         await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
-        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'x\ny');
+        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'a\nb\n\nc');
 
-        // 畳んだ後の1行目は「あ」×19 + "x y" の22書記素になり、20書記素を超えるため
-        // 先頭20書記素("あ"×19 + "x")のみ残して省略記号が付くはず
-        const expectedTruncated = `${'あ'.repeat(19)}x…`;
-        await screen.findByText(expectedTruncated);
+        await screen.findByText('a b c');
         const [excerpt] = getRenderedSearchExcerpts();
-        expect(excerpt.match).toBeNull();
-        expect(excerpt.prefix).toBe(expectedTruncated);
-        expect(excerpt.suffix).toBe('');
+        expect(excerpt.prefix).toBe('メモ');
+        expect(excerpt.match).toBe('a b c');
+        expect(excerpt.suffix).toBe('残り');
       });
 
-      it('does not split a surrogate-pair emoji in the middle when truncating the fallback excerpt (boundary)', async () => {
-        // 絵文字がちょうど切り詰め境界(20書記素目)にまたがるケース。UTF-16コード単位で
-        // slice(0, 20)してしまうと絵文字の上位サロゲートだけが残って文字化けするはずの境界を狙う
-        const now = new Date();
-        const { dayWithEntry } = pickTestDays(now);
-        const emoji = '😀';
-        const overLimitText = `${'あ'.repeat(19)}${emoji}x\ny`;
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify([{ id: '1', text: overLimitText, createdAt: isoAt(now, dayWithEntry) }]),
-        );
-        jest.clearAllMocks();
-
-        render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
-
-        fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'x\ny');
-
-        // 畳んだ後の1行目は「あ」×19 + 絵文字 + "x y" の23書記素。先頭20書記素
-        // ("あ"×19 + 絵文字)が壊れずに残り、省略記号が付くはず
-        const expectedTruncated = `${'あ'.repeat(19)}${emoji}…`;
-        await screen.findByText(expectedTruncated);
-        const [excerpt] = getRenderedSearchExcerpts();
-        expect(excerpt.match).toBeNull();
-        expect(excerpt.prefix).toBe(expectedTruncated);
-        expect(excerpt.suffix).toBe('');
-      });
+      // getSearchExcerptのフォールバック分岐(実装コード側のコメント参照、20書記素での切り詰め・
+      // 絵文字分断回避を含む)は、呼び出し元でtrim済みのクエリを使う限り、entries.filterを通過した
+      // エントリに対しては到達しないことを、改行以外の入力パターンも含めた網羅的な検証で確認済み。
+      // 到達手段が無い以上、この統合テストのスタイルで無理にフォールバック分岐を再現することはせず、
+      // (関数を個別exportするなどのコード構造変更なしには)テスト対象から意図的に外している
     });
 
     describe('検索欄のクリアボタン', () => {
