@@ -911,6 +911,54 @@ describe('日記データをインポートボタン(データ管理セクショ
     expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   });
 
+  it('appends a skipped-count notice to the confirmation dialog when some entries were invalid (異常系: 無効エントリの件数をユーザーに通知)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [pickedAsset],
+    });
+    const validEntry = { id: '1', text: '有効な日記', createdAt: '2026-01-01T00:00:00.000Z' };
+    mockedFileSystem.__mockText.mockResolvedValueOnce(
+      JSON.stringify([validEntry, { id: '2', text: '壊れたデータ' }, { id: '3' }]),
+    );
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+    });
+
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalledTimes(1));
+    const [title, message] = (Alert.alert as jest.Mock).mock.calls[0];
+    expect(title).toBe(CONFIRM_DIALOG_TITLE);
+    expect(message).toContain(
+      '2件のデータは形式が正しくないか文字数上限を超えていたためスキップされました。',
+    );
+  });
+
+  it('does not append a skipped-count notice when every entry is valid (境界値: 無効エントリが0件の場合は既存文言のまま)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [pickedAsset],
+    });
+    mockedFileSystem.__mockText.mockResolvedValueOnce(
+      JSON.stringify([{ id: '1', text: '取り込む日記', createdAt: '2026-02-01T00:00:00.000Z' }]),
+    );
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+    });
+
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalledTimes(1));
+    const [, message] = (Alert.alert as jest.Mock).mock.calls[0];
+    expect(message).toBe(
+      '1件の日記データを取り込みます。同じ日記が既にある場合は、ファイルの内容で上書きされます。',
+    );
+    expect(message).not.toContain('スキップされました');
+  });
+
   it('saves nothing when the confirmation dialog is cancelled (キャンセル時は保存しない)', async () => {
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({

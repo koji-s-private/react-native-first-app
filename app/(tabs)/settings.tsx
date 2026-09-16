@@ -528,11 +528,16 @@ function ImportDiaryDataButton() {
   }, []);
 
   const confirmImport = useCallback(
-    (entries: DiaryEntry[]) => {
+    (entries: DiaryEntry[], invalidCount: number) => {
       // 誤操作による意図しない上書きを防ぐため、取り込み前に件数を示して確認する
+      // (無効なエントリが除外されていた場合は、その件数もあわせて伝える)
+      const skippedNotice =
+        invalidCount > 0
+          ? `\n${invalidCount}件のデータは形式が正しくないか文字数上限を超えていたためスキップされました。`
+          : '';
       Alert.alert(
         '日記データをインポートしますか?',
-        `${entries.length}件の日記データを取り込みます。同じ日記が既にある場合は、ファイルの内容で上書きされます。`,
+        `${entries.length}件の日記データを取り込みます。同じ日記が既にある場合は、ファイルの内容で上書きされます。${skippedNotice}`,
         [
           { text: 'キャンセル', style: 'cancel', onPress: () => setIsImporting(false) },
           { text: '取り込む', onPress: () => importEntries(entries) },
@@ -569,7 +574,7 @@ function ImportDiaryDataButton() {
         return;
       }
 
-      confirmImport(validEntries);
+      confirmImport(validEntries, invalidCount);
     } catch {
       Alert.alert(
         'インポートに失敗しました',
