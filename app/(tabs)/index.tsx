@@ -1132,6 +1132,8 @@ export default function HomeScreen() {
                   <Pressable
                     style={[styles.searchResultItem, { borderBottomColor: iconColor }]}
                     onPress={() => handleSearchResultPress(item)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${formatDateHeading(toDateKey(new Date(item.createdAt)))}の日記: ${item.text}`}
                   >
                     <ThemedText style={[styles.searchResultDate, { color: iconColor }]}>
                       {formatDateHeading(toDateKey(new Date(item.createdAt)))}
