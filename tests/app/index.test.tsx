@@ -5365,6 +5365,48 @@ describe('HomeScreen', () => {
         expect(getTodayBadgeDayText(9)).toBeUndefined();
         expect(getTodayBadgeDayText(10)).toBeTruthy();
       });
+
+      it('does not refresh the "today" highlight before a full refresh interval elapses, and refreshes right at the interval boundary (境界値: 再評価タイマーの周期(60秒)ちょうど)', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date(2026, 8, 9, 23, 59, 0));
+
+        await renderInWeekLayout();
+        expect(getTodayBadgeDayText(9)).toBeTruthy();
+
+        jest.setSystemTime(new Date(2026, 8, 10, 0, 0, 0));
+        act(() => {
+          jest.advanceTimersByTime(59_999);
+        });
+        expect(getTodayBadgeDayText(9)).toBeTruthy();
+        expect(getTodayBadgeDayText(10)).toBeUndefined();
+
+        act(() => {
+          jest.advanceTimersByTime(1);
+        });
+        expect(getTodayBadgeDayText(9)).toBeUndefined();
+        expect(getTodayBadgeDayText(10)).toBeTruthy();
+      });
+
+      it('clears the periodic re-evaluation timer when the week view unmounts (異常系: アンマウント後のタイマーリーク防止)', async () => {
+        jest.useFakeTimers();
+        // アプリ全体でこの機能以外にsetIntervalを使っている箇所は無いため、
+        // clearIntervalの呼び出し回数からクリーンアップの実行を直接検証できる
+        const clearIntervalSpy = jest.spyOn(global, 'clearInterval');
+        try {
+          await AsyncStorage.setItem(CALENDAR_LAYOUT_PREFERENCE_STORAGE_KEY, 'week');
+          const { unmount } = renderHomeScreenWithLayoutProvider();
+          await waitFor(() => expect(screen.UNSAFE_queryAllByType(Calendar)).toHaveLength(0));
+          expect(clearIntervalSpy).not.toHaveBeenCalled();
+
+          unmount();
+
+          expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+        } finally {
+          // 復元しないと以降のテストでもspyが残り続け、jest.useRealTimers()後に
+          // フェイクタイマー用の実装を参照したままのclearIntervalが呼ばれて壊れる
+          clearIntervalSpy.mockRestore();
+        }
+      });
     });
 
     describe('日付フォーカスの移動(#284: ヘッダーの日付タップ・前後日ボタンのタップ・週をまたぐ移動)', () => {
