@@ -22,6 +22,12 @@ import {
  */
 export const APP_LOCK_ENABLED_STORAGE_KEY = 'app-lock-enabled';
 
+/**
+ * authenticate()の結果。'skipped'は多重呼び出しガードにより実際には生体認証を
+ * 試みなかったことを表し、呼び出し元が'failure'(実際の認証失敗)と区別できるようにする。
+ */
+export type AppLockAuthenticationResult = 'success' | 'failure' | 'skipped';
+
 type AppLockContextValue = {
   /** アプリロック機能がONになっているか(既定値はfalse。オプトイン方式) */
   enabled: boolean;
@@ -45,7 +51,7 @@ type AppLockContextValue = {
   /** アプリロックのON/OFFを切り替え、AsyncStorageへ永続化する */
   setEnabled: (enabled: boolean) => Promise<void>;
   /** 生体認証(またはOS標準パスコード)を実行し、成功していればロックを解除する */
-  authenticate: () => Promise<boolean>;
+  authenticate: () => Promise<AppLockAuthenticationResult>;
 };
 
 const AppLockContext = createContext<AppLockContextValue | null>(null);
@@ -157,9 +163,9 @@ export function AppLockProvider({ children }: PropsWithChildren) {
   // 重なった場合)ネイティブ側で意図しない挙動になり得るため、実行中は追加の呼び出しを無視する
   const isAuthenticatingRef = useRef(false);
 
-  const authenticate = useCallback(async () => {
+  const authenticate = useCallback(async (): Promise<AppLockAuthenticationResult> => {
     if (isAuthenticatingRef.current) {
-      return false;
+      return 'skipped';
     }
     isAuthenticatingRef.current = true;
     try {
@@ -167,9 +173,9 @@ export function AppLockProvider({ children }: PropsWithChildren) {
       if (success) {
         setIsUnlocked(true);
       }
-      return success;
+      return success ? 'success' : 'failure';
     } catch {
-      return false;
+      return 'failure';
     } finally {
       isAuthenticatingRef.current = false;
     }
@@ -256,6 +262,6 @@ export function useAppLock(): AppLockContextValue {
     isInactiveOverlayVisible: false,
     isReady: true,
     setEnabled: async () => {},
-    authenticate: async () => true,
+    authenticate: async () => 'success',
   };
 }

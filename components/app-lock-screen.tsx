@@ -3,6 +3,7 @@ import { Modal, Pressable, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import type { AppLockAuthenticationResult } from '@/contexts/app-lock-context';
 import { useThemeColor } from '@/hooks/use-theme-color';
 
 // 認証失敗が続いた場合にフォールバック案内を表示するまでの連続失敗回数。
@@ -17,8 +18,10 @@ type AppLockScreenProps = {
   // 脱出導線を表示する(ONにした後で端末側の認証手段が全て削除されるケースの対策)
   isSupported: boolean;
   // 生体認証(またはOS標準パスコード)を実行する。呼び出し側(contexts/app-lock-context.tsx)が
-  // 成功時にvisible=falseへ戻す。連続失敗回数の判定に使うため、成否をPromiseで返す
-  onAuthenticate: () => Promise<boolean>;
+  // 成功時にvisible=falseへ戻す。連続失敗回数の判定に使うため、結果をPromiseで返す。
+  // 'skipped'は多重呼び出しガードにより実際には認証を試みなかったことを表し、
+  // 実際の認証失敗('failure')と区別する
+  onAuthenticate: () => Promise<AppLockAuthenticationResult>;
   // 認証手段を失った状態から抜け出すための脱出導線。contexts/app-lock-context.tsxの
   // setEnabled(false)を呼び出し、アプリロックをOFFにすることを想定している
   onDisableAppLock: () => void;
@@ -42,6 +45,9 @@ export function AppLockScreen({
   const backgroundColor = useThemeColor({}, 'background');
   const errorColor = useThemeColor({}, 'error');
   const [consecutiveFailureCount, setConsecutiveFailureCount] = useState(0);
+  // 生体認証プロンプトの表示にはわずかな遅延があるため、完了を待たずにボタンを連打できてしまう。
+  // 実行中はボタンをdisabledにして連打自体を防ぐ
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   // 表示される(=バックグラウンドから復帰する)たびに、前回の失敗回数を持ち越さない
   useEffect(() => {
@@ -51,9 +57,16 @@ export function AppLockScreen({
   }, [visible]);
 
   const handleAuthenticate = async () => {
-    const success = await onAuthenticate();
-    if (!success) {
-      setConsecutiveFailureCount((count) => count + 1);
+    setIsAuthenticating(true);
+    try {
+      const result = await onAuthenticate();
+      // 'skipped'は多重呼び出しガードにより実際には認証を試みていないため、
+      // 実際の失敗('failure')のみを連続失敗回数に加算する
+      if (result === 'failure') {
+        setConsecutiveFailureCount((count) => count + 1);
+      }
+    } finally {
+      setIsAuthenticating(false);
     }
   };
 
@@ -80,9 +93,16 @@ export function AppLockScreen({
         )}
         {isSupported ? (
           <Pressable
-            style={[styles.button, { backgroundColor: tintColor }]}
+            style={[
+              styles.button,
+              { backgroundColor: tintColor },
+              // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
+              { opacity: isAuthenticating ? 0.5 : 1 },
+            ]}
             onPress={handleAuthenticate}
+            disabled={isAuthenticating}
             accessibilityRole="button"
+            accessibilityState={{ disabled: isAuthenticating }}
           >
             <ThemedText style={[styles.buttonText, { color: backgroundColor }]}>
               認証する

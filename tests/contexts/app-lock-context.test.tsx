@@ -5,6 +5,7 @@ import { AppState } from 'react-native';
 
 import {
   APP_LOCK_ENABLED_STORAGE_KEY,
+  type AppLockAuthenticationResult,
   AppLockProvider,
   useAppLock,
 } from '@/contexts/app-lock-context';
@@ -534,16 +535,16 @@ describe('AppLockProvider / useAppLock', () => {
       await lockScreen(result);
       mockedAuthenticationUtil.authenticateForAppLockAsync.mockResolvedValue(true);
 
-      let authResult: boolean | undefined;
+      let authResult: AppLockAuthenticationResult | undefined;
       await act(async () => {
         authResult = await result.current.authenticate();
       });
 
-      expect(authResult).toBe(true);
+      expect(authResult).toBe('success');
       expect(result.current.isUnlocked).toBe(true);
     });
 
-    it('keeps the screen locked and returns false when authentication fails (異常系: 認証失敗)', async () => {
+    it('keeps the screen locked and returns "failure" when authentication fails (異常系: 認証失敗)', async () => {
       const { result } = renderHook(() => useAppLock(), { wrapper });
       await act(async () => {
         await Promise.resolve();
@@ -551,16 +552,16 @@ describe('AppLockProvider / useAppLock', () => {
       await lockScreen(result);
       mockedAuthenticationUtil.authenticateForAppLockAsync.mockResolvedValue(false);
 
-      let authResult: boolean | undefined;
+      let authResult: AppLockAuthenticationResult | undefined;
       await act(async () => {
         authResult = await result.current.authenticate();
       });
 
-      expect(authResult).toBe(false);
+      expect(authResult).toBe('failure');
       expect(result.current.isUnlocked).toBe(false);
     });
 
-    it('keeps the screen locked and returns false without throwing when the underlying call rejects (異常系: 認証呼び出し自体の失敗)', async () => {
+    it('keeps the screen locked and returns "failure" without throwing when the underlying call rejects (異常系: 認証呼び出し自体の失敗)', async () => {
       const { result } = renderHook(() => useAppLock(), { wrapper });
       await act(async () => {
         await Promise.resolve();
@@ -570,16 +571,16 @@ describe('AppLockProvider / useAppLock', () => {
         new Error('native error'),
       );
 
-      let authResult: boolean | undefined;
+      let authResult: AppLockAuthenticationResult | undefined;
       await act(async () => {
         authResult = await result.current.authenticate();
       });
 
-      expect(authResult).toBe(false);
+      expect(authResult).toBe('failure');
       expect(result.current.isUnlocked).toBe(false);
     });
 
-    it('ignores a duplicate call while a previous authenticate() is still in flight (境界値: 多重呼び出しの抑止)', async () => {
+    it('returns "skipped" (not "failure") for a duplicate call while a previous authenticate() is still in flight (境界値: 多重呼び出しの抑止)', async () => {
       const { result } = renderHook(() => useAppLock(), { wrapper });
       await act(async () => {
         await Promise.resolve();
@@ -592,8 +593,8 @@ describe('AppLockProvider / useAppLock', () => {
         }),
       );
 
-      let firstCallResult: Promise<boolean>;
-      let secondCallResult: boolean | undefined;
+      let firstCallResult: Promise<AppLockAuthenticationResult>;
+      let secondCallResult: AppLockAuthenticationResult | undefined;
       act(() => {
         firstCallResult = result.current.authenticate();
       });
@@ -601,7 +602,7 @@ describe('AppLockProvider / useAppLock', () => {
         secondCallResult = await result.current.authenticate();
       });
 
-      expect(secondCallResult).toBe(false);
+      expect(secondCallResult).toBe('skipped');
       expect(mockedAuthenticationUtil.authenticateForAppLockAsync).toHaveBeenCalledTimes(1);
 
       await act(async () => {
@@ -630,10 +631,10 @@ describe('AppLockProvider / useAppLock', () => {
       expect(AsyncStorage.setItem).not.toHaveBeenCalled();
     });
 
-    it('resolves to true without calling the native authentication module outside of the Provider (境界値: Provider外でのauthenticateはno-op)', async () => {
+    it('resolves to "success" without calling the native authentication module outside of the Provider (境界値: Provider外でのauthenticateはno-op)', async () => {
       const { result } = renderHook(() => useAppLock());
 
-      await expect(result.current.authenticate()).resolves.toBe(true);
+      await expect(result.current.authenticate()).resolves.toBe('success');
       expect(mockedAuthenticationUtil.authenticateForAppLockAsync).not.toHaveBeenCalled();
     });
   });

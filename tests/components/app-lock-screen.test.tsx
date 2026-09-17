@@ -19,7 +19,7 @@ describe('AppLockScreen', () => {
       <AppLockScreen
         visible={true}
         isSupported={true}
-        onAuthenticate={jest.fn().mockResolvedValue(true)}
+        onAuthenticate={jest.fn().mockResolvedValue('success')}
         onDisableAppLock={jest.fn()}
       />,
     );
@@ -33,7 +33,7 @@ describe('AppLockScreen', () => {
       <AppLockScreen
         visible={false}
         isSupported={true}
-        onAuthenticate={jest.fn().mockResolvedValue(true)}
+        onAuthenticate={jest.fn().mockResolvedValue('success')}
         onDisableAppLock={jest.fn()}
       />,
     );
@@ -47,7 +47,7 @@ describe('AppLockScreen', () => {
       <AppLockScreen
         visible={true}
         isSupported={true}
-        onAuthenticate={jest.fn().mockResolvedValue(true)}
+        onAuthenticate={jest.fn().mockResolvedValue('success')}
         onDisableAppLock={jest.fn()}
       />,
     );
@@ -61,7 +61,7 @@ describe('AppLockScreen', () => {
       <AppLockScreen
         visible={true}
         isSupported={true}
-        onAuthenticate={jest.fn().mockResolvedValue(true)}
+        onAuthenticate={jest.fn().mockResolvedValue('success')}
         onDisableAppLock={jest.fn()}
       />,
     );
@@ -71,7 +71,7 @@ describe('AppLockScreen', () => {
   });
 
   it('calls onAuthenticate when the retry button is pressed (正常系: 手動再試行)', async () => {
-    const onAuthenticate = jest.fn().mockResolvedValue(true);
+    const onAuthenticate = jest.fn().mockResolvedValue('success');
     render(
       <AppLockScreen
         visible={true}
@@ -88,6 +88,60 @@ describe('AppLockScreen', () => {
     expect(onAuthenticate).toHaveBeenCalledTimes(1);
   });
 
+  describe('連打防止', () => {
+    it('disables the retry button while onAuthenticate is in flight and ignores additional presses (境界値: 実行中の連打)', async () => {
+      let resolveAuthenticate: (result: 'success') => void = () => {};
+      const onAuthenticate = jest.fn(
+        () =>
+          new Promise<'success'>((resolve) => {
+            resolveAuthenticate = resolve;
+          }),
+      );
+      render(
+        <AppLockScreen
+          visible={true}
+          isSupported={true}
+          onAuthenticate={onAuthenticate}
+          onDisableAppLock={jest.fn()}
+        />,
+      );
+
+      act(() => {
+        fireEvent.press(screen.getByText(AUTHENTICATE_BUTTON_TEXT));
+      });
+      // 1回目の呼び出しがまだ完了していない間はボタンがdisabledになり、連打しても無視される
+      fireEvent.press(screen.getByText(AUTHENTICATE_BUTTON_TEXT));
+      fireEvent.press(screen.getByText(AUTHENTICATE_BUTTON_TEXT));
+
+      expect(onAuthenticate).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        resolveAuthenticate('success');
+        await Promise.resolve();
+      });
+    });
+
+    it('does not increment the consecutive failure count when onAuthenticate resolves to "skipped" (境界値: 多重呼び出しガードによるskippedは失敗扱いしない)', async () => {
+      const onAuthenticate = jest.fn().mockResolvedValue('skipped');
+      render(
+        <AppLockScreen
+          visible={true}
+          isSupported={true}
+          onAuthenticate={onAuthenticate}
+          onDisableAppLock={jest.fn()}
+        />,
+      );
+
+      for (let i = 0; i < 3; i += 1) {
+        await act(async () => {
+          fireEvent.press(screen.getByText(AUTHENTICATE_BUTTON_TEXT));
+        });
+      }
+
+      expect(screen.queryByText(FAILURE_GUIDANCE_TEXT)).toBeNull();
+    });
+  });
+
   // 端末側の生体認証・パスコード設定が全て削除されると、
   // isSupportedがfalseになり、ロック画面からアプリロックをOFFにできる脱出導線が必要になる
   describe('端末側の認証手段が失われた場合の脱出導線', () => {
@@ -96,7 +150,7 @@ describe('AppLockScreen', () => {
         <AppLockScreen
           visible={true}
           isSupported={false}
-          onAuthenticate={jest.fn().mockResolvedValue(false)}
+          onAuthenticate={jest.fn().mockResolvedValue('failure')}
           onDisableAppLock={jest.fn()}
         />,
       );
@@ -112,7 +166,7 @@ describe('AppLockScreen', () => {
         <AppLockScreen
           visible={true}
           isSupported={false}
-          onAuthenticate={jest.fn().mockResolvedValue(false)}
+          onAuthenticate={jest.fn().mockResolvedValue('failure')}
           onDisableAppLock={onDisableAppLock}
         />,
       );
@@ -125,7 +179,7 @@ describe('AppLockScreen', () => {
 
   describe('連続認証失敗時のフォールバック案内', () => {
     it('does not show the guidance text before repeated failures accumulate (境界値: 失敗回数がしきい値未満)', async () => {
-      const onAuthenticate = jest.fn().mockResolvedValue(false);
+      const onAuthenticate = jest.fn().mockResolvedValue('failure');
       render(
         <AppLockScreen
           visible={true}
@@ -146,7 +200,7 @@ describe('AppLockScreen', () => {
     });
 
     it('shows the guidance text after authentication fails repeatedly (正常系: 連続失敗でフォールバック案内を表示)', async () => {
-      const onAuthenticate = jest.fn().mockResolvedValue(false);
+      const onAuthenticate = jest.fn().mockResolvedValue('failure');
       render(
         <AppLockScreen
           visible={true}
@@ -166,7 +220,7 @@ describe('AppLockScreen', () => {
     });
 
     it('resets the failure count once the screen becomes visible again (境界値: 再表示で失敗回数がリセットされる)', async () => {
-      const onAuthenticate = jest.fn().mockResolvedValue(false);
+      const onAuthenticate = jest.fn().mockResolvedValue('failure');
       const { rerender } = render(
         <AppLockScreen
           visible={true}
@@ -204,7 +258,7 @@ describe('AppLockScreen', () => {
     });
 
     it('shows only the unsupported guidance, not the failure guidance, when isSupported becomes false after repeated failures (境界値: 失敗ガイダンス表示中に非対応端末へ切り替わった場合の排他表示)', async () => {
-      const onAuthenticate = jest.fn().mockResolvedValue(false);
+      const onAuthenticate = jest.fn().mockResolvedValue('failure');
       const { rerender } = render(
         <AppLockScreen
           visible={true}
