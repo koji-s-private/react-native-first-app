@@ -187,6 +187,9 @@ function DiaryReminderSection() {
   // ON/OFF切り替え(通知許可のリクエストを伴う非同期処理)が完了するまで、
   // 誤って連続でタップされないようにするための状態
   const [isTogglePending, setIsTogglePending] = useState(false);
+  // 時刻変更(通知の再スケジュール登録を伴う非同期処理)が完了するまで、
+  // TimeStepperボタンを連続でタップされないようにするための状態
+  const [isTimePending, setIsTimePending] = useState(false);
   // 破壊的な操作・警告であることを示す強調色(テーマに応じてconstants/theme.tsから取得)
   const errorColor = useThemeColor({}, 'error');
 
@@ -219,14 +222,20 @@ function DiaryReminderSection() {
 
   const handleHourChange = useCallback(
     (delta: number) => {
-      setTime((hour + delta + 24) % 24, minute).catch(handleScheduleFailure);
+      setIsTimePending(true);
+      setTime((hour + delta + 24) % 24, minute)
+        .catch(handleScheduleFailure)
+        .finally(() => setIsTimePending(false));
     },
     [hour, minute, setTime, handleScheduleFailure],
   );
 
   const handleMinuteChange = useCallback(
     (delta: number) => {
-      setTime(hour, (minute + delta + 60) % 60).catch(handleScheduleFailure);
+      setIsTimePending(true);
+      setTime(hour, (minute + delta + 60) % 60)
+        .catch(handleScheduleFailure)
+        .finally(() => setIsTimePending(false));
     },
     [hour, minute, setTime, handleScheduleFailure],
   );
@@ -254,7 +263,7 @@ function DiaryReminderSection() {
           value={hour}
           onDecrease={() => handleHourChange(-1)}
           onIncrease={() => handleHourChange(1)}
-          disabled={isTogglePending}
+          disabled={isTogglePending || isTimePending}
         />
         <ThemedText style={styles.reminderTimeSeparator}>:</ThemedText>
         <TimeStepper
@@ -262,7 +271,7 @@ function DiaryReminderSection() {
           value={minute}
           onDecrease={() => handleMinuteChange(-REMINDER_MINUTE_STEP)}
           onIncrease={() => handleMinuteChange(REMINDER_MINUTE_STEP)}
-          disabled={isTogglePending}
+          disabled={isTogglePending || isTimePending}
         />
       </ThemedView>
       {permissionStatus === 'denied' && (
