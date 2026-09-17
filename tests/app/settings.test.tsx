@@ -1895,6 +1895,121 @@ describe('リマインダーセクション(日記を書く習慣化のための
     expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(false);
   });
 
+  describe('時刻変更中の連続タップ防止(isTimePending)', () => {
+    it('disables both the hour and minute stepper buttons (increase/decrease) while the time change is being scheduled, then re-enables them once it settles (境界値: 時刻変更中の連続タップ防止)', async () => {
+      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
+        'granted',
+      );
+      await AsyncStorage.setItem(
+        DIARY_REMINDER_STORAGE_KEY,
+        JSON.stringify({ enabled: true, hour: 21, minute: 0 }),
+      );
+      renderSettingsScreen();
+      await waitFor(() =>
+        expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true),
+      );
+      // `scheduleDailyReminderAsync`が完了するまで解決しないPromiseにして、処理中の一瞬の状態を検証する
+      let resolveSchedule: () => void = () => {};
+      mockedDiaryReminderNotifications.scheduleDailyReminderAsync.mockReturnValue(
+        new Promise((resolve) => {
+          resolveSchedule = resolve;
+        }),
+      );
+
+      act(() => {
+        fireEvent.press(screen.getByLabelText(HOUR_INCREASE_LABEL));
+      });
+
+      expect(
+        screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled,
+      ).toBe(true);
+      expect(
+        screen.getByLabelText(HOUR_DECREASE_LABEL).props.accessibilityState.disabled,
+      ).toBe(true);
+      expect(
+        screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled,
+      ).toBe(true);
+      expect(
+        screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled,
+      ).toBe(true);
+      // トグル自体は`isTogglePending`のみに連動するため、時刻変更中でも無効化されない
+      expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.disabled).toBe(false);
+
+      await act(async () => {
+        resolveSchedule();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled,
+      ).toBe(false);
+      expect(
+        screen.getByLabelText(HOUR_DECREASE_LABEL).props.accessibilityState.disabled,
+      ).toBe(false);
+      expect(
+        screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled,
+      ).toBe(false);
+      expect(
+        screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled,
+      ).toBe(false);
+    });
+
+    it('re-enables the stepper buttons via the finally handler even when re-scheduling fails after a minute change (異常系: 時刻変更失敗時もpending状態が解除される)', async () => {
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
+        'granted',
+      );
+      await AsyncStorage.setItem(
+        DIARY_REMINDER_STORAGE_KEY,
+        JSON.stringify({ enabled: true, hour: 21, minute: 0 }),
+      );
+      renderSettingsScreen();
+      await waitFor(() =>
+        expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true),
+      );
+      let rejectSchedule: (error: Error) => void = () => {};
+      mockedDiaryReminderNotifications.scheduleDailyReminderAsync.mockReturnValue(
+        new Promise((_resolve, reject) => {
+          rejectSchedule = reject;
+        }),
+      );
+
+      act(() => {
+        fireEvent.press(screen.getByLabelText(MINUTE_INCREASE_LABEL));
+      });
+
+      expect(
+        screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled,
+      ).toBe(true);
+      expect(
+        screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled,
+      ).toBe(true);
+
+      await act(async () => {
+        rejectSchedule(new Error('schedule error'));
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      await waitFor(() =>
+        expect(
+          screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled,
+        ).toBe(false),
+      );
+      expect(
+        screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled,
+      ).toBe(false);
+      // 失敗時もエラー案内自体は既存の異常系テストで検証済みだが、ここではpending解除の
+      // 副作用として発火することも合わせて確認する
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'リマインダー時刻の変更に失敗しました',
+        '新しい時刻を通知に反映できませんでした。もう一度お試しください。',
+      );
+    });
+  });
+
   it('does not show a failure alert when changing the time while OFF, since no re-scheduling is attempted (境界値: OFF状態での時刻変更は失敗しようがない)', async () => {
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     renderSettingsScreen();
