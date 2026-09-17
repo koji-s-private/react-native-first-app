@@ -675,6 +675,76 @@ describe('EditEntryScreen', () => {
       const persisted = await readPersistedEntry(ENTRY_ID);
       expect(persisted?.text).toBe('保存成功後に画面を離れられることを確認する内容');
     });
+
+    it('dispatches only the most recently blocked action (not a stale earlier one) when beforeRemove fires more than once during an in-flight save (境界値/複数回発火時の上書き)', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '保存中に複数回beforeRemoveが発火する日記',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      let resolveSetItem: () => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSetItem = resolve;
+          }),
+      );
+
+      render(<EditEntryScreen />);
+      const input = await screen.findByDisplayValue('保存中に複数回beforeRemoveが発火する日記');
+      fireEvent.changeText(input, '複数回発火後も最新のアクションが送られることを確認する内容');
+      fireEvent.press(screen.getByRole('button', { name: '保存' }));
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      // 保存中に実際のユーザー操作(スワイプ戻る等)によって発火したbeforeRemoveを模擬する。
+      // router.back()が使うアクションとは別物であることを区別できるよう、あえて異なる
+      // アクションを渡す
+      const staleAction = { type: 'POP', payload: { count: 1 } };
+      const preventDefault = jest.fn();
+      getBeforeRemoveListener()({ preventDefault, data: { action: staleAction } });
+      expect(preventDefault).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        resolveSetItem();
+      });
+
+      // handleSaveEdit完了後のrouter.back()がGO_BACKアクションで自身のbeforeRemoveガードを
+      // 再度ブロックし、保持していたアクションを上書きする。保存完了後に再送されるのは
+      // 最新のGO_BACKであり、先に保持されていた古いPOPアクションではないことを確認する
+      await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith({ type: 'GO_BACK' }));
+      expect(mockDispatch).not.toHaveBeenCalledWith(staleAction);
+      expect(mockDispatch).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not force-navigate away using a blocked leave action once a save fails, keeping the unsaved edit and error message visible (異常系/保存失敗時の離脱アクション再送抑止)', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '保存失敗時に離脱しないことを確認する日記',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
+
+      render(<EditEntryScreen />);
+      const input = await screen.findByDisplayValue('保存失敗時に離脱しないことを確認する日記');
+      fireEvent.changeText(input, '保存失敗するはずの編集内容');
+      fireEvent.press(screen.getByRole('button', { name: '保存' }));
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      // 保存が失敗する前に、ユーザーが実際に画面を離れようとした操作を模擬する
+      const preventDefault = jest.fn();
+      getBeforeRemoveListener()(buildBeforeRemoveEvent(preventDefault));
+      expect(preventDefault).toHaveBeenCalledTimes(1);
+
+      await screen.findByText('更新に失敗しました。もう一度お試しください。');
+
+      // 保存に失敗した場合、保存中にブロックしていた離脱アクションを勝手に再送して画面を
+      // 離れさせてはならない(ユーザーが確認する間もなく未保存の編集内容を失ってしまうため)
+      expect(mockDispatch).not.toHaveBeenCalled();
+      expect(mockBack).not.toHaveBeenCalled();
+      expect(screen.getByDisplayValue('保存失敗するはずの編集内容')).toBeTruthy();
+    });
   });
 
   describe('編集下書きの自動保存', () => {
