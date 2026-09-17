@@ -16,7 +16,7 @@ export const ONBOARDING_SLIDES: OnboardingSlide[] = [
     key: 'view-calendar',
     title: 'カレンダーで一覧を見る',
     description:
-      '日記を書いた日はカレンダーにタイトルが表示されます。日付をタップすると、その日に書いた日記をまとめて確認できます。',
+      '日記を書いた日はカレンダーにドットや件数が表示されます。日付をタップすると、その日に書いた日記をまとめて確認できます。',
   },
   {
     key: 'settings',
