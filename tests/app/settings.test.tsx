@@ -337,7 +337,21 @@ describe('SettingsScreen', () => {
       render(<SettingsScreen />);
 
       const scrollView = screen.UNSAFE_getByType(ScrollView);
+      // 先頭(外観)と末尾(データ管理)の両方がScrollView配下にあることを確認し、
+      // 一部のセクションだけがラップから漏れる回帰を防ぐ
+      expect(within(scrollView).getByText('外観')).toBeTruthy();
       expect(within(scrollView).getByText('日記データを全件削除')).toBeTruthy();
+    });
+
+    it('keeps the base padding (top/left/right) of the scroll content unchanged by the paddingBottom override', () => {
+      render(<SettingsScreen />);
+
+      const scrollView = screen.UNSAFE_getByType(ScrollView);
+      const flattenedStyle = StyleSheet.flatten(scrollView.props.contentContainerStyle);
+
+      // `padding`ショートハンドは`StyleSheet.flatten`ではpaddingTop/Left/Right個別には展開されない
+      // ため、paddingBottomのみ上書きされ他方向は元の`padding: 16`のままであることを確認する
+      expect(flattenedStyle.padding).toBe(16);
     });
 
     it('adds only the bottom tab bar height as paddingBottom on the scroll content when the safe area bottom inset is zero (default mock)', () => {
