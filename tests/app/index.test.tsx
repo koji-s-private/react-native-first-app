@@ -5366,6 +5366,22 @@ describe('HomeScreen', () => {
         expect(getTodayBadgeDayText(10)).toBeTruthy();
       });
 
+      it('immediately refreshes the "today" highlight on refocus, without waiting for the periodic timer (正常系: useFocusEffectによる即時更新)', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date(2026, 8, 9, 23, 59, 30));
+
+        await renderInWeekLayout();
+        expect(getTodayBadgeDayText(9)).toBeTruthy();
+
+        jest.setSystemTime(new Date(2026, 8, 10, 0, 0, 30));
+        act(() => {
+          (triggerRefocus as () => void)();
+        });
+
+        expect(getTodayBadgeDayText(9)).toBeUndefined();
+        expect(getTodayBadgeDayText(10)).toBeTruthy();
+      });
+
       it('does not refresh the "today" highlight before a full refresh interval elapses, and refreshes right at the interval boundary (境界値: 再評価タイマーの周期(60秒)ちょうど)', async () => {
         jest.useFakeTimers();
         jest.setSystemTime(new Date(2026, 8, 9, 23, 59, 0));
