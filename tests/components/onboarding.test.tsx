@@ -87,6 +87,25 @@ describe('Onboarding', () => {
     });
   });
 
+  it('shows a calendar description that matches the actual calendar UI (dot/count badges, not a title) (正常系: カレンダー説明文の内容確認)', () => {
+    render(<Onboarding visible={true} onFinish={jest.fn()} />);
+
+    const calendarSlideIndex = ONBOARDING_SLIDES.findIndex(
+      (slide) => slide.key === 'view-calendar',
+    );
+    for (let i = 0; i < calendarSlideIndex; i += 1) {
+      fireEvent.press(screen.getByText('次へ'));
+    }
+
+    const description = ONBOARDING_SLIDES[calendarSlideIndex].description;
+    expect(screen.getByText(description)).toBeTruthy();
+    // カレンダーのセルは日記のタイトルではなくドット/件数バッジで件数を示すため、
+    // 実装と食い違う「タイトル」という表現を含まないことを回帰確認する
+    expect(description).not.toContain('タイトル');
+    expect(description).toContain('ドット');
+    expect(description).toContain('件数');
+  });
+
   it('walks through every slide in order as "次へ" is pressed repeatedly, and switches the button label to "はじめる" on the last slide (正常系: 全スライド遷移・境界値: 最終ページのボタン切り替え)', () => {
     render(<Onboarding visible={true} onFinish={jest.fn()} />);
 
