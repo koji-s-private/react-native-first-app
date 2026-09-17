@@ -53,9 +53,39 @@ jest.mock('expo-secure-store', () => {
 // テスト側は登録されたコールバックを直接呼び出すことでこれらすべての操作を模擬できる。
 jest.mock('expo-router', () => {
   let idParam = 'entry-1';
-  const mockBack = jest.fn();
-  const mockAddListener = jest.fn((_event: string, _callback: unknown) => () => {});
+  // router.back()が実際にnavigationのbeforeRemoveガードを経由する挙動を再現するため、
+  // 現在登録されているリスナーをaddListener側で追跡し、back()呼び出し時にそれを発火させる
+  let currentBeforeRemoveListener:
+    ((event: { preventDefault: () => void; data: { action: unknown } }) => void) | null = null;
+  const BACK_ACTION = { type: 'GO_BACK' };
+
   const mockDispatch = jest.fn();
+  const mockBack = jest.fn(() => {
+    if (!currentBeforeRemoveListener) {
+      return;
+    }
+    let prevented = false;
+    currentBeforeRemoveListener({
+      preventDefault: () => {
+        prevented = true;
+      },
+      data: { action: BACK_ACTION },
+    });
+    // 実際のReact Navigationと同様、ブロックされなければそのままアクションを反映する
+    if (!prevented) {
+      mockDispatch(BACK_ACTION);
+    }
+  });
+  const mockAddListener = jest.fn((event: string, callback: unknown) => {
+    if (event === 'beforeRemove') {
+      currentBeforeRemoveListener = callback as typeof currentBeforeRemoveListener;
+    }
+    return () => {
+      if (event === 'beforeRemove' && currentBeforeRemoveListener === callback) {
+        currentBeforeRemoveListener = null;
+      }
+    };
+  });
 
   function useLocalSearchParams() {
     return { id: idParam };
@@ -620,6 +650,30 @@ describe('EditEntryScreen', () => {
 
       expect(preventDefault).not.toHaveBeenCalled();
       expect(Alert.alert).not.toHaveBeenCalled();
+    });
+
+    it('actually leaves the screen after a successful save, even though router.back() is itself initially blocked by the in-flight beforeRemove guard (異常系/自己ガード競合)', async () => {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: '自身のガードでブロックされないか確認する日記',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<EditEntryScreen />);
+      const input = await screen.findByDisplayValue('自身のガードでブロックされないか確認する日記');
+      fireEvent.changeText(input, '保存成功後に画面を離れられることを確認する内容');
+      fireEvent.press(screen.getByRole('button', { name: '保存' }));
+
+      // router.back()自体はhandleSaveEdit完了前(isSavingEdit === true)に呼ばれるため、
+      // 一度は自身のbeforeRemoveガードでブロックされる。それでも保存完了後にアクションが
+      // 再送され、実際に画面遷移(navigation.dispatch)まで完了することを確認する
+      await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith({ type: 'GO_BACK' }));
+      expect(mockBack).toHaveBeenCalledTimes(1);
+      expect(Alert.alert).not.toHaveBeenCalled();
+
+      const persisted = await readPersistedEntry(ENTRY_ID);
+      expect(persisted?.text).toBe('保存成功後に画面を離れられることを確認する内容');
     });
   });
 

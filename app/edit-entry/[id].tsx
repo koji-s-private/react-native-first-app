@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { NavigationAction } from '@react-navigation/native';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -54,6 +55,10 @@ export default function EditEntryScreen() {
   // アンマウントは遷移アニメーション等の完了まで遅延しうるため、クリーンアップ任せだと
   // 削除後にタイマーが発火して下書きが復活してしまうrace conditionがある
   const draftAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 保存処理中にbeforeRemoveでブロックされた離脱アクション。router.back()自体もbeforeRemoveを
+  // 発火させ、保存完了前(isSavingEdit === true)は自分自身のガードでブロックされてしまうため、
+  // 保存完了後に再送して確実に画面を離れられるようにする
+  const pendingRemoveActionRef = useRef<NavigationAction | null>(null);
 
   useEffect(() => {
     return () => {
@@ -193,10 +198,12 @@ export default function EditEntryScreen() {
   useEffect(() => {
     const unsubscribe = navigation.addListener('beforeRemove', (event) => {
       // 保存処理の進行中は、破棄確認ダイアログとhandleSaveEdit完了後のrouter.back()が
-      // 競合してしまうため、離脱操作自体を一律ブロックする(保存完了後のrouter.back()による
-      // プログラム的な遷移のみが画面を離れる手段になる)
+      // 競合してしまうため、離脱操作自体を一律ブロックする。router.back()によるプログラム的な
+      // 遷移もここで一旦ブロックされるため、そのアクションを保持しておき、保存完了後に
+      // 再送することで画面を確実に離れられるようにする
       if (isSavingEdit) {
         event.preventDefault();
+        pendingRemoveActionRef.current = event.data.action;
         return;
       }
       if (editDraft.trim() === editOriginalTextRef.current.trim()) {
@@ -228,6 +235,18 @@ export default function EditEntryScreen() {
     });
     return unsubscribe;
   }, [navigation, editDraft, isSavingEdit, id]);
+
+  // 保存完了(isSavingEdit: true→false)を検知したら、保存中にブロックされていた離脱アクションを
+  // 再送する。router.back()呼び出し自体は既に完了しているため、ここではnavigation.dispatchで
+  // アクションを直接反映させる
+  useEffect(() => {
+    if (isSavingEdit || pendingRemoveActionRef.current === null) {
+      return;
+    }
+    const action = pendingRemoveActionRef.current;
+    pendingRemoveActionRef.current = null;
+    navigation.dispatch(action);
+  }, [isSavingEdit, navigation]);
 
   const editDraftGraphemeCount = useMemo(() => splitIntoGraphemes(editDraft).length, [editDraft]);
 
