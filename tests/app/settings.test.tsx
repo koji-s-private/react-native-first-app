@@ -5,7 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as Sharing from 'expo-sharing';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
-import { Alert, Platform, StyleSheet, Text } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import SettingsScreen from '@/app/(tabs)/settings';
@@ -324,6 +324,47 @@ describe('SettingsScreen', () => {
       const flattenedStyle = StyleSheet.flatten(safeAreaWrapper.props.style);
 
       expect(flattenedStyle.paddingTop).toBe(59);
+    });
+  });
+
+  // 設定項目が増えて画面高さを超えても下部の操作(データ管理セクション等)に到達できることを確認する。
+  describe('スクロール対応(画面高さを超える設定項目への到達)', () => {
+    // タブバーのおおよそのコンテンツ高さ(セーフエリア分は含まない)。実装側の
+    // BOTTOM_TAB_BAR_CONTENT_HEIGHTと同じ値(app/(tabs)/settings.tsx参照)
+    const BOTTOM_TAB_BAR_CONTENT_HEIGHT = 49;
+
+    it('wraps all sections (including the データ管理 section) in a ScrollView', () => {
+      render(<SettingsScreen />);
+
+      const scrollView = screen.UNSAFE_getByType(ScrollView);
+      expect(within(scrollView).getByText('日記データを全件削除')).toBeTruthy();
+    });
+
+    it('adds only the bottom tab bar height as paddingBottom on the scroll content when the safe area bottom inset is zero (default mock)', () => {
+      render(<SettingsScreen />);
+
+      const scrollView = screen.UNSAFE_getByType(ScrollView);
+      const flattenedStyle = StyleSheet.flatten(scrollView.props.contentContainerStyle);
+
+      expect(flattenedStyle.paddingBottom).toBe(16 + BOTTOM_TAB_BAR_CONTENT_HEIGHT);
+    });
+
+    it('adds the safe area bottom inset plus the bottom tab bar height as paddingBottom on the scroll content, so it does not overlap the tab bar', () => {
+      render(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 393, height: 852 },
+            insets: { top: 59, left: 0, right: 0, bottom: 34 },
+          }}
+        >
+          <SettingsScreen />
+        </SafeAreaProvider>,
+      );
+
+      const scrollView = screen.UNSAFE_getByType(ScrollView);
+      const flattenedStyle = StyleSheet.flatten(scrollView.props.contentContainerStyle);
+
+      expect(flattenedStyle.paddingBottom).toBe(16 + 34 + BOTTOM_TAB_BAR_CONTENT_HEIGHT);
     });
   });
 });

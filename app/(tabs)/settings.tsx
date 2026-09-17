@@ -3,7 +3,8 @@ import { File, Paths } from 'expo-file-system';
 import { Link } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useCallback, useState } from 'react';
-import { Alert, Platform, Pressable, StyleSheet, Switch } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ExternalLink } from '@/components/external-link';
 import { TabScreenContainer } from '@/components/tab-screen-container';
@@ -26,6 +27,11 @@ import {
   saveDiaryEntry,
   type DiaryEntry,
 } from '@/utils/diary-storage';
+
+// タブバー(@react-navigation/bottom-tabsのデフォルト、tabBarStyle未カスタマイズ)のおおよその
+// コンテンツ高さ(セーフエリア分は含まない)。ScrollViewの最下部コンテンツがタブバーと重ならないよう、
+// insets.bottomと合わせてcontentContainerStyleのpaddingBottomに加算する(app/(tabs)/index.tsxと同じ値)
+const BOTTOM_TAB_BAR_CONTENT_HEIGHT = 49;
 
 // 「外観」セクションで選べる配色設定の選択肢。表示順もこの配列の並び順に従う
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
@@ -607,42 +613,53 @@ function ImportDiaryDataButton() {
 }
 
 export default function SettingsScreen() {
+  const insets = useSafeAreaInsets();
+  // ScrollViewの最下部(データ管理セクション)がタブバーの下に隠れて操作できなくならないよう、
+  // セーフエリア下端の分もあわせてpaddingBottomに加算する
+  const contentBottomPadding = 16 + insets.bottom + BOTTOM_TAB_BAR_CONTENT_HEIGHT;
+
   return (
     // ステータスバー/ノッチ領域とコンテンツが重ならないよう、TabScreenContainerで
     // セーフエリア上端インセットぶんの余白を自動的に加算する
     <TabScreenContainer style={styles.container}>
-      <AppearanceSection />
-      <CalendarLayoutSection />
-      <DiaryReminderSection />
-      <AppLockSection />
+      {/* 設定項目が増えて画面高さを超えても下部の操作(データ管理セクション等)に到達できるよう、
+          全セクションをScrollViewでラップする */}
+      <ScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
+      >
+        <AppearanceSection />
+        <CalendarLayoutSection />
+        <DiaryReminderSection />
+        <AppLockSection />
 
-      {SETTINGS_SECTIONS.map((section) => (
-        <ThemedView key={section.key} style={styles.section}>
+        {SETTINGS_SECTIONS.map((section) => (
+          <ThemedView key={section.key} style={styles.section}>
+            <ThemedText type="subtitle" style={styles.sectionTitle}>
+              {section.title}
+            </ThemedText>
+            {section.items.map((item) => (
+              <ThemedView key={item.key} style={styles.item}>
+                <SettingsMenuLink item={item} />
+              </ThemedView>
+            ))}
+          </ThemedView>
+        ))}
+
+        <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
-            {section.title}
+            データ管理
           </ThemedText>
-          {section.items.map((item) => (
-            <ThemedView key={item.key} style={styles.item}>
-              <SettingsMenuLink item={item} />
-            </ThemedView>
-          ))}
+          <ThemedView style={styles.item}>
+            <ExportDiaryDataButton />
+          </ThemedView>
+          <ThemedView style={styles.item}>
+            <ImportDiaryDataButton />
+          </ThemedView>
+          <ThemedView style={styles.item}>
+            <DeleteAllDiaryDataButton />
+          </ThemedView>
         </ThemedView>
-      ))}
-
-      <ThemedView style={styles.section}>
-        <ThemedText type="subtitle" style={styles.sectionTitle}>
-          データ管理
-        </ThemedText>
-        <ThemedView style={styles.item}>
-          <ExportDiaryDataButton />
-        </ThemedView>
-        <ThemedView style={styles.item}>
-          <ImportDiaryDataButton />
-        </ThemedView>
-        <ThemedView style={styles.item}>
-          <DeleteAllDiaryDataButton />
-        </ThemedView>
-      </ThemedView>
+      </ScrollView>
     </TabScreenContainer>
   );
 }
@@ -650,6 +667,8 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  scrollContent: {
     padding: 16,
   },
   section: {
