@@ -5336,6 +5336,37 @@ describe('HomeScreen', () => {
       ).toBe(true);
     });
 
+    describe('「今日」判定の自動更新', () => {
+      // 今日バッジ特有のスタイル(丸背景に合わせた太字)を持つ、指定した日番号のテキストを取得する
+      function getTodayBadgeDayText(day: number) {
+        return screen
+          .getAllByText(String(day))
+          .find((node) => StyleSheet.flatten(node.props.style ?? {}).fontWeight === '700');
+      }
+
+      afterEach(() => {
+        jest.useRealTimers();
+      });
+
+      it('moves the "today" highlight to the next day after the date changes while the week view stays mounted across midnight (境界値: 日付をまたいで表示し続けた場合)', async () => {
+        // 2026-09-09(水)23:59から日をまたいで2026-09-10(木)0:00になる
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date(2026, 8, 9, 23, 59, 30));
+
+        await renderInWeekLayout();
+        expect(getTodayBadgeDayText(9)).toBeTruthy();
+        expect(getTodayBadgeDayText(10)).toBeUndefined();
+
+        jest.setSystemTime(new Date(2026, 8, 10, 0, 0, 30));
+        act(() => {
+          jest.advanceTimersByTime(2 * 60 * 1000);
+        });
+
+        expect(getTodayBadgeDayText(9)).toBeUndefined();
+        expect(getTodayBadgeDayText(10)).toBeTruthy();
+      });
+    });
+
     describe('日付フォーカスの移動(#284: ヘッダーの日付タップ・前後日ボタンのタップ・週をまたぐ移動)', () => {
       afterEach(() => {
         jest.useRealTimers();

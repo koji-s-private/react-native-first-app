@@ -56,6 +56,10 @@ const DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX = 'diary-new-entry-draft-';
 // 下書きの自動保存をデバウンスする間隔(ミリ秒)
 const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
 
+// 週表示レイアウトの「今日」判定を再評価する間隔(ミリ秒)。タブ画面が保持され続けても
+// 日付をまたいだタイミングから1分以内には追従できるようにする
+const TODAY_DATE_KEY_REFRESH_INTERVAL_MS = 60 * 1000;
+
 // getSearchExcerptで通常マッチしないフォールバック時に使う抜粋の最大文字数(超える場合は省略記号を付ける)
 const FALLBACK_EXCERPT_MAX_LENGTH = 20;
 
@@ -271,7 +275,21 @@ function WeekCalendarView({
   const backgroundColor = useThemeColor({}, 'background');
   const iconColor = useThemeColor({}, 'icon');
 
-  const todayDateKey = useMemo(() => toDateKey(new Date()), []);
+  // 「今日」の日付キー。expo-routerのTabsはタブ画面をアンマウントしないため、マウント時一度きりの
+  // 評価だと週表示を開いたまま日付をまたいでも古い日付を指し続ける。フォーカス復帰時に加え、
+  // 開いたままでも追従できるようタイマーでも定期的に再評価する
+  const [todayDateKey, setTodayDateKey] = useState(() => toDateKey(new Date()));
+  useFocusEffect(
+    useCallback(() => {
+      setTodayDateKey(toDateKey(new Date()));
+    }, []),
+  );
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setTodayDateKey(toDateKey(new Date()));
+    }, TODAY_DATE_KEY_REFRESH_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, []);
   // フォーカス中の日。初期値は今日で、タップ/スワイプ操作で前後に移動する
   const [focusedDate, setFocusedDate] = useState(() => new Date());
   const focusedDateKey = useMemo(() => toDateKey(focusedDate), [focusedDate]);
