@@ -1909,7 +1909,7 @@ describe('リマインダーセクション(日記を書く習慣化のための
         expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true),
       );
       // `scheduleDailyReminderAsync`が完了するまで解決しないPromiseにして、処理中の一瞬の状態を検証する
-      let resolveSchedule: () => void = () => {};
+      let resolveSchedule: (value?: void | PromiseLike<void>) => void = () => {};
       mockedDiaryReminderNotifications.scheduleDailyReminderAsync.mockReturnValue(
         new Promise((resolve) => {
           resolveSchedule = resolve;
@@ -1920,18 +1920,18 @@ describe('リマインダーセクション(日記を書く習慣化のための
         fireEvent.press(screen.getByLabelText(HOUR_INCREASE_LABEL));
       });
 
-      expect(
-        screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled,
-      ).toBe(true);
-      expect(
-        screen.getByLabelText(HOUR_DECREASE_LABEL).props.accessibilityState.disabled,
-      ).toBe(true);
-      expect(
-        screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled,
-      ).toBe(true);
-      expect(
-        screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled,
-      ).toBe(true);
+      expect(screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
+        true,
+      );
+      expect(screen.getByLabelText(HOUR_DECREASE_LABEL).props.accessibilityState.disabled).toBe(
+        true,
+      );
+      expect(screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
+        true,
+      );
+      expect(screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled).toBe(
+        true,
+      );
       // トグル自体は`isTogglePending`のみに連動するため、時刻変更中でも無効化されない
       expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.disabled).toBe(false);
 
@@ -1941,18 +1941,18 @@ describe('リマインダーセクション(日記を書く習慣化のための
         await Promise.resolve();
       });
 
-      expect(
-        screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled,
-      ).toBe(false);
-      expect(
-        screen.getByLabelText(HOUR_DECREASE_LABEL).props.accessibilityState.disabled,
-      ).toBe(false);
-      expect(
-        screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled,
-      ).toBe(false);
-      expect(
-        screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled,
-      ).toBe(false);
+      expect(screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
+        false,
+      );
+      expect(screen.getByLabelText(HOUR_DECREASE_LABEL).props.accessibilityState.disabled).toBe(
+        false,
+      );
+      expect(screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
+        false,
+      );
+      expect(screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled).toBe(
+        false,
+      );
     });
 
     it('re-enables the stepper buttons via the finally handler even when re-scheduling fails after a minute change (異常系: 時刻変更失敗時もpending状態が解除される)', async () => {
@@ -1979,12 +1979,12 @@ describe('リマインダーセクション(日記を書く習慣化のための
         fireEvent.press(screen.getByLabelText(MINUTE_INCREASE_LABEL));
       });
 
-      expect(
-        screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled,
-      ).toBe(true);
-      expect(
-        screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled,
-      ).toBe(true);
+      expect(screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
+        true,
+      );
+      expect(screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled).toBe(
+        true,
+      );
 
       await act(async () => {
         rejectSchedule(new Error('schedule error'));
@@ -1994,13 +1994,13 @@ describe('リマインダーセクション(日記を書く習慣化のための
       });
 
       await waitFor(() =>
-        expect(
-          screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled,
-        ).toBe(false),
+        expect(screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
+          false,
+        ),
       );
-      expect(
-        screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled,
-      ).toBe(false);
+      expect(screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled).toBe(
+        false,
+      );
       // 失敗時もエラー案内自体は既存の異常系テストで検証済みだが、ここではpending解除の
       // 副作用として発火することも合わせて確認する
       expect(Alert.alert).toHaveBeenCalledWith(
