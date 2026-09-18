@@ -2043,6 +2043,21 @@ describe('HomeScreen', () => {
       expect(await screen.findByText(EMPTY_STATE_TEXT)).toBeTruthy();
       expect(screen.queryByText(LOAD_ERROR_TEXT)).toBeNull();
     });
+
+    it('clears the load-error message and falls back to the plain empty state once a later reload succeeds (recovery)', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'getItem').mockResolvedValueOnce('not valid json');
+
+      render(<HomeScreen />);
+      expect(await screen.findByText(LOAD_ERROR_TEXT)).toBeTruthy();
+
+      // 実ストレージは壊れていないため、再フォーカスによる再読み込みは成功し、
+      // エラー専用メッセージは通常の空状態メッセージへ切り替わる
+      triggerRefocus();
+
+      await waitFor(() => expect(screen.queryByText(LOAD_ERROR_TEXT)).toBeNull());
+      expect(screen.getByText(EMPTY_STATE_TEXT)).toBeTruthy();
+    });
   });
 
   describe('カレンダー表示とモーダル', () => {

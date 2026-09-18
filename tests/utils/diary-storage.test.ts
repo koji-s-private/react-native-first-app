@@ -422,6 +422,18 @@ describe('getAllDiaryEntries', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it('does not call onError when only some entries are corrupted, since the read as a whole still succeeds (境界値: 一部だけ壊れている場合はonErrorを呼ばない)', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    await seedDiaryEntry(sampleEntries[0]);
+    await AsyncStorage.setItem(buildDiaryEntryKey('broken'), 'not-valid-json{{{');
+    const onError = jest.fn();
+
+    const result = await getAllDiaryEntries({ onError });
+
+    expect(result).toEqual([sampleEntries[0]]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   describe('レガシーキーからの移行(マイグレーション)', () => {
     it('migrates entries from the legacy single-key (encrypted) storage into per-entry keys (正常系)', async () => {
       const key = await getOrCreateEncryptionKey();
