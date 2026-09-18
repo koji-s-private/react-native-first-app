@@ -164,17 +164,21 @@ function TimeStepper({
         disabled={disabled}
         accessibilityRole="button"
         accessibilityLabel={`${label}を減らす`}
-        style={[styles.reminderStepButton, { borderColor: tintColor }]}
+        accessibilityState={{ disabled }}
+        style={[styles.reminderStepButton, { borderColor: tintColor, opacity: disabled ? 0.4 : 1 }]}
       >
         <ThemedText style={[styles.reminderStepButtonText, { color: tintColor }]}>−</ThemedText>
       </Pressable>
-      <ThemedText style={styles.reminderStepperValue}>{formattedValue}</ThemedText>
+      <ThemedText style={[styles.reminderStepperValue, { opacity: disabled ? 0.4 : 1 }]}>
+        {formattedValue}
+      </ThemedText>
       <Pressable
         onPress={onIncrease}
         disabled={disabled}
         accessibilityRole="button"
         accessibilityLabel={`${label}を増やす`}
-        style={[styles.reminderStepButton, { borderColor: tintColor }]}
+        accessibilityState={{ disabled }}
+        style={[styles.reminderStepButton, { borderColor: tintColor, opacity: disabled ? 0.4 : 1 }]}
       >
         <ThemedText style={[styles.reminderStepButtonText, { color: tintColor }]}>+</ThemedText>
       </Pressable>

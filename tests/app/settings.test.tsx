@@ -2101,18 +2101,17 @@ describe('リマインダーセクション(日記を書く習慣化のための
 
       await waitFor(() => expect(screen.getByText(FALLBACK_TEXT)).toBeTruthy());
 
-      expect(screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
-        true,
-      );
-      expect(screen.getByLabelText(HOUR_DECREASE_LABEL).props.accessibilityState.disabled).toBe(
-        true,
-      );
-      expect(screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
-        true,
-      );
-      expect(screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled).toBe(
-        true,
-      );
+      for (const label of [
+        HOUR_INCREASE_LABEL,
+        HOUR_DECREASE_LABEL,
+        MINUTE_INCREASE_LABEL,
+        MINUTE_DECREASE_LABEL,
+      ]) {
+        const button = screen.getByLabelText(label);
+        expect(button.props.accessibilityState.disabled).toBe(true);
+        // 操作できないことが見た目でも伝わるよう、半透明化(opacity: 0.4)されていることを確認する
+        expect(StyleSheet.flatten(button.props.style).opacity).toBe(0.4);
+      }
     });
 
     it('keeps all four time stepper buttons enabled when permission is granted (正常系: 許可済みの場合はボタン操作可能)', async () => {
@@ -2128,18 +2127,16 @@ describe('リマインダーセクション(日記を書く習慣化のための
       );
       expect(screen.queryByText(FALLBACK_TEXT)).toBeNull();
 
-      expect(screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
-        false,
-      );
-      expect(screen.getByLabelText(HOUR_DECREASE_LABEL).props.accessibilityState.disabled).toBe(
-        false,
-      );
-      expect(screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
-        false,
-      );
-      expect(screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled).toBe(
-        false,
-      );
+      for (const label of [
+        HOUR_INCREASE_LABEL,
+        HOUR_DECREASE_LABEL,
+        MINUTE_INCREASE_LABEL,
+        MINUTE_DECREASE_LABEL,
+      ]) {
+        const button = screen.getByLabelText(label);
+        expect(button.props.accessibilityState.disabled).toBe(false);
+        expect(StyleSheet.flatten(button.props.style).opacity).toBe(1);
+      }
     });
   });
 
