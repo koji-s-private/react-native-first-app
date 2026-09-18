@@ -654,6 +654,33 @@ describe('日記データをエクスポートボタン(データ管理セクシ
     expect(Sharing.shareAsync).not.toHaveBeenCalled();
   });
 
+  it('shows a load-error alert distinct from the "no data" alert when all entries fail to load, so it is not mistaken for having nothing to back up (異常系: 全滅時のエクスポート)', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    // レガシーキーに不正なJSONを保存し、getAllDiaryEntries内部のマイグレーション処理を
+    // 失敗させることで、全滅エラー(外側catch)を再現する
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, 'not valid json');
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(EXPORT_BUTTON_LABEL));
+    });
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        '日記データを読み込めませんでした',
+        'エクスポートを完了できませんでした。アプリを再起動しても解決しない場合は端末の復元設定をご確認ください。',
+      ),
+    );
+    expect(Alert.alert).not.toHaveBeenCalledWith(
+      'エクスポートできる日記データがありません',
+      expect.anything(),
+    );
+    expect(mockedFileSystem.__mockWrite).not.toHaveBeenCalled();
+    expect(Sharing.isAvailableAsync).not.toHaveBeenCalled();
+    expect(Sharing.shareAsync).not.toHaveBeenCalled();
+  });
+
   it('writes the JSON file to the cache directory and opens the native share sheet when there is data (正常系)', async () => {
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     // 暗号化対応前の平文JSON形式でも読み込めることを兼ねて確認するため、そのまま保存する

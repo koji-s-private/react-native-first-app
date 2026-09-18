@@ -516,7 +516,22 @@ function ExportDiaryDataButton() {
   const handleExport = useCallback(async () => {
     setIsExporting(true);
     try {
-      const entries = await getAllDiaryEntries();
+      // 全件読み込みに失敗した場合、entries.length === 0だけでは「本当に0件」と
+      // 見分けが付かず「バックアップすべきデータが無い」と誤解されかねないため、
+      // onErrorで検知して専用のメッセージを出し分ける
+      let hasLoadError = false;
+      const entries = await getAllDiaryEntries({
+        onError: () => {
+          hasLoadError = true;
+        },
+      });
+      if (hasLoadError) {
+        Alert.alert(
+          '日記データを読み込めませんでした',
+          'エクスポートを完了できませんでした。アプリを再起動しても解決しない場合は端末の復元設定をご確認ください。',
+        );
+        return;
+      }
       if (entries.length === 0) {
         // 空の状態で共有シートを開いても意味が無いため、その旨を伝えて終了する
         Alert.alert(

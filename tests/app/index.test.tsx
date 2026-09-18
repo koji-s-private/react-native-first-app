@@ -197,6 +197,9 @@ const SEARCH_INPUT_PLACEHOLDER = '日記を検索';
 const CLOSE_BUTTON_TEXT = '閉じる';
 // 日記が0件のときにカレンダーの上に表示される案内メッセージ
 const EMPTY_STATE_TEXT = 'まだ日記がありません。最初の日記を書いてみましょう。';
+// 全件読み込みに失敗したときにカレンダーの上に表示されるエラーメッセージ(0件と区別するためのもの)
+const LOAD_ERROR_TEXT =
+  '日記データを読み込めませんでした。アプリを再起動しても解決しない場合は端末の復元設定をご確認ください。';
 const KEYBOARD_AVOIDING_VIEW_TEST_ID = 'keyboard-avoiding-view';
 
 // `queryAllByRole('button')`は常に保存ボタンを含む。
@@ -1123,25 +1126,27 @@ describe('HomeScreen', () => {
     });
 
     it('shows the empty state when stored data is corrupted (invalid JSON)', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
       jest.spyOn(AsyncStorage, 'getItem').mockResolvedValueOnce('not valid json');
 
       render(<HomeScreen />);
 
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(STORAGE_KEY));
       // 壊れたデータは読み捨てられ、空の状態から始まるため、日記が実際に存在するセルは無い
-      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(0);
+      await waitFor(() => expect(queryCalendarDayButtonsWithEntry()).toHaveLength(0));
+      await waitFor(() => expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0));
     });
 
     it('shows the empty state when stored data has the encrypted-payload marker but fails to decrypt (corrupted ciphertext)', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
       jest
         .spyOn(AsyncStorage, 'getItem')
         .mockResolvedValueOnce(`${ENCRYPTED_PREFIX}not-a-real-ciphertext`);
 
       render(<HomeScreen />);
 
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(STORAGE_KEY));
       // 復号に失敗したデータは読み捨てられ、空の状態から始まるため、日記が実際に存在するセルは無い
-      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(0);
+      await waitFor(() => expect(queryCalendarDayButtonsWithEntry()).toHaveLength(0));
+      await waitFor(() => expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0));
     });
 
     it('rolls back entries and draft and shows an error message when AsyncStorage.setItem fails', async () => {
@@ -2023,25 +2028,49 @@ describe('HomeScreen', () => {
       expect(screen.queryByText(EMPTY_STATE_TEXT)).toBeNull();
     });
 
-    it('shows the empty state message again when stored data is corrupted (invalid JSON) and falls back to an empty list (boundary)', async () => {
+    it('shows a load-error message instead of the empty state message when stored data is corrupted (invalid JSON), so it stays distinguishable from a truly empty state (boundary)', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
       jest.spyOn(AsyncStorage, 'getItem').mockResolvedValueOnce('not valid json');
 
       render(<HomeScreen />);
 
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(STORAGE_KEY));
-      // 壊れたデータは読み捨てられ空の状態に戻るため、案内メッセージが表示される
-      expect(screen.getByText(EMPTY_STATE_TEXT)).toBeTruthy();
+      // 壊れたデータは読み捨てられるが、「本当に0件」とは区別できるようエラー専用のメッセージが表示される
+      expect(await screen.findByText(LOAD_ERROR_TEXT)).toBeTruthy();
+      expect(screen.queryByText(EMPTY_STATE_TEXT)).toBeNull();
     });
 
-    it('shows the empty state message when the encrypted payload fails to decrypt (corrupted ciphertext, boundary)', async () => {
+    it('shows a load-error message instead of the empty state message when the encrypted payload fails to decrypt (corrupted ciphertext, boundary)', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
       jest
         .spyOn(AsyncStorage, 'getItem')
         .mockResolvedValueOnce(`${ENCRYPTED_PREFIX}not-a-real-ciphertext`);
 
       render(<HomeScreen />);
 
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(STORAGE_KEY));
-      // 復号に失敗したデータも読み捨てられ空の状態に戻るため、案内メッセージが表示される
+      // 復号に失敗したデータも読み捨てられるが、「本当に0件」とは区別できるようエラー専用のメッセージが表示される
+      expect(await screen.findByText(LOAD_ERROR_TEXT)).toBeTruthy();
+      expect(screen.queryByText(EMPTY_STATE_TEXT)).toBeNull();
+    });
+
+    it('shows the plain empty state message (not the load-error message) when nothing has been saved yet', async () => {
+      render(<HomeScreen />);
+
+      expect(await screen.findByText(EMPTY_STATE_TEXT)).toBeTruthy();
+      expect(screen.queryByText(LOAD_ERROR_TEXT)).toBeNull();
+    });
+
+    it('clears the load-error message and falls back to the plain empty state once a later reload succeeds (recovery)', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'getItem').mockResolvedValueOnce('not valid json');
+
+      render(<HomeScreen />);
+      expect(await screen.findByText(LOAD_ERROR_TEXT)).toBeTruthy();
+
+      // 実ストレージは壊れていないため、再フォーカスによる再読み込みは成功し、
+      // エラー専用メッセージは通常の空状態メッセージへ切り替わる
+      triggerRefocus();
+
+      await waitFor(() => expect(screen.queryByText(LOAD_ERROR_TEXT)).toBeNull());
       expect(screen.getByText(EMPTY_STATE_TEXT)).toBeTruthy();
     });
   });
