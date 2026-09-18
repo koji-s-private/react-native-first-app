@@ -650,6 +650,45 @@ describe('DayEntriesScreen', () => {
       expect(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.value).toBe('保存失敗する日記');
     });
 
+    // 補足: React 18以降はアンマウント済みコンポーネントへのstate更新を検知する
+    // コンソール警告自体が撤廃されたため、このテストはガードの有無に関わらずpassし得る
+    // (console.errorへの出力が無いことは確認できるが、isMountedRefガードが実際に効いた
+    // ことの直接証明にはならない)。ガードの意義はReactの将来的な仕様変更や他レンダラーへの
+    // 備えとしての防御的実装であり、コードレビューで妥当性を担保する。
+    it('does not update state after unmounting while a save is still in flight (avoids a "state update on an unmounted component" warning)', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      let rejectSetItem: (error: Error) => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectSetItem = reject;
+          }),
+      );
+
+      const { unmount } = render(<DayEntriesScreen />);
+      await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+      await openNewEntryComposer();
+
+      fireEvent.changeText(
+        screen.getByLabelText(NEW_ENTRY_INPUT_LABEL),
+        'アンマウント時点で保存中の内容',
+      );
+      fireEvent.press(screen.getByText(NEW_ENTRY_SAVE_LABEL));
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      unmount();
+
+      await act(async () => {
+        rejectSetItem(new Error('write failed'));
+      });
+
+      const stateUpdateWarning = consoleErrorSpy.mock.calls.find(([message]) =>
+        String(message).includes('a component'),
+      );
+      expect(stateUpdateWarning).toBeUndefined();
+      consoleErrorSpy.mockRestore();
+    });
+
     it('closes the modal immediately without a confirmation dialog via the close button when the draft is still empty (正常系)', async () => {
       jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 

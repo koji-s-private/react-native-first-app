@@ -60,6 +60,14 @@ export function DiaryEntryComposerModal({
   // 保留中の下書き自動保存タイマーID。保存成功時・破棄確定時にAsyncStorageの下書きキーを
   // 削除する際、クリーンアップ(モーダルを閉じるタイミング)を待たずに明示的にキャンセルするために使う
   const draftAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // アンマウント後にstate更新を行わないようにするためのフラグ。保存処理の完了を待つ間に
+  // 呼び出し画面側の遷移でアンマウントされ得るため、useSaveDiaryEntryへ渡して安全性を確保する
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
   const { isSaving, error, setError, save } = useSaveDiaryEntry();
 
   const transition = useModalSlideTransition(dateKey !== null);
@@ -168,6 +176,7 @@ export function DiaryEntryComposerModal({
         onSaveError?.();
       },
       errorMessage: '保存に失敗しました。もう一度お試しください。',
+      isMountedRef,
     });
   };
 
