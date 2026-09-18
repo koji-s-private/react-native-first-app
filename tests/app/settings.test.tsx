@@ -2094,6 +2094,55 @@ describe('リマインダーセクション(日記を書く習慣化のための
     expect(screen.getByText('30')).toBeTruthy();
   });
 
+  describe('通知許可拒否時のTimeStepper無効化(境界値: permissionStatus)', () => {
+    it('disables all four time stepper buttons (hour/minute, decrease/increase) when permission is denied at mount (異常系: 許可拒否時はボタン操作不可)', async () => {
+      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('denied');
+      renderSettingsScreen();
+
+      await waitFor(() => expect(screen.getByText(FALLBACK_TEXT)).toBeTruthy());
+
+      expect(screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
+        true,
+      );
+      expect(screen.getByLabelText(HOUR_DECREASE_LABEL).props.accessibilityState.disabled).toBe(
+        true,
+      );
+      expect(screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
+        true,
+      );
+      expect(screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled).toBe(
+        true,
+      );
+    });
+
+    it('keeps all four time stepper buttons enabled when permission is granted (正常系: 許可済みの場合はボタン操作可能)', async () => {
+      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
+        'granted',
+      );
+      renderSettingsScreen();
+
+      await waitFor(() =>
+        expect(
+          mockedDiaryReminderNotifications.getReminderPermissionStatusAsync,
+        ).toHaveBeenCalled(),
+      );
+      expect(screen.queryByText(FALLBACK_TEXT)).toBeNull();
+
+      expect(screen.getByLabelText(HOUR_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
+        false,
+      );
+      expect(screen.getByLabelText(HOUR_DECREASE_LABEL).props.accessibilityState.disabled).toBe(
+        false,
+      );
+      expect(screen.getByLabelText(MINUTE_INCREASE_LABEL).props.accessibilityState.disabled).toBe(
+        false,
+      );
+      expect(screen.getByLabelText(MINUTE_DECREASE_LABEL).props.accessibilityState.disabled).toBe(
+        false,
+      );
+    });
+  });
+
   // 通知未許可時のフォールバック文言の文字色も、削除ボタンと同様に
   // 固定のライトモード用エラー色ではなく、useThemeColor経由でライト/ダークそれぞれの
   // テーマに応じた色が適用されることを確認する回帰テスト。
