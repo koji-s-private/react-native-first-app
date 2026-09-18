@@ -7,6 +7,7 @@ import { Alert, StyleSheet, useColorScheme } from 'react-native';
 
 import DayEntriesScreen from '@/app/day-entries/[date]';
 import { Colors } from '@/constants/theme';
+import { useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
 import { encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
 import { buildDiaryEntryKey, type DiaryEntry } from '@/utils/diary-storage';
 import { BODY_MAX_LENGTH } from '@/utils/diary-text';
@@ -23,6 +24,21 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
+
+// isMountedRefガードが実際にコンポーネントからhookへ配線されているかを、Reactの
+// (React 19では撤廃済みの)アンマウント警告に頼らず直接検証するためのモック。
+// save呼び出し引数を記録するラッパーで実装本体を包むだけで、実際の保存処理自体は
+// 本物のuseSaveDiaryEntryにそのまま委譲するため、他のテストの挙動には影響しない
+jest.mock('@/hooks/use-save-diary-entry', () => {
+  const actual = jest.requireActual('@/hooks/use-save-diary-entry');
+  return {
+    ...actual,
+    useSaveDiaryEntry: jest.fn(() => {
+      const original = actual.useSaveDiaryEntry();
+      return { ...original, save: jest.fn(original.save) };
+    }),
+  };
+});
 
 // 実機では`expo-router`の`ExpoRoot`が自動的に`SafeAreaProvider`で全体をラップするが、
 // 単体レンダリングではそのラップが無く`useSafeAreaInsets`がエラーを投げるため、
@@ -648,6 +664,46 @@ describe('DayEntriesScreen', () => {
       // モーダルは開いたままで、入力内容も保持されている
       expect(screen.getByText(NEW_ENTRY_HEADING)).toBeTruthy();
       expect(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.value).toBe('保存失敗する日記');
+    });
+
+    it('passes an isMountedRef to useSaveDiaryEntry.save whose current becomes false after unmounting while a save is still in flight (isMountedRefガードの配線確認)', async () => {
+      let rejectSetItem: (error: Error) => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectSetItem = reject;
+          }),
+      );
+
+      const { unmount } = render(<DayEntriesScreen />);
+      await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+      await openNewEntryComposer();
+
+      fireEvent.changeText(
+        screen.getByLabelText(NEW_ENTRY_INPUT_LABEL),
+        'アンマウント時点で保存中の内容',
+      );
+      fireEvent.press(screen.getByText(NEW_ENTRY_SAVE_LABEL));
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      // 保存処理を実際に呼び出したレンダー結果(save.mockが呼ばれているもの)からisMountedRefを取り出す
+      const useSaveDiaryEntryMock = useSaveDiaryEntry as jest.Mock;
+      const invokedResult = useSaveDiaryEntryMock.mock.results.find(
+        (result) => (result.value.save as jest.Mock).mock.calls.length > 0,
+      );
+      const isMountedRef = invokedResult?.value.save.mock.calls[0][0].isMountedRef;
+      expect(isMountedRef).toBeDefined();
+      expect(isMountedRef.current).toBe(true);
+
+      unmount();
+
+      expect(isMountedRef.current).toBe(false);
+
+      // アンマウント後に保存が失敗してもエラーは投げられない(save内部の状態更新がガードされ、
+      // 呼び出し自体は最後まで解決する)
+      await act(async () => {
+        rejectSetItem(new Error('write failed'));
+      });
     });
 
     it('closes the modal immediately without a confirmation dialog via the close button when the draft is still empty (正常系)', async () => {
