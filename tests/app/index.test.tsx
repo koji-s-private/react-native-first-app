@@ -226,6 +226,12 @@ async function decryptPersistedEntry(encryptedValue: string): Promise<unknown> {
   return JSON.parse(decryptText(encryptedValue, key));
 }
 
+// 下書きの暗号化文字列を復号して元の本文に戻すヘルパー(JSONではなくプレーンテキストな点がdecryptPersistedEntryと異なる)
+async function decryptPersistedDraft(encryptedValue: string): Promise<string> {
+  const key = await getOrCreateEncryptionKey();
+  return decryptText(encryptedValue, key);
+}
+
 // 個別キー方式で保存されているエントリを1件、AsyncStorageから直接読み取って復号するヘルパー
 async function readPersistedEntry(id: string): Promise<DiaryEntry | null> {
   const stored = await AsyncStorage.getItem(buildDiaryEntryKey(id));
@@ -1421,8 +1427,14 @@ describe('HomeScreen', () => {
         });
 
         await waitFor(() =>
-          expect(AsyncStorage.setItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY, '書きかけの下書き'),
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY, expect.any(String)),
         );
+        const [, persistedDraft] = (AsyncStorage.setItem as jest.Mock).mock.calls.find(
+          ([key]) => key === DRAFT_STORAGE_KEY,
+        );
+        // 保存済みエントリと同じくAES-256-GCMで暗号化され、平文のままでは保存されない
+        expect(persistedDraft).not.toBe('書きかけの下書き');
+        await expect(decryptPersistedDraft(persistedDraft)).resolves.toBe('書きかけの下書き');
         // 日記本文の保存キー(diary-entries)とは別キーで保存されている
         expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(STORAGE_KEY, expect.any(String));
       } finally {
@@ -1461,7 +1473,7 @@ describe('HomeScreen', () => {
           ([key]) => key === DRAFT_STORAGE_KEY,
         );
         expect(draftWrites).toHaveLength(1);
-        expect(draftWrites[0][1]).toBe('書きか');
+        await expect(decryptPersistedDraft(draftWrites[0][1])).resolves.toBe('書きか');
       } finally {
         jest.useRealTimers();
       }
@@ -1526,7 +1538,7 @@ describe('HomeScreen', () => {
           jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
         });
         await waitFor(() =>
-          expect(AsyncStorage.setItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY, '保存される日記'),
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY, expect.any(String)),
         );
 
         fireEvent.press(screen.getByText('保存'));
@@ -1699,10 +1711,13 @@ describe('HomeScreen', () => {
         });
 
         await waitFor(() =>
-          expect(AsyncStorage.setItem).toHaveBeenCalledWith(
-            DRAFT_STORAGE_KEY,
-            '復元失敗後も自動保存される下書き',
-          ),
+          expect(AsyncStorage.setItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY, expect.any(String)),
+        );
+        const [, persistedDraft] = (AsyncStorage.setItem as jest.Mock).mock.calls.find(
+          ([key]) => key === DRAFT_STORAGE_KEY,
+        );
+        await expect(decryptPersistedDraft(persistedDraft)).resolves.toBe(
+          '復元失敗後も自動保存される下書き',
         );
       } finally {
         jest.useRealTimers();
@@ -3846,9 +3861,13 @@ describe('HomeScreen', () => {
         await waitFor(() =>
           expect(AsyncStorage.setItem).toHaveBeenCalledWith(
             draftKeyFor(yesterday),
-            '書きかけの新規下書き',
+            expect.any(String),
           ),
         );
+        const [, persistedDraft] = (AsyncStorage.setItem as jest.Mock).mock.calls.find(
+          ([key]) => key === draftKeyFor(yesterday),
+        );
+        await expect(decryptPersistedDraft(persistedDraft)).resolves.toBe('書きかけの新規下書き');
       });
 
       it('restores a previously auto-saved draft into the modal input when reopened for the same date', async () => {
@@ -3880,7 +3899,7 @@ describe('HomeScreen', () => {
         await waitFor(() =>
           expect(AsyncStorage.setItem).toHaveBeenCalledWith(
             draftKeyFor(yesterday),
-            '保存される新規日記',
+            expect.any(String),
           ),
         );
 
@@ -4045,10 +4064,13 @@ describe('HomeScreen', () => {
           });
 
           await waitFor(() =>
-            expect(AsyncStorage.setItem).toHaveBeenCalledWith(
-              key,
-              '復元失敗後も自動保存される下書き',
-            ),
+            expect(AsyncStorage.setItem).toHaveBeenCalledWith(key, expect.any(String)),
+          );
+          const [, persistedDraft] = (AsyncStorage.setItem as jest.Mock).mock.calls.find(
+            ([writtenKey]) => writtenKey === key,
+          );
+          await expect(decryptPersistedDraft(persistedDraft)).resolves.toBe(
+            '復元失敗後も自動保存される下書き',
           );
         } finally {
           process.off('unhandledRejection', onUnhandledRejection);
@@ -4087,7 +4109,7 @@ describe('HomeScreen', () => {
             jest.advanceTimersByTime(DRAFT_AUTO_SAVE_DEBOUNCE_MS);
           });
           await waitFor(() =>
-            expect(AsyncStorage.setItem).toHaveBeenCalledWith(key, '保存に失敗するはずの下書き'),
+            expect(AsyncStorage.setItem).toHaveBeenCalledWith(key, expect.any(String)),
           );
 
           // 下書きの自動保存(補助的な処理)が失敗しても、入力は継続でき、

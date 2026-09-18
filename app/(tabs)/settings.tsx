@@ -2,7 +2,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import { Link } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -137,9 +137,72 @@ function CalendarLayoutSection() {
   );
 }
 
+// 長押しでのオートリピート開始までの遅延(ms)。単発タップと区別できる程度の間を持たせる
+const STEPPER_REPEAT_START_DELAY_MS = 500;
+// オートリピート中に値を増減する間隔(ms)
+const STEPPER_REPEAT_INTERVAL_MS = 120;
+
+// TimeStepperの−/+ボタンを長押しした際、離すかアンマウントされるまで一定間隔で値を
+// 増減し続けるオートリピートを実装するフック。PressableのonLongPressは単発でしか発火しないため
+// setIntervalで明示的に反復させる。onChange/disabledは呼び出し元の再レンダリングで変わりうるため、
+// 実行中のタイマーが常に最新の値を参照できるようrefで保持する
+function useStepperAutoRepeat(onChange: () => void, disabled: boolean) {
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
+
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 長押しによるオートリピートが発火済みかどうか。発火済みの場合、指を離した際に届くonPressで
+  // さらに1回増減してしまう(単発タップとの二重発火)のを防ぐために使う
+  const didRepeatRef = useRef(false);
+
+  const stopRepeating = useCallback(() => {
+    if (timeoutRef.current !== null) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
+  // アンマウント時にタイマーが残らないようにする
+  useEffect(() => stopRepeating, [stopRepeating]);
+
+  // 非同期処理(通知の再スケジュール登録)が完了するまでは値を進めない。既存のisTimePending等に
+  // よる連打防止と同じ方針を、長押し中の連続発火にも適用する
+  const fireIfEnabled = useCallback(() => {
+    if (!disabledRef.current) {
+      onChangeRef.current();
+    }
+  }, []);
+
+  const handlePressIn = useCallback(() => {
+    didRepeatRef.current = false;
+    timeoutRef.current = setTimeout(() => {
+      didRepeatRef.current = true;
+      fireIfEnabled();
+      intervalRef.current = setInterval(fireIfEnabled, STEPPER_REPEAT_INTERVAL_MS);
+    }, STEPPER_REPEAT_START_DELAY_MS);
+  }, [fireIfEnabled]);
+
+  const handlePress = useCallback(() => {
+    if (didRepeatRef.current) {
+      didRepeatRef.current = false;
+      return;
+    }
+    onChangeRef.current();
+  }, []);
+
+  return { onPressIn: handlePressIn, onPressOut: stopRepeating, onPress: handlePress };
+}
+
 // 時刻の「時」「分」を1つずつ調整するためのステッパー(−/+ボタン)。
 // 端末に標準搭載のネイティブなタイムピッカーは使わず、外部ライブラリを追加せずに実装するため、
-// シンプルな増減ボタンで時刻を選べるようにしている
+// シンプルな増減ボタンで時刻を選べるようにしている。長押しすると一定間隔で連続増減する。
 function TimeStepper({
   label,
   value,
@@ -155,12 +218,16 @@ function TimeStepper({
 }) {
   const tintColor = useThemeColor({}, 'tint');
   const formattedValue = String(value).padStart(2, '0');
+  const decreaseAutoRepeat = useStepperAutoRepeat(onDecrease, disabled);
+  const increaseAutoRepeat = useStepperAutoRepeat(onIncrease, disabled);
 
   return (
     <ThemedView style={styles.reminderStepperGroup}>
       <ThemedText style={styles.reminderStepperLabel}>{label}</ThemedText>
       <Pressable
-        onPress={onDecrease}
+        onPress={decreaseAutoRepeat.onPress}
+        onPressIn={decreaseAutoRepeat.onPressIn}
+        onPressOut={decreaseAutoRepeat.onPressOut}
         disabled={disabled}
         accessibilityRole="button"
         accessibilityLabel={`${label}を減らす`}
@@ -173,7 +240,9 @@ function TimeStepper({
         {formattedValue}
       </ThemedText>
       <Pressable
-        onPress={onIncrease}
+        onPress={increaseAutoRepeat.onPress}
+        onPressIn={increaseAutoRepeat.onPressIn}
+        onPressOut={increaseAutoRepeat.onPressOut}
         disabled={disabled}
         accessibilityRole="button"
         accessibilityLabel={`${label}を増やす`}

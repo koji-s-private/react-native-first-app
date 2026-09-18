@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { isDraftStorageKey } from '@/utils/diary-draft-storage';
 import {
   decryptText,
   encryptText,
@@ -92,11 +93,13 @@ async function migrateLegacyEntriesIfNeeded(): Promise<void> {
 /**
  * 保存済みの日記データを全件削除する(Google Play/Apple双方で求められるユーザーによる
  * データ削除手段への対応)。暗号鍵や他の設定値に影響しないよう、日記データのキー
- * (エントリ単位の個別キー、および念のためレガシーキー)のみを対象にする。
+ * (エントリ単位の個別キー、未保存の下書きキー、および念のためレガシーキー)のみを対象にする。
  */
 export async function clearAllDiaryEntries(): Promise<void> {
   const allKeys = await AsyncStorage.getAllKeys();
-  const entryKeys = allKeys.filter((key) => key.startsWith(DIARY_ENTRY_KEY_PREFIX));
+  const entryKeys = allKeys.filter(
+    (key) => key.startsWith(DIARY_ENTRY_KEY_PREFIX) || isDraftStorageKey(key),
+  );
   if (entryKeys.length > 0) {
     await AsyncStorage.multiRemove(entryKeys);
   }

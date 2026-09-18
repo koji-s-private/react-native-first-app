@@ -16,12 +16,13 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
 import { useThemeColor } from '@/hooks/use-theme-color';
+import {
+  DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX,
+  loadDraftText,
+  saveDraftText,
+} from '@/utils/diary-draft-storage';
 import { BODY_MAX_LENGTH, splitIntoGraphemes, truncateToBodyMaxLength } from '@/utils/diary-text';
 import { getDiaryEntryById, saveDiaryEntry, type DiaryEntry } from '@/utils/diary-storage';
-
-// 保存前の編集下書きを自動保存するAsyncStorageキーの接頭辞。エントリIDごとにキーを分け、
-// 複数のエントリを行き来しても下書きが混ざらないようにする(実際のキーはこの接頭辞+エントリID)
-const DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX = 'diary-edit-draft-';
 
 // 下書きの自動保存をデバウンスする間隔(ミリ秒)。app/(tabs)/index.tsxの新規作成composerと合わせる
 const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
@@ -102,9 +103,7 @@ export default function EditEntryScreen() {
         // ただし下書きが元の本文と同一の場合はそのまま元の本文を使う(意味の無い復元を避ける)
         let textToShow = truncatedText;
         try {
-          const storedDraft = await AsyncStorage.getItem(
-            DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX + found.id,
-          );
+          const storedDraft = await loadDraftText(DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX + found.id);
           if (!isCancelled && storedDraft !== null) {
             const truncatedDraft = truncateToBodyMaxLength(storedDraft);
             if (truncatedDraft !== truncatedText) {
@@ -147,7 +146,7 @@ export default function EditEntryScreen() {
     const timer = setTimeout(() => {
       draftAutoSaveTimerRef.current = null;
       const persist = editDraft
-        ? AsyncStorage.setItem(draftKey, editDraft)
+        ? saveDraftText(draftKey, editDraft)
         : AsyncStorage.removeItem(draftKey);
       // 下書きの自動保存は補助的な処理のため、失敗しても静かに無視する(本保存の失敗はhandleSaveEdit側で伝える)
       persist.catch(() => {});
