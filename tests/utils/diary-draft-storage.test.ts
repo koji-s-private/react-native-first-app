@@ -87,6 +87,56 @@ describe('utils/diary-draft-storage', () => {
         '暗号化対応前に保存された平文の下書き',
       );
     });
+
+    it('rejects when the stored ciphertext has been tampered with, instead of returning corrupted text (異常系: 改ざん検知)', async () => {
+      await saveDraftText(DIARY_DRAFT_STORAGE_KEY, '改ざん検知のテスト');
+      const stored = await AsyncStorage.getItem(DIARY_DRAFT_STORAGE_KEY);
+      // GCMの認証タグ検証に引っかかるよう、末尾の1文字を別のbase64文字へ書き換える
+      const tamperedChar = stored!.endsWith('A') ? 'B' : 'A';
+      const tampered = `${stored!.slice(0, -1)}${tamperedChar}`;
+      await AsyncStorage.setItem(DIARY_DRAFT_STORAGE_KEY, tampered);
+
+      await expect(loadDraftText(DIARY_DRAFT_STORAGE_KEY)).rejects.toThrow();
+    });
+
+    it('propagates the error instead of silently succeeding when encryption key retrieval fails (異常系: 鍵取得失敗)', async () => {
+      const error = new Error('SecureStoreへのアクセスに失敗しました');
+      jest.mocked(SecureStore.getItemAsync).mockRejectedValueOnce(error);
+
+      await expect(
+        saveDraftText(DIARY_DRAFT_STORAGE_KEY, '保存できないはずの下書き'),
+      ).rejects.toThrow(error);
+      // 失敗時はAsyncStorageへ書き込まれない(下書きの平文流出や不完全な暗号文の保存を防ぐ)
+      await expect(AsyncStorage.getItem(DIARY_DRAFT_STORAGE_KEY)).resolves.toBeNull();
+    });
+
+    it('propagates the error instead of returning corrupted text when decrypting fails to fetch the key (異常系: 復号時の鍵取得失敗)', async () => {
+      await saveDraftText(DIARY_DRAFT_STORAGE_KEY, '鍵取得に失敗する場面のテスト');
+      const error = new Error('SecureStoreへのアクセスに失敗しました');
+      jest.mocked(SecureStore.getItemAsync).mockRejectedValueOnce(error);
+
+      await expect(loadDraftText(DIARY_DRAFT_STORAGE_KEY)).rejects.toThrow(error);
+    });
+
+    it('saves concurrent drafts for different keys under the same encryption key without corrupting either one (レースコンディション: 鍵未生成時の連続自動保存)', async () => {
+      // ホーム下書きと新規作成モーダル下書きが、暗号鍵がまだ存在しない状態でほぼ同時に
+      // 自動保存されるケースを想定する(それぞれ内部でgetOrCreateEncryptionKeyを呼ぶ)
+      await Promise.all([
+        saveDraftText(DIARY_DRAFT_STORAGE_KEY, 'ホーム下書きの並行保存'),
+        saveDraftText(
+          `${DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX}2026-02-01`,
+          '新規作成下書きの並行保存',
+        ),
+      ]);
+
+      // 鍵の生成・永続化は1回だけで、双方とも同じ鍵で復号できる(別々の鍵が生成され
+      // 片方が復号不能になっていないこと)
+      expect(SecureStore.setItemAsync).toHaveBeenCalledTimes(1);
+      await expect(loadDraftText(DIARY_DRAFT_STORAGE_KEY)).resolves.toBe('ホーム下書きの並行保存');
+      await expect(
+        loadDraftText(`${DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX}2026-02-01`),
+      ).resolves.toBe('新規作成下書きの並行保存');
+    });
   });
 
   describe('isDraftStorageKey', () => {
