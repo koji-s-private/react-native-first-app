@@ -1911,6 +1911,128 @@ describe('リマインダーセクション(日記を書く習慣化のための
         jest.useRealTimers();
       }
     });
+
+    it('wraps the hour from 23 to 0 while continuing to hold the button through multiple auto-repeat ticks (境界値: 長押し中の時の繰り上がり)', async () => {
+      jest.useFakeTimers();
+      try {
+        renderSettingsScreen();
+        const increaseButton = screen.getByLabelText(HOUR_INCREASE_LABEL);
+
+        // 分の初期値も"00"のため、時が繰り上がって"00"になった際にgetByTextが一意に定まらなく
+        // ならないよう、あらかじめ分を動かしておく
+        await act(async () => {
+          fireEvent.press(screen.getByLabelText(MINUTE_INCREASE_LABEL));
+        });
+        expect(screen.getByText('05')).toBeTruthy();
+
+        // 21時(既定値)から長押しを離さずに保持し続け、初回リピート(500ms)以降120ms間隔で
+        // 22 -> 23 -> 0 と繰り上がることを確認する
+        fireEvent(increaseButton, 'pressIn');
+        await act(async () => {
+          jest.advanceTimersByTime(500);
+          await Promise.resolve();
+        });
+        expect(screen.getByText('22')).toBeTruthy();
+
+        await act(async () => {
+          jest.advanceTimersByTime(120);
+          await Promise.resolve();
+        });
+        expect(screen.getByText('23')).toBeTruthy();
+
+        await act(async () => {
+          jest.advanceTimersByTime(120);
+          await Promise.resolve();
+        });
+        expect(screen.getByText('00')).toBeTruthy();
+
+        fireEvent(increaseButton, 'pressOut');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('wraps the minute from 0 to 55 while continuing to hold the decrease button through auto-repeat (境界値: 長押し中の分の繰り下がり)', async () => {
+      jest.useFakeTimers();
+      try {
+        renderSettingsScreen();
+        const decreaseButton = screen.getByLabelText(MINUTE_DECREASE_LABEL);
+
+        // 0分(既定値)から長押しで-5分し、55分に繰り下がることを確認する
+        fireEvent(decreaseButton, 'pressIn');
+        await act(async () => {
+          jest.advanceTimersByTime(500);
+          await Promise.resolve();
+        });
+        expect(screen.getByText('55')).toBeTruthy();
+
+        fireEvent(decreaseButton, 'pressOut');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('suspends further auto-repeat ticks while the previous time change is still pending, then resumes once it settles (異常系: 非同期処理中のオートリピート抑制)', async () => {
+      jest.useFakeTimers();
+      // isTimePendingによる抑制が機能する前提条件として、リマインダーがONかつ通知許可済みで
+      // 実際にscheduleDailyReminderAsyncが呼ばれる(=Promiseが未解決のままになりうる)状態にする
+      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
+        'granted',
+      );
+      await AsyncStorage.setItem(
+        DIARY_REMINDER_STORAGE_KEY,
+        JSON.stringify({ enabled: true, hour: 21, minute: 0 }),
+      );
+      let resolvePendingSchedule: (() => void) | undefined;
+      mockedDiaryReminderNotifications.scheduleDailyReminderAsync.mockReturnValue(
+        new Promise<void>((resolve) => {
+          resolvePendingSchedule = resolve;
+        }),
+      );
+      try {
+        renderSettingsScreen();
+        await waitFor(() =>
+          expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true),
+        );
+        const increaseButton = screen.getByLabelText(HOUR_INCREASE_LABEL);
+
+        fireEvent(increaseButton, 'pressIn');
+        // 初回リピートの発火。setTime(内部のscheduleDailyReminderAsync)が未解決のまま
+        // isTimePendingがtrueになり、TimeStepperのdisabledに伝播する
+        await act(async () => {
+          jest.advanceTimersByTime(500);
+          await Promise.resolve();
+        });
+        expect(screen.getByText('22')).toBeTruthy();
+        expect(increaseButton.props.accessibilityState.disabled).toBe(true);
+
+        // 非同期処理が未解決の間はインターバルが発火しても値を進めない
+        await act(async () => {
+          jest.advanceTimersByTime(120);
+          await Promise.resolve();
+        });
+        expect(screen.getByText('22')).toBeTruthy();
+
+        // 非同期処理が解決すると再度有効になり、以降のインターバルで増加を再開する
+        mockedDiaryReminderNotifications.scheduleDailyReminderAsync.mockResolvedValue(undefined);
+        await act(async () => {
+          resolvePendingSchedule?.();
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        expect(increaseButton.props.accessibilityState.disabled).toBe(false);
+
+        await act(async () => {
+          jest.advanceTimersByTime(120);
+          await Promise.resolve();
+        });
+        expect(screen.getByText('23')).toBeTruthy();
+
+        fireEvent(increaseButton, 'pressOut');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
   });
 
   it('re-schedules the reminder with the new time via AsyncStorage persistence when ON and permission is granted (正常系: 通知許可済みでの時刻変更)', async () => {
