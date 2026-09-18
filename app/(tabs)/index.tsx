@@ -232,14 +232,14 @@ function getSearchExcerpt(text: string, query: string): SearchExcerpt {
 
   // 本文・クエリ双方を同じ規則で折り畳んでいるため、entries.filterを通過したエントリでは
   // 実質的に到達しない、念のためのフォールバック(ハイライト対象なしのためmatchは空文字列)。
-  // 本文の最初の行を、書記素クラスタ単位で切り詰めて抜粋として使う
+  // 改行を畳み込んだ本文を、書記素クラスタ単位で切り詰めて抜粋として使う
   // (絵文字等が途中で分断されないようにする配慮のためsliceではなくsplitIntoGraphemesを使う)
   if (matchIndex === -1 || lowerQuery.length === 0) {
-    const firstLine = normalizedText.split('\n')[0]?.trim() ?? '';
-    const graphemes = splitIntoGraphemes(firstLine);
+    const trimmedText = normalizedText.trim();
+    const graphemes = splitIntoGraphemes(trimmedText);
     const fallbackExcerpt =
       graphemes.length <= FALLBACK_EXCERPT_MAX_LENGTH
-        ? firstLine
+        ? trimmedText
         : `${graphemes.slice(0, FALLBACK_EXCERPT_MAX_LENGTH).join('')}…`;
     return { prefix: fallbackExcerpt, match: '', suffix: '' };
   }
