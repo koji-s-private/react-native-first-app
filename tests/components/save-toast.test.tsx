@@ -33,7 +33,7 @@ describe('SaveToast', () => {
   // インライン化されるため、テスト実行中の書き換えは実装側の分岐に反映されない
   // (jest-expo/jest-preset.jsのbabelOpts参照)。そのため、iOS向けにインライン化された状態
   // (=常にiOS相当として振る舞う)でのアナウンス呼び出しのみを検証する。
-  describe('iOSでのVoiceOverアナウンス(Issue #134)', () => {
+  describe('iOSでのVoiceOverアナウンス', () => {
     // react-native標準のjestプリセットにより`AccessibilityInfo.announceForAccessibility`は
     // 既に自動モック化されたjest.fn()であり、その呼び出し履歴はこのdescribeブロックの外を
     // 含む他のテストから引き継がれてしまう。`spyOn`だけでは既存の呼び出し履歴はクリアされない
