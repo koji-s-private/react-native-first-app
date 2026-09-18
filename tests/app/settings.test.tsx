@@ -1800,6 +1800,119 @@ describe('リマインダーセクション(日記を書く習慣化のための
     expect(screen.getByText('55')).toBeTruthy();
   });
 
+  describe('長押しでの連続増減(オートリピート)', () => {
+    it('starts repeatedly increasing the hour after the button is held past the initial delay, then stops once released (正常系: 長押しでの連続増加と指を離した際の停止)', async () => {
+      jest.useFakeTimers();
+      try {
+        renderSettingsScreen();
+        const increaseButton = screen.getByLabelText(HOUR_INCREASE_LABEL);
+
+        fireEvent(increaseButton, 'pressIn');
+
+        // 長押し開始直後(初回リピートまでの遅延未満)はまだ増加しない
+        await act(async () => {
+          jest.advanceTimersByTime(499);
+          await Promise.resolve();
+        });
+        expect(screen.getByText('21')).toBeTruthy();
+
+        // 初回リピートの発火
+        await act(async () => {
+          jest.advanceTimersByTime(1);
+          await Promise.resolve();
+        });
+        expect(screen.getByText('22')).toBeTruthy();
+
+        // 以降は一定間隔で増加し続ける
+        await act(async () => {
+          jest.advanceTimersByTime(120);
+          await Promise.resolve();
+        });
+        expect(screen.getByText('23')).toBeTruthy();
+
+        fireEvent(increaseButton, 'pressOut');
+
+        // 指を離した後はタイマーが止まり、それ以上時間が経過しても増加しない
+        await act(async () => {
+          jest.advanceTimersByTime(1000);
+          await Promise.resolve();
+        });
+        expect(screen.getByText('23')).toBeTruthy();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('does not decrease the value an extra time via the subsequent onPress once auto-repeat has already fired for a long press (境界値: 長押し後のonPressによる二重発火防止)', async () => {
+      jest.useFakeTimers();
+      try {
+        renderSettingsScreen();
+        const decreaseButton = screen.getByLabelText(HOUR_DECREASE_LABEL);
+
+        fireEvent(decreaseButton, 'pressIn');
+        await act(async () => {
+          jest.advanceTimersByTime(500);
+          await Promise.resolve();
+        });
+        expect(screen.getByText('20')).toBeTruthy();
+
+        fireEvent(decreaseButton, 'pressOut');
+        // 実機では指を離した後にonPressも届くが、長押しで既に減算済みのため無視される
+        fireEvent(decreaseButton, 'press');
+
+        expect(screen.getByText('20')).toBeTruthy();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('still increases the value exactly once for a quick tap that is released before the auto-repeat delay elapses (正常系: 通常のタップは単発増加のまま)', async () => {
+      jest.useFakeTimers();
+      try {
+        renderSettingsScreen();
+        const increaseButton = screen.getByLabelText(MINUTE_INCREASE_LABEL);
+
+        fireEvent(increaseButton, 'pressIn');
+        fireEvent(increaseButton, 'pressOut');
+        fireEvent(increaseButton, 'press');
+
+        expect(screen.getByText('05')).toBeTruthy();
+
+        // 既にpressOutでタイマーが止まっているため、その後時間が経過しても増加しない
+        await act(async () => {
+          jest.advanceTimersByTime(2000);
+          await Promise.resolve();
+        });
+        expect(screen.getByText('05')).toBeTruthy();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('stops the pending auto-repeat timer on unmount so no state update on an unmounted component is attempted (アンマウント時のクリーンアップ)', async () => {
+      jest.useFakeTimers();
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const { unmount } = renderSettingsScreen();
+        const increaseButton = screen.getByLabelText(HOUR_INCREASE_LABEL);
+
+        fireEvent(increaseButton, 'pressIn');
+        unmount();
+
+        // アンマウント前に長押し開始しているため、クリーンアップされていなければ
+        // ここでアンマウント済みコンポーネントへのstate更新が発生してしまう
+        act(() => {
+          jest.advanceTimersByTime(5000);
+        });
+
+        expect(consoleErrorSpy).not.toHaveBeenCalled();
+      } finally {
+        consoleErrorSpy.mockRestore();
+        jest.useRealTimers();
+      }
+    });
+  });
+
   it('re-schedules the reminder with the new time via AsyncStorage persistence when ON and permission is granted (正常系: 通知許可済みでの時刻変更)', async () => {
     mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('granted');
     await AsyncStorage.setItem(
