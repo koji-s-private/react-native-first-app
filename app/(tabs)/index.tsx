@@ -414,6 +414,9 @@ export default function HomeScreen() {
   // 初回のloadEntries完了までtrueの読み込み中フラグ。useFocusEffectで再フォーカス時にも
   // loadEntriesは呼ばれるが、都度trueに戻すとローディング表示がちらつくため一方向にのみ遷移させる
   const [isLoading, setIsLoading] = useState(true);
+  // 直近のloadEntriesが読み込みエラーだったか。「日記が0件」と見た目上区別できるよう、
+  // 空状態メッセージの表示を切り替えるために使う
+  const [hasLoadError, setHasLoadError] = useState(false);
   const [draft, setDraft] = useState('');
   // 下書き復元が完了したか。完了前に自動保存effectを動かすと、初期値(空文字列)で
   // 保存済みの下書きを誤って上書き・削除してしまうため、完了までは自動保存の対象外にする
@@ -494,8 +497,16 @@ export default function HomeScreen() {
       await writeQueueRef.current;
     }
     // getAllDiaryEntriesはストレージが空・壊れている場合も例外を投げず空配列を返すため、
-    // ここで個別にtry/catchする必要はない
-    setEntries(await getAllDiaryEntries());
+    // ここで個別にtry/catchする必要はない。読み込みエラーの有無はonErrorで受け取り、
+    // 「日記0件」の空状態表示と区別する
+    let loadFailed = false;
+    const loadedEntries = await getAllDiaryEntries({
+      onError: () => {
+        loadFailed = true;
+      },
+    });
+    setEntries(loadedEntries);
+    setHasLoadError(loadFailed);
     // 初回読み込み完了を示す(isLoadingは一方向にのみ遷移し、trueへ戻す処理は無い)
     setIsLoading(false);
   }, []);
@@ -1186,6 +1197,13 @@ export default function HomeScreen() {
                 // 初回読み込み中はentriesが空配列なだけで空状態メッセージが誤表示されないよう、ローディング表示にする
                 <ThemedView style={styles.emptyState}>
                   <ActivityIndicator color={tintColor} />
+                </ThemedView>
+              ) : entries.length === 0 && hasLoadError ? (
+                // 読み込み失敗時は「日記が0件」と見た目上区別が付かなくなるため、専用のメッセージを表示する
+                <ThemedView style={styles.emptyState}>
+                  <ThemedText style={[styles.emptyStateText, { color: errorColor }]}>
+                    日記データを読み込めませんでした。アプリを再起動しても解決しない場合は端末の復元設定をご確認ください。
+                  </ThemedText>
                 </ThemedView>
               ) : entries.length === 0 ? (
                 // 日記が1件も無い場合、案内メッセージを表示する(カレンダー自体は書く導線として表示し続ける)

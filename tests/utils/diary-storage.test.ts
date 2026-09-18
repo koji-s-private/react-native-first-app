@@ -386,6 +386,42 @@ describe('getAllDiaryEntries', () => {
     await expect(getAllDiaryEntries()).resolves.toEqual([]);
   });
 
+  it('logs the underlying error when all entries fail to load, so it stays distinguishable from a truly empty state (異常系: 全滅時のログ)', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const thrown = new Error('storage read error');
+    jest.spyOn(AsyncStorage, 'getAllKeys').mockRejectedValueOnce(thrown);
+
+    await getAllDiaryEntries();
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy.mock.calls[0][0]).toContain('getAllDiaryEntries');
+    expect(errorSpy.mock.calls[0][1]).toBe(thrown);
+    errorSpy.mockRestore();
+  });
+
+  it('notifies the caller-supplied onError callback when all entries fail to load (異常系: onErrorコールバック)', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    const thrown = new Error('storage read error');
+    jest.spyOn(AsyncStorage, 'getAllKeys').mockRejectedValueOnce(thrown);
+    const onError = jest.fn();
+
+    const result = await getAllDiaryEntries({ onError });
+
+    expect(result).toEqual([]);
+    expect(onError).toHaveBeenCalledWith(thrown);
+  });
+
+  it('does not call onError when entries load successfully (正常系: onErrorが呼ばれないこと)', async () => {
+    for (const entry of sampleEntries) {
+      await seedDiaryEntry(entry);
+    }
+    const onError = jest.fn();
+
+    await getAllDiaryEntries({ onError });
+
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   describe('レガシーキーからの移行(マイグレーション)', () => {
     it('migrates entries from the legacy single-key (encrypted) storage into per-entry keys (正常系)', async () => {
       const key = await getOrCreateEncryptionKey();

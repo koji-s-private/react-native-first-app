@@ -104,13 +104,25 @@ export async function clearAllDiaryEntries(): Promise<void> {
   await AsyncStorage.removeItem(DIARY_ENTRIES_STORAGE_KEY);
 }
 
+export type GetAllDiaryEntriesOptions = {
+  /**
+   * 暗号鍵の取得失敗やストレージ破損など全件に影響する例外が発生した際に呼ばれる。
+   * 戻り値は後方互換のため引き続き空配列にするので、「0件」と「読み込みエラー」を
+   * 呼び出し元(UI)で区別したい場合にこれを使う。
+   */
+  onError?: (error: unknown) => void;
+};
+
 /**
  * 保存済みの日記データを全件取得し、必要であれば復号して返す。一覧表示とエクスポート機能の
  * 両方が利用する共通ロジック。AsyncStorage.getAllKeys()の順序は保証されないため、
  * `createdAt`の降順(新しい順、UI側は先頭が最新という前提)に並べ替える。
- * ストレージが空・壊れている・復号失敗のいずれの場合も例外を投げず空配列を返す。
+ * ストレージが空・壊れている・復号失敗のいずれの場合も例外を投げず空配列を返すが、
+ * 発生した例外は必ずログに残し、`options.onError`が渡されていればそちらにも通知する。
  */
-export async function getAllDiaryEntries(): Promise<DiaryEntry[]> {
+export async function getAllDiaryEntries(
+  options?: GetAllDiaryEntriesOptions,
+): Promise<DiaryEntry[]> {
   try {
     await migrateLegacyEntriesIfNeeded();
 
@@ -173,8 +185,10 @@ export async function getAllDiaryEntries(): Promise<DiaryEntry[]> {
     });
 
     return validEntries;
-  } catch {
-    // ストレージが壊れている・復号失敗の場合は空配列を返す
+  } catch (error) {
+    // 「本当に0件」と見た目上区別が付かなくなるため、原因調査用に必ずログへ残す
+    console.error('getAllDiaryEntries: 日記データの読み込みに失敗しました', error);
+    options?.onError?.(error);
     return [];
   }
 }
