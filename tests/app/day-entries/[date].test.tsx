@@ -533,29 +533,99 @@ describe('DayEntriesScreen', () => {
       );
     });
 
-    it('saves a new entry anchored to local noon of the displayed date, immediately reflects it in the list, persists it, and closes the modal (正常系)', async () => {
-      render(<DayEntriesScreen />);
-      await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
-      await openNewEntryComposer();
+    it('saves a new entry anchored to the displayed date but with the actual save-moment time as createdAt, immediately reflects it in the list, persists it, and closes the modal (正常系)', async () => {
+      jest.useFakeTimers();
+      try {
+        jest.setSystemTime(new Date(2026, 7, 15, 9, 34, 17));
 
-      fireEvent.changeText(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL), '新規登録した日記');
-      fireEvent.press(screen.getByText(NEW_ENTRY_SAVE_LABEL));
+        render(<DayEntriesScreen />);
+        await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+        await openNewEntryComposer();
 
-      // 永続化(AsyncStorage.setItem)の完了を待たず、楽観的更新により即座に一覧へ反映される
-      expect(await screen.findByText('新規登録した日記')).toBeTruthy();
-      // createdAtは実行時刻ではなく、この画面が表示している日付のローカル正午になる
-      expect(screen.getByText('2026/08/15 12:00')).toBeTruthy();
+        fireEvent.changeText(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL), '新規登録した日記');
+        fireEvent.press(screen.getByText(NEW_ENTRY_SAVE_LABEL));
 
-      // 実機の暗号化処理はテスト環境でも一定の実時間を要するため、既定の待機時間(1000ms)を延長する
-      await waitFor(() => expect(screen.queryByText(NEW_ENTRY_HEADING)).toBeNull(), {
-        timeout: 5000,
-      });
+        // 永続化(AsyncStorage.setItem)の完了を待たず、楽観的更新により即座に一覧へ反映される
+        expect(await screen.findByText('新規登録した日記')).toBeTruthy();
+        // createdAtの日付部分はこの画面が表示している日付に固定されるが、時分は正午固定ではなく
+        // 実際に保存した瞬間の時刻になる
+        expect(screen.getByText('2026/08/15 09:34')).toBeTruthy();
 
-      // 再フォーカスによりAsyncStorageから読み直しても消えないことで、永続化されたことを確認する
-      act(() => {
-        triggerRefocus();
-      });
-      expect(await screen.findByText('新規登録した日記')).toBeTruthy();
+        // 実機の暗号化処理はテスト環境でも一定の実時間を要するため、既定の待機時間(1000ms)を延長する
+        await waitFor(() => expect(screen.queryByText(NEW_ENTRY_HEADING)).toBeNull(), {
+          timeout: 5000,
+        });
+
+        // 再フォーカスによりAsyncStorageから読み直しても消えないことで、永続化されたことを確認する
+        act(() => {
+          triggerRefocus();
+        });
+        expect(await screen.findByText('新規登録した日記')).toBeTruthy();
+      } finally {
+        jest.useRealTimers();
+      }
+    }, 15000); // waitForのtimeout(5000ms)にマージンを持たせ、CI環境の負荷によるflaky失敗を防ぐ
+
+    it('uses the save-moment time-of-day (not a fixed noon) for createdAt on each save, so consecutive saves at different times produce different displayed times (境界値)', async () => {
+      jest.useFakeTimers();
+      try {
+        jest.setSystemTime(new Date(2026, 7, 15, 9, 34, 17));
+
+        render(<DayEntriesScreen />);
+        await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+        await openNewEntryComposer();
+
+        fireEvent.changeText(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL), '1件目の新規日記');
+        fireEvent.press(screen.getByText(NEW_ENTRY_SAVE_LABEL));
+        expect(await screen.findByText('2026/08/15 09:34')).toBeTruthy();
+        await waitFor(() => expect(screen.queryByText(NEW_ENTRY_HEADING)).toBeNull(), {
+          timeout: 5000,
+        });
+
+        jest.setSystemTime(new Date(2026, 7, 15, 21, 12, 0));
+
+        await openNewEntryComposer();
+        fireEvent.changeText(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL), '2件目の新規日記');
+        fireEvent.press(screen.getByText(NEW_ENTRY_SAVE_LABEL));
+
+        expect(await screen.findByText('2026/08/15 21:12')).toBeTruthy();
+        // 1件目の時刻表示は変わらず残っており、登録順に異なる時刻で記録されたことが分かる
+        expect(screen.getByText('2026/08/15 09:34')).toBeTruthy();
+      } finally {
+        jest.useRealTimers();
+      }
+    }, 15000); // waitForのtimeout(5000ms)にマージンを持たせ、CI環境の負荷によるflaky失敗を防ぐ
+
+    it('keeps createdAt on the displayed date even when saving near the real-clock day boundary (境界値: 0時台・23時台)', async () => {
+      jest.useFakeTimers();
+      try {
+        // 表示している日付(2026-08-15)とは別日の23時台に保存しても、記録される日付は
+        // 表示日付のまま(実行時刻の日付には引きずられない)ことを確認する
+        jest.setSystemTime(new Date(2026, 7, 20, 23, 50, 0));
+
+        render(<DayEntriesScreen />);
+        await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+        await openNewEntryComposer();
+
+        fireEvent.changeText(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL), '23時台に登録した日記');
+        fireEvent.press(screen.getByText(NEW_ENTRY_SAVE_LABEL));
+
+        expect(await screen.findByText('2026/08/15 23:50')).toBeTruthy();
+        await waitFor(() => expect(screen.queryByText(NEW_ENTRY_HEADING)).toBeNull(), {
+          timeout: 5000,
+        });
+
+        // 続けて0時台に保存しても、記録される日付は変わらず表示日付のまま
+        jest.setSystemTime(new Date(2026, 7, 21, 0, 5, 0));
+
+        await openNewEntryComposer();
+        fireEvent.changeText(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL), '0時台に登録した日記');
+        fireEvent.press(screen.getByText(NEW_ENTRY_SAVE_LABEL));
+
+        expect(await screen.findByText('2026/08/15 00:05')).toBeTruthy();
+      } finally {
+        jest.useRealTimers();
+      }
     }, 15000); // waitForのtimeout(5000ms)にマージンを持たせ、CI環境の負荷によるflaky失敗を防ぐ
 
     it('disables the save button while the draft is empty or whitespace-only, and does not call AsyncStorage.setItem (異常系/境界値)', async () => {
