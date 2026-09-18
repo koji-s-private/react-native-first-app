@@ -42,16 +42,14 @@ import {
   getWeekDays,
   toDateKey,
 } from '@/utils/diary-date';
+import {
+  DIARY_DRAFT_STORAGE_KEY,
+  DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX,
+  loadDraftText,
+  saveDraftText,
+} from '@/utils/diary-draft-storage';
 import { BODY_MAX_LENGTH, splitIntoGraphemes, truncateToBodyMaxLength } from '@/utils/diary-text';
 import { getAllDiaryEntries, saveDiaryEntry, type DiaryEntry } from '@/utils/diary-storage';
-
-// 保存前の下書きを自動保存するAsyncStorageキー(保存済みエントリの個別キーとは別。utils/diary-storage.ts参照)
-const DIARY_DRAFT_STORAGE_KEY = 'diary-draft';
-
-// 新規作成モーダルの下書きを自動保存するAsyncStorageキーの接頭辞。対象日付ごとにキーを分け、
-// モーダルを閉じて別の日付で開き直しても下書きが混ざらないようにする(実際のキーはこの接頭辞+日付キー。
-// app/edit-entry/[id].tsxのDIARY_EDIT_DRAFT_STORAGE_KEY_PREFIXと同じ設計)
-const DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX = 'diary-new-entry-draft-';
 
 // 下書きの自動保存をデバウンスする間隔(ミリ秒)
 const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
@@ -536,7 +534,7 @@ export default function HomeScreen() {
     let isCancelled = false;
     (async () => {
       try {
-        const storedDraft = await AsyncStorage.getItem(DIARY_DRAFT_STORAGE_KEY);
+        const storedDraft = await loadDraftText(DIARY_DRAFT_STORAGE_KEY);
         if (!isCancelled && storedDraft && !draftEditedRef.current) {
           setDraft(storedDraft);
         }
@@ -562,7 +560,7 @@ export default function HomeScreen() {
     }
     const timer = setTimeout(() => {
       const persist = draft
-        ? AsyncStorage.setItem(DIARY_DRAFT_STORAGE_KEY, draft)
+        ? saveDraftText(DIARY_DRAFT_STORAGE_KEY, draft)
         : AsyncStorage.removeItem(DIARY_DRAFT_STORAGE_KEY);
       // 下書きの自動保存は補助的な処理のため、失敗しても静かに無視する(本保存の失敗はhandleSave側で伝える)
       persist.catch(() => {});
@@ -580,7 +578,7 @@ export default function HomeScreen() {
     let isCancelled = false;
     (async () => {
       try {
-        const storedDraft = await AsyncStorage.getItem(
+        const storedDraft = await loadDraftText(
           DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX + newEntryDate,
         );
         if (!isCancelled && storedDraft) {
@@ -611,7 +609,7 @@ export default function HomeScreen() {
     const timer = setTimeout(() => {
       newEntryDraftAutoSaveTimerRef.current = null;
       const persist = newEntryDraft
-        ? AsyncStorage.setItem(draftKey, newEntryDraft)
+        ? saveDraftText(draftKey, newEntryDraft)
         : AsyncStorage.removeItem(draftKey);
       // 下書きの自動保存は補助的な処理のため、失敗しても静かに無視する(本保存の失敗はhandleSaveNewEntry側で伝える)
       persist.catch(() => {});

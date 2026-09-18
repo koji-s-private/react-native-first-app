@@ -1,6 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
+import {
+  DIARY_DRAFT_STORAGE_KEY,
+  DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX,
+  DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX,
+} from '@/utils/diary-draft-storage';
 import { decryptText, encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
 import {
   DIARY_ENTRIES_STORAGE_KEY,
@@ -112,6 +117,27 @@ describe('clearAllDiaryEntries', () => {
     await clearAllDiaryEntries();
 
     expect(await AsyncStorage.getItem('other-unrelated-key')).toBe('should survive');
+  });
+
+  it('also removes unsaved draft keys for the composer, new-entry modal, and edit screen (下書きキーも削除対象に含まれることの確認)', async () => {
+    await seedDiaryEntry({ id: '1', text: '1件目', createdAt: '2026-01-01T00:00:00.000Z' });
+    await AsyncStorage.setItem(DIARY_DRAFT_STORAGE_KEY, 'encrypted:v1:dummy-composer-draft');
+    await AsyncStorage.setItem(
+      `${DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX}2026-01-05`,
+      'encrypted:v1:dummy-new-entry-draft',
+    );
+    await AsyncStorage.setItem(
+      `${DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX}entry-1`,
+      'encrypted:v1:dummy-edit-draft',
+    );
+
+    await clearAllDiaryEntries();
+
+    expect(await AsyncStorage.getItem(DIARY_DRAFT_STORAGE_KEY)).toBeNull();
+    expect(
+      await AsyncStorage.getItem(`${DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX}2026-01-05`),
+    ).toBeNull();
+    expect(await AsyncStorage.getItem(`${DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX}entry-1`)).toBeNull();
   });
 
   it('does not throw when there is no diary data to delete yet (境界値: 未保存状態での削除)', async () => {
