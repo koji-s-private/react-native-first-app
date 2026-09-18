@@ -269,7 +269,7 @@ function DiaryReminderSection() {
           value={hour}
           onDecrease={() => handleHourChange(-1)}
           onIncrease={() => handleHourChange(1)}
-          disabled={isTogglePending || isTimePending}
+          disabled={isTogglePending || isTimePending || permissionStatus === 'denied'}
         />
         <ThemedText style={styles.reminderTimeSeparator}>:</ThemedText>
         <TimeStepper
@@ -277,7 +277,7 @@ function DiaryReminderSection() {
           value={minute}
           onDecrease={() => handleMinuteChange(-REMINDER_MINUTE_STEP)}
           onIncrease={() => handleMinuteChange(REMINDER_MINUTE_STEP)}
-          disabled={isTogglePending || isTimePending}
+          disabled={isTogglePending || isTimePending || permissionStatus === 'denied'}
         />
       </ThemedView>
       {permissionStatus === 'denied' && (
