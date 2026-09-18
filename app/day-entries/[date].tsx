@@ -12,7 +12,7 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import {
-  buildCreatedAtForDateKey,
+  buildCreatedAtForDateKeyAtTime,
   formatDateHeading,
   formatEntryDateTime,
   toDateKey,
@@ -105,8 +105,8 @@ export default function DayEntriesScreen() {
     setIsComposerOpen(false);
   }, []);
 
-  // 新規作成モーダルの保存処理本体。createdAtはその瞬間ではなく、この画面が表示している
-  // 日付基準(buildCreatedAtForDateKey)にする(app/(tabs)/index.tsxのhandleSaveNewEntryと同じ方針)
+  // 新規作成モーダルの保存処理本体。createdAtの日付部分はこの画面が表示している日付に
+  // 固定しつつ、時分秒は実際に保存した瞬間の時刻にする(buildCreatedAtForDateKeyAtTime)
   const handlePersistNewEntry = useCallback(
     async (trimmed: string) => {
       if (!date) {
@@ -115,7 +115,7 @@ export default function DayEntriesScreen() {
       const newEntry: DiaryEntry = {
         id: randomUUID(),
         text: trimmed,
-        createdAt: buildCreatedAtForDateKey(date),
+        createdAt: buildCreatedAtForDateKeyAtTime(date),
       };
       // 体感速度を落とさないよう、即座に現在のstateから計算した内容で楽観的にUIを更新する
       // (この画面の一覧は時刻の昇順のため、末尾に追加する)
