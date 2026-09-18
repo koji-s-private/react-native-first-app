@@ -1203,7 +1203,41 @@ describe('日記データをインポートボタン(データ管理セクショ
     await waitFor(() => expect(Alert.alert).toHaveBeenCalledWith(...IMPORT_FAILURE_ALERT));
   });
 
-  it('shows a failure alert when saving an imported entry fails (異常系: 保存失敗)', async () => {
+  it('shows a failure alert including the count saved so far when saving an imported entry fails (異常系: 保存失敗時に成功件数を通知)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+      canceled: false,
+      assets: [pickedAsset],
+    });
+    const importedEntries = [
+      { id: '1', text: '取り込む日記1', createdAt: '2026-02-01T00:00:00.000Z' },
+      { id: '2', text: '取り込む日記2', createdAt: '2026-02-02T00:00:00.000Z' },
+      { id: '3', text: '取り込む日記3', createdAt: '2026-02-03T00:00:00.000Z' },
+    ];
+    mockedFileSystem.__mockText.mockResolvedValueOnce(JSON.stringify(importedEntries));
+    // 1・2件目は成功させ、3件目でのみ失敗させることで途中失敗を再現する
+    jest
+      .spyOn(AsyncStorage, 'setItem')
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('write error'));
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+    });
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalledTimes(1));
+    await pressAlertButtonByLabel('取り込む');
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenLastCalledWith(
+        'インポートに失敗しました',
+        '3件中2件を取り込んだ時点で失敗しました。もう一度お試しください。',
+      ),
+    );
+  });
+
+  it('shows a failure alert with 0 saved when the very first entry fails to save (境界値: 1件目で失敗)', async () => {
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
       canceled: false,
@@ -1224,7 +1258,7 @@ describe('日記データをインポートボタン(データ管理セクショ
     await waitFor(() =>
       expect(Alert.alert).toHaveBeenLastCalledWith(
         'インポートに失敗しました',
-        'もう一度お試しください。',
+        '1件中0件を取り込んだ時点で失敗しました。もう一度お試しください。',
       ),
     );
   });

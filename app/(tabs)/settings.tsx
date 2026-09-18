@@ -532,15 +532,22 @@ function ImportDiaryDataButton() {
   const [isImporting, setIsImporting] = useState(false);
 
   const importEntries = useCallback(async (entries: DiaryEntry[]) => {
+    // 逐次保存のため、途中で失敗しても直前までのエントリは保存済みのまま残る。
+    // 「全く反映されなかった」という誤認を防ぐため、失敗時は成功済み件数を伝える。
+    let succeededCount = 0;
     try {
       // 暗号鍵未生成の状態で並列保存すると、各呼び出しが別々の鍵を生成し合って
       // 書き込みを取り合い、データが消失し得るため、あえて逐次保存にしている
       for (const entry of entries) {
         await saveDiaryEntry(entry);
+        succeededCount += 1;
       }
       Alert.alert('インポートが完了しました', `${entries.length}件の日記データを取り込みました。`);
     } catch {
-      Alert.alert('インポートに失敗しました', 'もう一度お試しください。');
+      Alert.alert(
+        'インポートに失敗しました',
+        `${entries.length}件中${succeededCount}件を取り込んだ時点で失敗しました。もう一度お試しください。`,
+      );
     } finally {
       setIsImporting(false);
     }
