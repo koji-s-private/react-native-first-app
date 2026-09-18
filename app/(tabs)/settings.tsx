@@ -164,17 +164,21 @@ function TimeStepper({
         disabled={disabled}
         accessibilityRole="button"
         accessibilityLabel={`${label}を減らす`}
-        style={[styles.reminderStepButton, { borderColor: tintColor }]}
+        accessibilityState={{ disabled }}
+        style={[styles.reminderStepButton, { borderColor: tintColor, opacity: disabled ? 0.4 : 1 }]}
       >
         <ThemedText style={[styles.reminderStepButtonText, { color: tintColor }]}>−</ThemedText>
       </Pressable>
-      <ThemedText style={styles.reminderStepperValue}>{formattedValue}</ThemedText>
+      <ThemedText style={[styles.reminderStepperValue, { opacity: disabled ? 0.4 : 1 }]}>
+        {formattedValue}
+      </ThemedText>
       <Pressable
         onPress={onIncrease}
         disabled={disabled}
         accessibilityRole="button"
         accessibilityLabel={`${label}を増やす`}
-        style={[styles.reminderStepButton, { borderColor: tintColor }]}
+        accessibilityState={{ disabled }}
+        style={[styles.reminderStepButton, { borderColor: tintColor, opacity: disabled ? 0.4 : 1 }]}
       >
         <ThemedText style={[styles.reminderStepButtonText, { color: tintColor }]}>+</ThemedText>
       </Pressable>
@@ -269,7 +273,7 @@ function DiaryReminderSection() {
           value={hour}
           onDecrease={() => handleHourChange(-1)}
           onIncrease={() => handleHourChange(1)}
-          disabled={isTogglePending || isTimePending}
+          disabled={isTogglePending || isTimePending || permissionStatus === 'denied'}
         />
         <ThemedText style={styles.reminderTimeSeparator}>:</ThemedText>
         <TimeStepper
@@ -277,7 +281,7 @@ function DiaryReminderSection() {
           value={minute}
           onDecrease={() => handleMinuteChange(-REMINDER_MINUTE_STEP)}
           onIncrease={() => handleMinuteChange(REMINDER_MINUTE_STEP)}
-          disabled={isTogglePending || isTimePending}
+          disabled={isTogglePending || isTimePending || permissionStatus === 'denied'}
         />
       </ThemedView>
       {permissionStatus === 'denied' && (
