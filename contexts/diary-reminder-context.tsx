@@ -83,10 +83,45 @@ export function DiaryReminderProvider({ children }: PropsWithChildren) {
   const [permissionStatus, setPermissionStatus] =
     useState<ReminderPermissionStatus>('undetermined');
 
+  const persist = useCallback((next: DiaryReminderSettings) => {
+    // 保存の完了を待たずに即座に画面へ反映する(theme-preference-contextと同じ方針。
+    // 保存に失敗しても次回起動時に設定がリセットされる程度で、致命的な不具合にはならない)
+    setSettings(next);
+    AsyncStorage.setItem(DIARY_REMINDER_STORAGE_KEY, JSON.stringify(next)).catch(() => {});
+  }, []);
+
+  // AppStateのリスナーや起動時の初期化処理からは常に最新のsettings/permissionStatusを
+  // 参照したいが、リスナー自体を都度re-subscribeするのは避けたいため、依存配列に含めず
+  // refで最新値を追う
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const permissionStatusRef = useRef(permissionStatus);
+  permissionStatusRef.current = permissionStatus;
+
   // 起動時にAsyncStorageから前回の設定と、現在の通知許可状態(OSの設定画面で後から
-  // 変更された可能性もあるため毎回取得し直す)を読み込む
+  // 変更された可能性もあるため毎回取得し直す)を読み込む。この2つの読み込みは並行して走り、
+  // どちらが先に解決するかは保証されない。「許可がdeniedなのにenabled=trueが復元される」状態を
+  // どちらの解決順でも補正できるよう、Reactの再描画を挟まないローカル変数で双方の結果を追跡する
   useEffect(() => {
     let isMounted = true;
+    let loadedSettings: DiaryReminderSettings | null = null;
+    let loadedPermissionStatus: ReminderPermissionStatus | null = null;
+
+    const correctIfPermissionDenied = (): boolean => {
+      if (
+        loadedSettings === null ||
+        loadedPermissionStatus !== 'denied' ||
+        !loadedSettings.enabled
+      ) {
+        return false;
+      }
+      // アプリを完全終了した状態でOS設定から通知許可を取り消された場合、フォアグラウンド
+      // 復帰時の整合ロジック(下記useEffect)は`granted`からの変化しか検知できないため、
+      // 起動時の復元時にもenabledを実態に合わせて補正する
+      persist({ ...loadedSettings, enabled: false });
+      cancelDailyReminderAsync().catch(() => {});
+      return true;
+    };
 
     AsyncStorage.getItem(DIARY_REMINDER_STORAGE_KEY)
       .then((value) => {
@@ -94,7 +129,11 @@ export function DiaryReminderProvider({ children }: PropsWithChildren) {
           return;
         }
         const parsed: unknown = JSON.parse(value);
-        if (isDiaryReminderSettings(parsed)) {
+        if (!isDiaryReminderSettings(parsed)) {
+          return;
+        }
+        loadedSettings = parsed;
+        if (!correctIfPermissionDenied()) {
           setSettings(parsed);
         }
       })
@@ -104,9 +143,12 @@ export function DiaryReminderProvider({ children }: PropsWithChildren) {
 
     getReminderPermissionStatusAsync()
       .then((status) => {
-        if (isMounted) {
-          setPermissionStatus(status);
+        if (!isMounted) {
+          return;
         }
+        setPermissionStatus(status);
+        loadedPermissionStatus = status;
+        correctIfPermissionDenied();
       })
       .catch(() => {
         // 取得に失敗した場合は「未確認」のまま扱う
@@ -115,22 +157,7 @@ export function DiaryReminderProvider({ children }: PropsWithChildren) {
     return () => {
       isMounted = false;
     };
-  }, []);
-
-  const persist = useCallback((next: DiaryReminderSettings) => {
-    // 保存の完了を待たずに即座に画面へ反映する(theme-preference-contextと同じ方針。
-    // 保存に失敗しても次回起動時に設定がリセットされる程度で、致命的な不具合にはならない)
-    setSettings(next);
-    AsyncStorage.setItem(DIARY_REMINDER_STORAGE_KEY, JSON.stringify(next)).catch(() => {});
-  }, []);
-
-  // AppStateのリスナー(マウント時に一度だけ登録する)からは常に最新のsettings/
-  // permissionStatusを参照したいが、リスナー自体を都度re-subscribeするのは避けたいため、
-  // 依存配列に含めずrefで最新値を追う
-  const settingsRef = useRef(settings);
-  settingsRef.current = settings;
-  const permissionStatusRef = useRef(permissionStatus);
-  permissionStatusRef.current = permissionStatus;
+  }, [persist]);
 
   // OSの設定画面で通知許可が取り消された場合、アプリ再起動まで気づけないと「ONに見えるのに
   // 通知が届かない」状態が放置されてしまう。フォアグラウンド復帰時(active)に限って許可状態を

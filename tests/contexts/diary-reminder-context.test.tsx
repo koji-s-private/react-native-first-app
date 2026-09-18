@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { act, renderHook } from '@testing-library/react-native';
+import { act, renderHook, waitFor } from '@testing-library/react-native';
 import type { PropsWithChildren } from 'react';
 import { AppState } from 'react-native';
 
@@ -135,6 +135,44 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
 
     // 不正値のため既定値のまま(hour=24は無効)
     expect(result.current.hour).toBe(21);
+  });
+
+  it('corrects a stored enabled=true back to false and cancels the schedule when the permission is already denied on mount (異常系: 完全終了中に許可が取り消された状態での起動)', async () => {
+    mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('denied');
+    await AsyncStorage.setItem(
+      DIARY_REMINDER_STORAGE_KEY,
+      JSON.stringify({ enabled: true, hour: 8, minute: 30 }),
+    );
+
+    const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+
+    await waitFor(() => expect(result.current.hour).toBe(8));
+
+    expect(result.current.enabled).toBe(false);
+    expect(result.current.minute).toBe(30);
+    expect(result.current.permissionStatus).toBe('denied');
+    expect(mockedNotificationsUtil.cancelDailyReminderAsync).toHaveBeenCalledTimes(1);
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+      DIARY_REMINDER_STORAGE_KEY,
+      JSON.stringify({ enabled: false, hour: 8, minute: 30 }),
+    );
+  });
+
+  it('keeps a stored enabled=true unchanged when the permission is granted on mount (正常系: 起動時に許可済みの場合はenabledを維持)', async () => {
+    mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+    await AsyncStorage.setItem(
+      DIARY_REMINDER_STORAGE_KEY,
+      JSON.stringify({ enabled: true, hour: 8, minute: 30 }),
+    );
+
+    const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.enabled).toBe(true);
+    expect(mockedNotificationsUtil.cancelDailyReminderAsync).not.toHaveBeenCalled();
   });
 
   it('falls back to the default without crashing when AsyncStorage.getItem rejects (異常系: 読み込み失敗)', async () => {
