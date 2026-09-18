@@ -56,6 +56,16 @@ function getAppStateChangeListener(): (nextAppState: string) => void {
   return call[1];
 }
 
+// AsyncStorageの復元と許可状態取得、どちらが先に解決するかをテストごとに明示的に
+// 制御するためのヘルパー。Promiseの解決順を握る側のテストコードから`resolve`を呼び出す
+function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 describe('DiaryReminderProvider / useDiaryReminder', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
@@ -173,6 +183,102 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
 
     expect(result.current.enabled).toBe(true);
     expect(mockedNotificationsUtil.cancelDailyReminderAsync).not.toHaveBeenCalled();
+  });
+
+  it('leaves a stored enabled=false untouched when the permission is denied on mount (境界値: 元々OFFの場合はdeniedでも何も変更しない)', async () => {
+    mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('denied');
+    await AsyncStorage.setItem(
+      DIARY_REMINDER_STORAGE_KEY,
+      JSON.stringify({ enabled: false, hour: 8, minute: 30 }),
+    );
+    jest.clearAllMocks();
+    mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('denied');
+
+    const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+
+    await waitFor(() => expect(result.current.hour).toBe(8));
+
+    expect(result.current.enabled).toBe(false);
+    expect(result.current.minute).toBe(30);
+    expect(mockedNotificationsUtil.cancelDailyReminderAsync).not.toHaveBeenCalled();
+    // 変更が無い場合はAsyncStorageへの書き戻し(persist)自体を行わないことも確認する
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('corrects enabled back to false when the settings restore resolves before the permission lookup (異常系: 設定復元が先に解決する順序でも補正される)', async () => {
+    const settingsDeferred = createDeferred<string | null>();
+    const permissionDeferred = createDeferred<'denied'>();
+    jest.spyOn(AsyncStorage, 'getItem').mockReturnValueOnce(settingsDeferred.promise);
+    mockedNotificationsUtil.getReminderPermissionStatusAsync.mockReturnValueOnce(
+      permissionDeferred.promise,
+    );
+
+    const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+
+    // 先に設定復元だけを解決させる。この時点では許可状態が未取得のため補正されず、
+    // 保存されていたenabled=trueがそのまま反映される
+    await act(async () => {
+      settingsDeferred.resolve(JSON.stringify({ enabled: true, hour: 8, minute: 30 }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.enabled).toBe(true);
+    expect(mockedNotificationsUtil.cancelDailyReminderAsync).not.toHaveBeenCalled();
+
+    // 後から許可状態(denied)が解決すると、矛盾を検知してenabledをfalseへ補正する
+    await act(async () => {
+      permissionDeferred.resolve('denied');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.enabled).toBe(false);
+    expect(result.current.hour).toBe(8);
+    expect(result.current.minute).toBe(30);
+    expect(mockedNotificationsUtil.cancelDailyReminderAsync).toHaveBeenCalledTimes(1);
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+      DIARY_REMINDER_STORAGE_KEY,
+      JSON.stringify({ enabled: false, hour: 8, minute: 30 }),
+    );
+  });
+
+  it('corrects enabled back to false when the permission lookup resolves before the settings restore (異常系: 許可状態取得が先に解決する順序でも補正される)', async () => {
+    const settingsDeferred = createDeferred<string | null>();
+    const permissionDeferred = createDeferred<'denied'>();
+    jest.spyOn(AsyncStorage, 'getItem').mockReturnValueOnce(settingsDeferred.promise);
+    mockedNotificationsUtil.getReminderPermissionStatusAsync.mockReturnValueOnce(
+      permissionDeferred.promise,
+    );
+
+    const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+
+    // 先に許可状態(denied)だけを解決させる。この時点では設定が未復元のため補正の
+    // しようがなく、permissionStatusの表示のみが更新される
+    await act(async () => {
+      permissionDeferred.resolve('denied');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.permissionStatus).toBe('denied');
+    expect(result.current.enabled).toBe(false);
+    expect(mockedNotificationsUtil.cancelDailyReminderAsync).not.toHaveBeenCalled();
+
+    // 後から設定復元(enabled=true)が解決すると、既にdeniedと分かっているため
+    // 復元と同時に補正され、enabled=trueが画面へ反映されることはない
+    await act(async () => {
+      settingsDeferred.resolve(JSON.stringify({ enabled: true, hour: 8, minute: 30 }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.enabled).toBe(false);
+    expect(result.current.hour).toBe(8);
+    expect(result.current.minute).toBe(30);
+    expect(mockedNotificationsUtil.cancelDailyReminderAsync).toHaveBeenCalledTimes(1);
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+      DIARY_REMINDER_STORAGE_KEY,
+      JSON.stringify({ enabled: false, hour: 8, minute: 30 }),
+    );
   });
 
   it('falls back to the default without crashing when AsyncStorage.getItem rejects (異常系: 読み込み失敗)', async () => {
