@@ -28,6 +28,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { decryptText, encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
 import { buildDiaryEntryKey, type DiaryEntry } from '@/utils/diary-storage';
+import { ACCESSIBILITY_LABEL_TEXT_MAX_LENGTH } from '@/utils/diary-text';
 import {
   CALENDAR_LAYOUT_PREFERENCE_STORAGE_KEY,
   CalendarLayoutPreferenceProvider,
@@ -5290,6 +5291,53 @@ describe('HomeScreen', () => {
 
       fireEvent.press(entryButtons[0]);
       expect(mockPush).toHaveBeenCalledWith(`/day-entries/${todayKey}`);
+    });
+
+    it('truncates a long diary entry text in the accessibilityLabel of a week-view entry while keeping the full text rendered (正常系)', async () => {
+      const todayKey = toDateKey(new Date());
+      const longText = 'あ'.repeat(ACCESSIBILITY_LABEL_TEXT_MAX_LENGTH + 30);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: '1', text: longText, createdAt: buildCreatedAtForDateKey(todayKey) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      await renderInWeekLayout();
+
+      const entryButtons = queryWeekEntryButtons();
+      expect(entryButtons).toHaveLength(1);
+      expect(entryButtons[0].props.accessibilityLabel).toBe(
+        `${formatDateHeading(todayKey)}の日記: ${'あ'.repeat(ACCESSIBILITY_LABEL_TEXT_MAX_LENGTH)}…`,
+      );
+      expect(screen.getByText(longText)).toBeTruthy();
+    });
+
+    it('keeps the full text in the accessibilityLabel of a week-view entry whose text is exactly at the limit, and truncates one grapheme over it (境界値)', async () => {
+      const todayKey = toDateKey(new Date());
+      const now = new Date();
+      const exactText = 'あ'.repeat(ACCESSIBILITY_LABEL_TEXT_MAX_LENGTH);
+      const overText = 'い'.repeat(ACCESSIBILITY_LABEL_TEXT_MAX_LENGTH + 1);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([
+          { id: 'exact', text: exactText, createdAt: isoAt(now, now.getDate(), 7, 0) },
+          { id: 'over', text: overText, createdAt: isoAt(now, now.getDate(), 21, 0) },
+        ]),
+      );
+      jest.clearAllMocks();
+
+      await renderInWeekLayout();
+
+      const entryButtons = queryWeekEntryButtons();
+      expect(entryButtons).toHaveLength(2);
+      expect(entryButtons[0].props.accessibilityLabel).toBe(
+        `${formatDateHeading(todayKey)}の日記: ${exactText}`,
+      );
+      expect(entryButtons[1].props.accessibilityLabel).toBe(
+        `${formatDateHeading(todayKey)}の日記: ${'い'.repeat(ACCESSIBILITY_LABEL_TEXT_MAX_LENGTH)}…`,
+      );
     });
 
     it('sorts multiple diary entries on the same day within the week in ascending order of createdAt (正常系: 作成日時昇順)', async () => {
