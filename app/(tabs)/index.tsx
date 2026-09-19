@@ -6,7 +6,6 @@ import type { ComponentProps } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   FlatList,
   Keyboard,
@@ -25,6 +24,7 @@ import type { CalendarProps, DateData } from 'react-native-calendars';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { DiaryEntryComposerModal } from '@/components/diary-entry-composer-modal';
 import { SaveToast } from '@/components/save-toast';
 import { TabScreenContainer } from '@/components/tab-screen-container';
 import { ThemedText } from '@/components/themed-text';
@@ -438,21 +438,6 @@ export default function HomeScreen() {
   const { isSaving, error: saveError, save: saveDraftEntry } = useSaveDiaryEntry();
   // 新規作成モーダルの対象日付('YYYY-MM-DD')。nullの間はモーダルを閉じている
   const [newEntryDate, setNewEntryDate] = useState<string | null>(null);
-  const [newEntryDraft, setNewEntryDraft] = useState('');
-  // 新規作成モーダルの下書き復元が完了したか。完了前に自動保存effectを動かすと、初期値(空文字列)で
-  // 保存済みの下書きを誤って上書き・削除してしまうため、完了までは自動保存の対象外にする
-  const [isNewEntryDraftRestored, setIsNewEntryDraftRestored] = useState(false);
-  // 新規作成モーダルの下書き自動保存のデバウンスタイマーID。保存成功時・破棄確定時にAsyncStorageの
-  // 下書きキーを削除する際、クリーンアップ(モーダルを閉じるタイミング)を待たずに明示的にキャンセル
-  // するために使う(app/edit-entry/[id].tsxのdraftAutoSaveTimerRefと同じ理由)
-  const newEntryDraftAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // handleSaveNewEntryの実行中かどうか・エラー内容。isSavingと同様に連打による重複保存を防ぐ
-  const {
-    isSaving: isSavingNewEntry,
-    error: newEntryError,
-    setError: setNewEntryError,
-    save: saveNewEntry,
-  } = useSaveDiaryEntry();
   const draftEditRevisionRef = useRef(0);
   // カレンダー外枠(flex: 1で残りスペースを使い切るView)の実測高さ(onLayoutで取得)。
   // 日付グリッドの高さもこの値を基準に算出し、外枠との基準を一致させる
@@ -470,8 +455,7 @@ export default function HomeScreen() {
   const [isMonthPickerVisible, setIsMonthPickerVisible] = useState(false);
   const [pickerYear, setPickerYear] = useState(displayedYear);
 
-  // 新規作成・年月ピッカー、それぞれのモーダルのアニメーション制御(詳細はuseModalSlideTransitionを参照)
-  const newEntryModalTransition = useModalSlideTransition(newEntryDate !== null);
+  // 年月ピッカーモーダルのアニメーション制御(詳細はuseModalSlideTransitionを参照)
   const monthPickerTransition = useModalSlideTransition(isMonthPickerVisible);
 
   const router = useRouter();
@@ -597,56 +581,6 @@ export default function HomeScreen() {
     return () => clearTimeout(timer);
   }, [draft, isDraftRestored]);
 
-  // 新規作成モーダルを開いた際(newEntryDateがセットされた際)、自動保存されていた下書きが
-  // 残っていれば復元する。日付ごとにキーが分かれるため、対象日付が変わるたびにやり直す
-  useEffect(() => {
-    setIsNewEntryDraftRestored(false);
-    if (!newEntryDate) {
-      return;
-    }
-    let isCancelled = false;
-    (async () => {
-      try {
-        const storedDraft = await loadDraftText(
-          DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX + newEntryDate,
-        );
-        if (!isCancelled && storedDraft) {
-          setNewEntryDraft(truncateToBodyMaxLength(storedDraft));
-        }
-      } catch {
-        // 復元を諦めるだけにとどめる。finallyでisNewEntryDraftRestoredをtrueにするため、
-        // 以降の自動保存が無効化されたままにはならない
-      } finally {
-        if (!isCancelled) {
-          setIsNewEntryDraftRestored(true);
-        }
-      }
-    })();
-    return () => {
-      isCancelled = true;
-    };
-  }, [newEntryDate]);
-
-  // newEntryDraftの変更をデバウンスし、入力が止まってからAsyncStorageへ自動保存する
-  // (ホーム画面composerのdraftと同じ方式。対象日付ごとにキーを分ける)
-  useEffect(() => {
-    // 復元完了前は、初期値(空文字列)で保存済みの下書きを上書きしないよう何もしない
-    if (!isNewEntryDraftRestored || !newEntryDate) {
-      return;
-    }
-    const draftKey = DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX + newEntryDate;
-    const timer = setTimeout(() => {
-      newEntryDraftAutoSaveTimerRef.current = null;
-      const persist = newEntryDraft
-        ? saveDraftText(draftKey, newEntryDraft)
-        : AsyncStorage.removeItem(draftKey);
-      // 下書きの自動保存は補助的な処理のため、失敗しても静かに無視する(本保存の失敗はhandleSaveNewEntry側で伝える)
-      persist.catch(() => {});
-    }, DRAFT_AUTO_SAVE_DEBOUNCE_MS);
-    newEntryDraftAutoSaveTimerRef.current = timer;
-    return () => clearTimeout(timer);
-  }, [newEntryDraft, isNewEntryDraftRestored, newEntryDate]);
-
   const handleSave = useCallback(async () => {
     // ロールバック用に保存前の状態をpersist内で退避し、失敗時にonErrorから参照する
     let previousEntries: DiaryEntry[] = [];
@@ -706,96 +640,35 @@ export default function HomeScreen() {
     setDraft(truncateToBodyMaxLength(text));
   }, []);
 
-  // 新規作成用TextInputのonChangeText。draft用と同様にgrapheme単位で切り詰める
-  const handleChangeNewEntryDraft = useCallback((text: string) => {
-    setNewEntryDraft(truncateToBodyMaxLength(text));
-  }, []);
-
-  // 新規作成モーダルを実際に閉じる処理本体(handleCancelNewEntryから、確認不要な場合は直接、
-  // 確認が必要な場合はAlert.alertの「破棄」選択時に呼ばれる)
-  const closeNewEntryModal = useCallback(() => {
-    // 破棄確定時、残っている自動保存下書きも削除する。保留中のデバウンスタイマーを明示的に
-    // キャンセルしてから削除しないと、削除後にタイマーが発火して破棄したはずの内容が
-    // 再度書き込まれてしまう(app/edit-entry/[id].tsxのbeforeRemove「破棄」処理と同じ理由)
-    if (newEntryDraftAutoSaveTimerRef.current !== null) {
-      clearTimeout(newEntryDraftAutoSaveTimerRef.current);
-      newEntryDraftAutoSaveTimerRef.current = null;
-    }
-    if (newEntryDate) {
-      AsyncStorage.removeItem(DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX + newEntryDate).catch(
-        () => {},
-      );
-    }
-    setNewEntryDate(null);
-    setNewEntryDraft('');
-    setNewEntryError(null);
-  }, [newEntryDate, setNewEntryError]);
-
-  // 新規作成モーダルを閉じる(背景タップ・「閉じる」ボタン・Android戻る操作の共通ハンドラ)。
-  // 入力途中の内容がある場合のみ、誤って入力内容を失わないよう確認ダイアログを挟む
-  const handleCancelNewEntry = useCallback(() => {
-    if (!newEntryDraft.trim()) {
-      closeNewEntryModal();
-      return;
-    }
-
-    Alert.alert('変更を破棄しますか?', '入力中の内容は保存されません。', [
-      { text: 'キャンセル', style: 'cancel' },
-      { text: '破棄', style: 'destructive', onPress: closeNewEntryModal },
-    ]);
-  }, [newEntryDraft, closeNewEntryModal]);
-
   // 日記の無い日をタップして開いたモーダルからの新規保存。createdAtの日付部分は選択日付に
   // 固定しつつ、時分秒は実際に保存した瞬間の時刻にする(buildCreatedAtForDateKeyAtTime)
-  const handleSaveNewEntry = useCallback(async () => {
-    // 対象日付が未確定(モーダルが閉じている状態)であれば何もしない
-    if (!newEntryDate) {
-      return;
-    }
-    const targetDateKey = newEntryDate;
-    // ロールバック用に保存前の状態をpersist内で退避し、失敗時にonErrorから参照する
-    let previousEntries: DiaryEntry[] = [];
-
-    await saveNewEntry({
-      text: newEntryDraft,
-      persist: async (trimmed) => {
-        const newEntry: DiaryEntry = {
-          id: randomUUID(),
-          text: trimmed,
-          createdAt: buildCreatedAtForDateKeyAtTime(targetDateKey),
-        };
-        previousEntries = entries;
-        // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
-        setEntries([newEntry, ...entries]);
+  const handlePersistNewEntry = useCallback(
+    async (trimmed: string) => {
+      if (!newEntryDate) {
+        return;
+      }
+      const newEntry: DiaryEntry = {
+        id: randomUUID(),
+        text: trimmed,
+        createdAt: buildCreatedAtForDateKeyAtTime(newEntryDate),
+      };
+      // 体感速度を落とさないよう、即座にReact stateを楽観的に更新する
+      setEntries((current) => [newEntry, ...current]);
+      try {
         // 他の保存処理と競合しないよう、書き込みはキュー経由で直列化する
         await enqueueDiaryWrite(newEntry);
-      },
-      onSuccess: async () => {
-        // 保存成功時は自動保存済みの下書きキーも削除する。残したままだと次回同じ日付で
-        // モーダルを開いた際に、既に保存済みの内容を誤って復元してしまう。削除前に保留中の
-        // デバウンスタイマーを明示的にキャンセルし、削除後にタイマーが発火して
-        // 下書きが復活しないようにする
-        if (newEntryDraftAutoSaveTimerRef.current !== null) {
-          clearTimeout(newEntryDraftAutoSaveTimerRef.current);
-          newEntryDraftAutoSaveTimerRef.current = null;
-        }
-        try {
-          await AsyncStorage.removeItem(DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX + targetDateKey);
-        } catch {
-          // 下書きキーのクリアに失敗しても、日記本体は既に保存済みで致命的ではないため無視する
-        }
+      } catch (err) {
+        // 永続化に失敗した場合は楽観的に追加した分を取り除いてロールバックする
+        setEntries((current) => current.filter((entry) => entry.id !== newEntry.id));
+        throw err;
+      }
+    },
+    [newEntryDate, enqueueDiaryWrite],
+  );
 
-        // 楽観的更新で既にstateは正しいため、永続化後の再同期は不要。成功時のみモーダルを閉じる
-        setNewEntryDate(null);
-        setNewEntryDraft('');
-      },
-      onError: () => {
-        // 永続化に失敗した場合は保存前の状態に戻し、モーダルは開いたままエラーを伝える
-        setEntries(previousEntries);
-      },
-      errorMessage: '保存に失敗しました。もう一度お試しください。',
-    });
-  }, [entries, enqueueDiaryWrite, newEntryDate, newEntryDraft, saveNewEntry]);
+  const handleCloseNewEntryModal = useCallback(() => {
+    setNewEntryDate(null);
+  }, []);
 
   // トーストを非表示にする。SaveToastのuseEffect依存配列に含まれるため、参照を安定させないと
   // 再レンダーのたびにタイマーが張り直され、トーストが仕様通りの時間で消えなくなる
@@ -1055,10 +928,6 @@ export default function HomeScreen() {
 
   // 文字数カウンター表示用に、grapheme単位で数え直す(絵文字などでUTF-16の.lengthとずれるため)
   const draftGraphemeCount = useMemo(() => splitIntoGraphemes(draft).length, [draft]);
-  const newEntryDraftGraphemeCount = useMemo(
-    () => splitIntoGraphemes(newEntryDraft).length,
-    [newEntryDraft],
-  );
 
   return (
     <KeyboardAvoidingView
@@ -1300,112 +1169,14 @@ export default function HomeScreen() {
           )}
         </Pressable>
 
-        <Modal
-          visible={newEntryModalTransition.isMounted}
-          animationType="none"
-          transparent
-          onRequestClose={handleCancelNewEntry}
-          statusBarTranslucent
-          navigationBarTranslucent
-        >
-          {/* Modalは親のKeyboardAvoidingViewの効果を受けないため、モーダル内にも別途配置する */}
-          <KeyboardAvoidingView
-            style={styles.flex}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          >
-            {/* 背景の半透明オーバーレイをタップした場合はモーダルを閉じる(他のモーダルと同じパターン) */}
-            <Pressable
-              style={styles.modalOverlay}
-              onPress={handleCancelNewEntry}
-              testID="modal-overlay-pressable"
-            >
-              <Animated.View
-                pointerEvents="none"
-                style={[
-                  StyleSheet.absoluteFill,
-                  styles.modalOverlayBackground,
-                  { opacity: newEntryModalTransition.overlayOpacity },
-                ]}
-              />
-              <Animated.View
-                style={{
-                  transform: [{ translateY: newEntryModalTransition.contentTranslateY }],
-                }}
-              >
-                {/* オーバーレイ側へのタップ伝播で意図せず閉じないよう、modalContentをPressableで包んで止める。
-                    react-native-webのPressableはクリックイベント判定のためonStartShouldSetResponderでは
-                    効果が無く、Pressableのクリックハンドラは内部でstopPropagationするためこの包み方で防げる */}
-                <Pressable onPress={() => {}}>
-                  <ThemedView
-                    style={[
-                      styles.modalContent,
-                      { borderColor: iconColor, paddingBottom: modalContentBottomPadding },
-                    ]}
-                  >
-                    <View style={styles.modalHeader}>
-                      <ThemedText type="subtitle">
-                        {newEntryDate ? formatDateHeading(newEntryDate) : ''}の日記を書く
-                      </ThemedText>
-                      <Pressable
-                        onPress={handleCancelNewEntry}
-                        accessibilityRole="button"
-                        accessibilityLabel="閉じる"
-                      >
-                        <ThemedText style={[styles.modalCloseText, { color: tintColor }]}>
-                          閉じる
-                        </ThemedText>
-                      </Pressable>
-                    </View>
-                    <TextInput
-                      style={[styles.input, { color: textColor, borderColor: tintColor }]}
-                      placeholder="その日の出来事や気持ちを書いてみましょう"
-                      placeholderTextColor={iconColor}
-                      value={newEntryDraft}
-                      onChangeText={handleChangeNewEntryDraft}
-                      multiline
-                      // draft用TextInputと同様、スクリーンリーダー向けに明示的なラベルを付ける
-                      accessibilityLabel="日記本文"
-                    />
-                    <View style={styles.composerFooter}>
-                      <ThemedText
-                        style={[
-                          styles.charCount,
-                          newEntryDraftGraphemeCount >= BODY_MAX_LENGTH
-                            ? { color: errorColor }
-                            : { color: iconColor },
-                        ]}
-                      >
-                        {newEntryDraftGraphemeCount}/{BODY_MAX_LENGTH}
-                      </ThemedText>
-                      <Pressable
-                        style={[
-                          styles.saveButton,
-                          { backgroundColor: tintColor },
-                          // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
-                          { opacity: !newEntryDraft.trim() || isSavingNewEntry ? 0.5 : 1 },
-                        ]}
-                        onPress={handleSaveNewEntry}
-                        disabled={!newEntryDraft.trim() || isSavingNewEntry}
-                        accessibilityRole="button"
-                        accessibilityLabel="保存"
-                        accessibilityState={{ disabled: !newEntryDraft.trim() || isSavingNewEntry }}
-                      >
-                        <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
-                          保存
-                        </ThemedText>
-                      </Pressable>
-                    </View>
-                    {newEntryError ? (
-                      <ThemedText style={[styles.errorText, { color: errorColor }]}>
-                        {newEntryError}
-                      </ThemedText>
-                    ) : null}
-                  </ThemedView>
-                </Pressable>
-              </Animated.View>
-            </Pressable>
-          </KeyboardAvoidingView>
-        </Modal>
+        <DiaryEntryComposerModal
+          dateKey={newEntryDate}
+          draftStorageKeyPrefix={DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX}
+          contentBottomPadding={modalContentBottomPadding}
+          persist={handlePersistNewEntry}
+          onSaved={handleCloseNewEntryModal}
+          onClose={handleCloseNewEntryModal}
+        />
 
         <Modal
           visible={monthPickerTransition.isMounted}

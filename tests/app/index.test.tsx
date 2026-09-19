@@ -2498,7 +2498,7 @@ describe('HomeScreen', () => {
       });
     });
 
-    it('does not change the maxHeight of the new-entry modal content, which stays a percentage of its parent', async () => {
+    it('sets the new-entry modal content maxHeight to 70% of the window height in px, like the month picker modal', async () => {
       const now = new Date();
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
@@ -2512,7 +2512,9 @@ describe('HomeScreen', () => {
       );
 
       const [modalContent] = screen.UNSAFE_getAllByType(Modal)[0].findAllByType(ThemedView);
-      expect(StyleSheet.flatten(modalContent.props.style).maxHeight).toBe('70%');
+      expect(StyleSheet.flatten(modalContent.props.style).maxHeight).toBe(
+        Dimensions.get('window').height * 0.7,
+      );
     });
 
     it('keeps the modal header and the year stepper outside the month ScrollView, so they stay fixed while only the month grid scrolls (正常系: 固定部分の分離)', async () => {

@@ -48,8 +48,7 @@ export type DiaryEntryComposerModalProps = {
 };
 
 // 対象日付の日記を新規登録するモーダル(アニメーション・下書き自動保存・文字数上限つき)。
-// `app/(tabs)/index.tsx`の「日記の無い日をタップして開く新規作成モーダル」と同じ入力体験を
-// 複数画面(ホーム画面・日別一覧画面)から再利用するための共通コンポーネント
+// ホーム画面・日別一覧画面で同じ入力体験を共有するための共通コンポーネント
 export function DiaryEntryComposerModal({
   dateKey,
   draftStorageKeyPrefix,
