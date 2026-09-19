@@ -79,12 +79,16 @@ export default function EditEntryScreen() {
   const errorColor = useThemeColor({}, 'error');
 
   useEffect(() => {
+    // idが変わって同effectが再実行される際、直前のidに対する非同期処理が後から解決しても
+    // 新しいidの表示内容を上書きしないよう、このeffect呼び出し専用の無効化フラグを持つ
+    // (isMountedRefはアンマウント自体の検知用で、id変化時の再実行では立たないため代用できない)
+    let isCancelled = false;
     // idが変わる場合(通常は画面が都度pushされるため起こらないが、念のため)に備え、
     // 新しいエントリの下書き復元が終わるまで自動保存effectを止める
     setIsDraftRestored(false);
     (async () => {
       const found = id ? await getDiaryEntryById(id) : null;
-      if (!isMountedRef.current) {
+      if (isCancelled || !isMountedRef.current) {
         return;
       }
       if (found) {
@@ -103,7 +107,7 @@ export default function EditEntryScreen() {
         let textToShow = truncatedText;
         try {
           const storedDraft = await loadDraftText(DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX + found.id);
-          if (isMountedRef.current && storedDraft !== null) {
+          if (!isCancelled && isMountedRef.current && storedDraft !== null) {
             const truncatedDraft = truncateToBodyMaxLength(storedDraft);
             if (truncatedDraft !== truncatedText) {
               textToShow = truncatedDraft;
@@ -112,7 +116,7 @@ export default function EditEntryScreen() {
         } catch {
           // 下書きの復元に失敗しても、元の本文の表示は継続できるため無視する
         }
-        if (!isMountedRef.current) {
+        if (isCancelled || !isMountedRef.current) {
           return;
         }
         setEditDraft(textToShow);
@@ -129,6 +133,9 @@ export default function EditEntryScreen() {
       setIsLoaded(true);
       setIsDraftRestored(true);
     })();
+    return () => {
+      isCancelled = true;
+    };
   }, [id]);
 
   // editDraftの変更をデバウンスし、入力が止まってからAsyncStorageへ自動保存する

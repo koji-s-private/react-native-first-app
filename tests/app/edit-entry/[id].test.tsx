@@ -279,6 +279,57 @@ describe('EditEntryScreen', () => {
     }
   });
 
+  it('does not let a stale lookup for the previous id overwrite the newly loaded entry once id changes while the screen stays mounted (race condition regression)', async () => {
+    const oldEntryId = 'entry-1';
+    const newEntryId = 'entry-2';
+    await seedDiaryEntry({
+      id: oldEntryId,
+      text: '古いIDの日記',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    await seedDiaryEntry({
+      id: newEntryId,
+      text: '新しいIDの日記',
+      createdAt: '2026-01-02T00:00:00.000Z',
+    });
+
+    const oldEntryKey = buildDiaryEntryKey(oldEntryId);
+    const originalGetItemImpl = (AsyncStorage.getItem as jest.Mock).getMockImplementation();
+    let resolveOldEntryLookup: (value: string | null) => void = () => {};
+    const deferredOldEntryLookup = new Promise<string | null>((resolve) => {
+      resolveOldEntryLookup = resolve;
+    });
+    const getItemSpy = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key: string) => {
+      if (key === oldEntryKey) {
+        return deferredOldEntryLookup;
+      }
+      return originalGetItemImpl ? originalGetItemImpl(key) : Promise.resolve(null);
+    });
+
+    try {
+      const { rerender } = render(<EditEntryScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(oldEntryKey));
+
+      // 画面がアンマウントされずにidだけが変わるケース(idが都度pushされる通常経路とは異なる備え)を模擬する
+      setMockIdParam(newEntryId);
+      rerender(<EditEntryScreen />);
+
+      expect(await screen.findByDisplayValue('新しいIDの日記')).toBeTruthy();
+
+      // 旧idに対する読み込みが新id表示後に解決しても、新idの表示内容を上書きしない
+      await act(async () => {
+        resolveOldEntryLookup(originalGetItemImpl ? await originalGetItemImpl(oldEntryKey) : null);
+      });
+
+      expect(screen.getByDisplayValue('新しいIDの日記')).toBeTruthy();
+      expect(screen.queryByDisplayValue('古いIDの日記')).toBeNull();
+    } finally {
+      if (originalGetItemImpl) {
+        getItemSpy.mockImplementation(originalGetItemImpl);
+      }
+    }
+  });
+
   it('sets accessibilityLabel="日記本文" on the TextInput, and accessibilityRole="button"/accessibilityLabel="保存" on the save button', async () => {
     await seedDiaryEntry({
       id: ENTRY_ID,
