@@ -30,7 +30,7 @@ function contrastRatio(hexA: string, hexB: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-describe('Colors.error (エラーメッセージ色のテーマ定数化)', () => {
+describe('Colors.error (エラーメッセージ色)', () => {
   it('defines a valid hex color for light mode', () => {
     expect(Colors.light.error).toMatch(HEX_COLOR_PATTERN);
   });
@@ -49,7 +49,7 @@ describe('Colors.error (エラーメッセージ色のテーマ定数化)', () =
   });
 });
 
-describe('Colors.link (ダークモードでリンク色のコントラストが不足する問題の修正)', () => {
+describe('Colors.link (ダークモードでのリンク色のコントラスト)', () => {
   it('defines a valid hex color for light mode', () => {
     expect(Colors.light.link).toMatch(HEX_COLOR_PATTERN);
   });

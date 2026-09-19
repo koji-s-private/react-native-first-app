@@ -141,9 +141,8 @@ describe('AppLockProvider / useAppLock', () => {
   });
 
   describe('isSupportedの再チェック', () => {
-    // アプリロックがONの状態で端末側の生体認証・パスコード設定が全て削除されると、
-    // isSupportedがマウント時の値のまま更新されず、AppLockScreenから二度と抜け出せなくなる不具合の
-    // 回帰テスト。バックグラウンド復帰('active'遷移)のたびに再チェックすることを検証する
+    // 端末側の生体認証・パスコード設定が削除されても、isSupportedがマウント時の値のまま
+    // 残らないよう、バックグラウンド復帰('active'遷移)のたびに再チェックすることを検証する
     it('re-checks isAppLockSupportedAsync every time the app returns to active (正常系: active復帰の度に再チェック)', async () => {
       const { result } = renderHook(() => useAppLock(), { wrapper });
       await act(async () => {
@@ -276,9 +275,8 @@ describe('AppLockProvider / useAppLock', () => {
       expect(AsyncStorage.setItem).toHaveBeenLastCalledWith(APP_LOCK_ENABLED_STORAGE_KEY, 'false');
     });
 
-    // AsyncStorage.setItemが失敗した場合、enabled/isUnlockedの表示状態が
-    // 呼び出し前の値へロールバックされず、かつ例外が呼び出し元へ伝播しない
-    // (未処理のPromise rejectionになる)不具合の回帰テスト。
+    // AsyncStorage.setItemが失敗した場合、enabled/isUnlockedの表示状態が呼び出し前の値へ
+    // ロールバックされ、かつ例外が呼び出し元へ伝播する(未処理のPromise rejectionにならない)ことを検証する
     it('rolls back enabled/isUnlocked to their previous values and rethrows when AsyncStorage.setItem rejects (異常系: 永続化失敗時のロールバック)', async () => {
       const { result } = renderHook(() => useAppLock(), { wrapper });
       await act(async () => {
