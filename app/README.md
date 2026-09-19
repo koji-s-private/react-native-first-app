@@ -8,7 +8,7 @@
 
 ```
 app/
-  _layout.tsx          アプリ全体のレイアウト・初期化処理（テーマ、フォント読み込みなど）
+  _layout.tsx            アプリ全体のレイアウト・初期化処理（各設定のProvider、テーマ、オンボーディング、アプリロックなど）
   oss-licenses.tsx       OSSライセンス一覧画面
   day-entries/
     [date].tsx           指定した日付の日記一覧画面（動的ルート）
@@ -17,32 +17,39 @@ app/
   (tabs)/
     _layout.tsx          タブナビゲーションの定義
     index.tsx            日記画面（ホームタブ）
+    settings.tsx         設定画面（設定タブ）
 ```
 
 ## `_layout.tsx` の役割
 
 `_layout.tsx` は、そのディレクトリ配下の画面に共通する「入れ物」を定義するファイルです。
 
-- `app/_layout.tsx`: アプリ全体のレイアウト。`ThemeProvider` によるライト/ダークテーマの切り替え、`Stack` によるスタックナビゲーションの定義（`(tabs)`・`oss-licenses` の各画面をスタックに登録）、スプラッシュ画面制御などを行っています。
-- `app/(tabs)/_layout.tsx`: タブ画面群のレイアウト。`Tabs` コンポーネントでタブバーの見た目・アイコン・タイトルを定義しています。
+- `app/_layout.tsx`: アプリ全体のレイアウト。次のような役割を持ちます。
+  - [`contexts/`](../contexts/README.md) の各Provider（テーマ設定・カレンダー表示レイアウト・日記リマインダー・アプリロック）で全体をラップする
+  - `ThemeProvider` によるライト/ダークテーマの切り替え
+  - `Stack` によるスタックナビゲーションの定義（`(tabs)`・`oss-licenses`・`day-entries/[date]`・`edit-entry/[id]` の各画面をスタックに登録）
+  - 初回起動時のオンボーディング（[`components/onboarding.tsx`](../components/onboarding.tsx)）の表示制御
+  - アプリロックのロック画面（[`components/app-lock-screen.tsx`](../components/app-lock-screen.tsx)）と、ロック設定の読み込み中・アプリスイッチャー表示時にコンテンツを覆い隠すオーバーレイの表示
+- `app/(tabs)/_layout.tsx`: タブ画面群のレイアウト。`Tabs` コンポーネントでタブバーの見た目・アイコン・タイトル（「日記」「設定」）を定義しています。
 
 ## `oss-licenses.tsx` の役割
 
-アプリが利用しているOSSライブラリのライセンス一覧を表示する画面です。表示内容は [`data/licenses.json`](../data/licenses.json)（`npm run generate-licenses` で `package-lock.json` から自動生成される静的ファイル。直接依存だけでなくtransitive依存も含む）を読み込んで一覧表示しているだけで、実行時に依存関係を解析しているわけではありません。依存関係を追加・更新したら、コミット前に `npm run generate-licenses` を再実行してください。現時点ではこの画面への導線（設定画面などからのリンク）は未実装です。
+アプリが利用しているOSSライブラリのライセンス一覧を表示する画面です。表示内容は [`data/licenses.json`](../data/licenses.json)（`npm run generate-licenses` で `package-lock.json` から自動生成される静的ファイル。直接依存だけでなくtransitive依存も含む）を読み込んで一覧表示しているだけで、実行時に依存関係を解析しているわけではありません。依存関係を追加・更新したら、コミット前に `npm run generate-licenses` を再実行してください。この画面へは、設定画面（`(tabs)/settings.tsx`）の「法的情報」セクションにある「OSSライセンス」から遷移します（[`constants/settings-menu.ts`](../constants/settings-menu.ts)で定義）。
 
 ## `(tabs)/` の役割
 
 `(tabs)` のように名前を丸括弧で囲んだディレクトリは、expo-routerの[グループ機能](https://docs.expo.dev/router/basics/common-navigation-patterns/)です。URLパス（画面遷移のパス）には反映されず、あくまで「タブナビゲーションでまとめる画面群」を整理するためのフォルダになっています。
 
-- `(tabs)/index.tsx` … タブの「Home」に対応する画面（日記の一覧・入力画面）
+- `(tabs)/index.tsx` … タブの「日記」に対応する画面（カレンダー表示・日記の入力・検索）。カレンダーは設定画面で選択した表示レイアウト（月表示/週表示）で描画します。
+- `(tabs)/settings.tsx` … タブの「設定」に対応する画面。テーマ・カレンダー表示レイアウト・日記リマインダー・アプリロックの各設定、法的情報・サポートへのリンク（[`constants/settings-menu.ts`](../constants/settings-menu.ts)で定義）、およびデータ管理（日記データのエクスポート・インポート・全件削除）を、縦スクロールの1画面にまとめています。
 
 タブを追加したい場合は、`(tabs)/` ディレクトリに新しい画面ファイルを追加し、`(tabs)/_layout.tsx` の `Tabs.Screen` に対応する設定（`name`、`title`、`tabBarIcon` など）を追記してください。
 
-## `day-entries/[date].tsx` ・ `edit-entry/[id].tsx` の役割（Issue #221）
+## `day-entries/[date].tsx` ・ `edit-entry/[id].tsx` の役割
 
-カレンダー画面（`(tabs)/index.tsx`）で日記のある日付をタップすると、`day-entries/[date].tsx`（`[date]` は `YYYY-MM-DD` 形式の動的パラメータ）へ遷移し、その日の日記一覧・コピー・削除を行えます。一覧の「編集」ボタンからは `edit-entry/[id].tsx`（`[id]` は日記エントリのid）へさらに遷移し、本文を編集できます。
+カレンダー画面（`(tabs)/index.tsx`）で日記のある日付をタップすると、`day-entries/[date].tsx`（`[date]` は `YYYY-MM-DD` 形式の動的パラメータ）へ遷移し、その日の日記一覧・コピー・削除（削除直後は「元に戻す」で復元可能）を行えます。一覧の「編集」ボタンからは `edit-entry/[id].tsx`（`[id]` は日記エントリのid）へさらに遷移し、本文を編集できます。
 
-以前はどちらもカレンダー画面上にモーダル（ドロワー）として重ねて表示していましたが、削除時にモーダルのフェードアウトが途中で止まる不具合の温床になっていたことに加え、編集専用の画面へ遷移させたいという要望を受けて、通常の画面遷移（`router.push`）に置き換えています。編集画面から戻る際（ヘッダーの戻る操作・Android物理戻るボタン・スワイプ戻るジェスチャーいずれも含む）に未保存の変更がある場合は、[React Navigationの`beforeRemove`イベント](https://reactnavigation.org/docs/preventing-going-back/)を使って離脱確認ダイアログを表示します。
+どちらもカレンダー画面上のモーダルではなく、通常の画面遷移（`router.push`）で開く独立した画面です。編集画面から戻る際（ヘッダーの戻る操作・Android物理戻るボタン・スワイプ戻るジェスチャーいずれも含む）に未保存の変更がある場合は、[React Navigationの`beforeRemove`イベント](https://reactnavigation.org/docs/preventing-going-back/)を使って離脱確認ダイアログを表示します。
 
 編集内容を保存すると、編集画面上に「保存しました」のトーストを短時間表示してから前の画面へ戻ります。この待機中は保存ボタンと戻る操作が無効になり、待機完了後に遷移します。
 
@@ -65,3 +72,4 @@ app/
 
 - ルートの [README.md](../README.md): 環境構築・動作確認・使用技術・データ構造など、プロジェクト全体の説明
 - [components/README.md](../components/README.md): 画面から利用するUIコンポーネントの置き場所・命名規則
+- [contexts/README.md](../contexts/README.md): アプリ全体で共有する設定・状態を提供するContext Provider
