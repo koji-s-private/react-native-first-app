@@ -36,9 +36,7 @@ export function useDraftAutoSave({ draftKey, draft, isRestored }: DraftAutoSaveO
     return () => clearTimeout(timer);
   }, [draft, isRestored, draftKey]);
 
-  // 保留中の自動保存をキャンセルしてから下書きキーを削除する。キャンセルしないと、
-  // 削除後にタイマーが発火して削除したはずの内容が再度書き込まれる。
-  // キー削除の失敗は保存済みの日記本体に影響しないため握りつぶし、reject しない
+  // 下書きキーを削除する。先に保留中のタイマーをキャンセルし、削除後の再書き込みを防ぐ
   const clearDraft = useCallback(async () => {
     if (timerRef.current !== null) {
       clearTimeout(timerRef.current);
