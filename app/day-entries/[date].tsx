@@ -27,6 +27,9 @@ import {
 // コピー成功時に一時的に表示するトーストのメッセージ
 const COPY_SUCCESS_MESSAGE = 'コピーしました';
 const EMPTY_STATE_MESSAGE = 'この日の日記はまだありません';
+// 全件読み込みに失敗した場合に、「その日は日記が無い」と区別して表示するメッセージ
+const LOAD_ERROR_MESSAGE =
+  '日記データを読み込めませんでした。アプリを再起動しても解決しない場合は端末の復元設定をご確認ください。';
 
 // この画面の新規作成モーダルの下書き自動保存に使うAsyncStorageキーの接頭辞。
 // ホーム画面(app/(tabs)/index.tsx)の新規作成モーダルと同じ日付でも下書きが混ざらないよう、
@@ -43,6 +46,7 @@ export default function DayEntriesScreen() {
   const navigation = useNavigation();
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
   const [hasLoadedEntries, setHasLoadedEntries] = useState(false);
+  const [hasLoadError, setHasLoadError] = useState(false);
   // コピー成功時に一時的に表示するトーストのメッセージ。nullの間は非表示
   const [copyToastMessage, setCopyToastMessage] = useState<string | null>(null);
   // この日の新規作成モーダルを開いているか
@@ -81,16 +85,23 @@ export default function DayEntriesScreen() {
   const loadEntries = useCallback(async () => {
     if (!date) {
       setEntries([]);
+      setHasLoadError(false);
       setHasLoadedEntries(true);
       return;
     }
-    const allEntries = await getAllDiaryEntries();
+    let loadFailed = false;
+    const allEntries = await getAllDiaryEntries({
+      onError: () => {
+        loadFailed = true;
+      },
+    });
     setEntries(
       allEntries
         .filter((entry) => toDateKey(new Date(entry.createdAt)) === date)
         // 各日付内は書かれた時刻の昇順に揃える(カレンダー画面の一覧表示と同じ並び順)
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
     );
+    setHasLoadError(loadFailed);
     setHasLoadedEntries(true);
   }, [date]);
 
@@ -184,10 +195,16 @@ export default function DayEntriesScreen() {
     () =>
       hasLoadedEntries ? (
         <ThemedView style={styles.emptyState}>
-          <ThemedText style={styles.emptyStateText}>{EMPTY_STATE_MESSAGE}</ThemedText>
+          {hasLoadError ? (
+            <ThemedText style={[styles.emptyStateText, { color: errorColor }]}>
+              {LOAD_ERROR_MESSAGE}
+            </ThemedText>
+          ) : (
+            <ThemedText style={styles.emptyStateText}>{EMPTY_STATE_MESSAGE}</ThemedText>
+          )}
         </ThemedView>
       ) : null,
-    [hasLoadedEntries],
+    [hasLoadedEntries, hasLoadError, errorColor],
   );
 
   return (
