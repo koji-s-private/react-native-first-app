@@ -6,10 +6,51 @@
 
 ```
 utils/
-  diary-encryption.ts     日記データ(AsyncStorageに保存するJSON文字列)のAES-256-GCM暗号化・復号
-  diary-storage.ts        日記データのAsyncStorageキー定義、および全件削除
-  onboarding-storage.ts   オンボーディング表示済みフラグのAsyncStorageキー定義、および読み書き
+  app-lock-authentication.ts      アプリロック(生体認証/パスコード)のサポート判定・認証の呼び出し
+  diary-date.ts                   日記エントリの日付・時刻の整形/変換、週表示カレンダー用の日付計算
+  diary-draft-storage.ts          未保存の下書きのAsyncStorageキー定義、および暗号化した保存・復元
+  diary-encryption.ts             日記データ(AsyncStorageに保存するJSON文字列)のAES-256-GCM暗号化・復号
+  diary-export.ts                 日記データをJSONとしてエクスポートするためのファイル名生成・シリアライズ
+  diary-import.ts                 JSONファイルから日記データをインポートするためのパース・検証
+  diary-reminder-notifications.ts 日記リマインダー(毎日決まった時刻のローカル通知)の許可状態取得・スケジュール
+  diary-storage.ts                日記データのAsyncStorageキー定義、および全件削除
+  diary-text.ts                   日記本文の文字数上限と、書記素クラスタ単位での切り詰め
+  onboarding-storage.ts           オンボーディング表示済みフラグのAsyncStorageキー定義、および読み書き
 ```
+
+## `app-lock-authentication.ts` の構成
+
+アプリロック機能で使う、`expo-local-authentication`の薄いラッパーです。Web版はネイティブモジュールが存在せず`authenticateAsync`が未実装のため、この機能自体を提供しません。
+
+- `isAppLockSupportedAsync()`: この端末でアプリロックを利用できるかを判定します。Webでは常に`false`、それ以外は生体認証ハードウェアがあり、生体認証またはOS標準のパスコードのいずれかが登録済みの場合に`true`を返します。
+- `authenticateForAppLockAsync()`: 生体認証によるロック解除を試み、成功したかを返します。生体認証が失敗・利用不可の場合にOS標準のパスコードへフォールバックできるようにしています。
+
+[`contexts/app-lock-context.tsx`](../contexts/app-lock-context.tsx)から利用されます。
+
+## `diary-date.ts` の構成
+
+日記エントリの日付・時刻の整形/変換に関する共通ユーティリティです。カレンダー画面と日付ごとの日記一覧画面の両方から使うため切り出しています。日付キーはいずれも`react-native-calendars`が使う`'YYYY-MM-DD'`形式(端末のローカル日時基準)です。
+
+- `toDateKey(date)` / `dateKeyToDate(dateKey)`: `Date`と日付キーを相互に変換します(`dateKeyToDate`はその日のローカル0時を返します)。
+- `buildCreatedAtForDateKey(dateKey)`: 日付キーからその日の正午(ローカルタイム)のISO文字列を作ります。過去日の新規作成時の`createdAt`に使います。日付境界(0時付近)だとタイムゾーン・サマータイムの影響で日付が前後し得るため、正午を採用しています。
+- `buildCreatedAtForDateKeyAtTime(dateKey, time?)`: 日付キーの年月日と、基準時刻(既定は現在時刻)の時分秒を組み合わせたISO文字列を作ります。
+- `formatDateHeading(dateKey)`: 日付キーを画面見出し用の`YYYY年M月D日`に整形します。
+- `formatEntryDateTime(isoString)`: ISO文字列を`YYYY/MM/DD HH:mm`に整形します。端末のロケールに依存する`toLocaleString()`は使わず、手動でフォーマットします。
+- `getWeekDays(date)` / `WeekDayInfo`: 指定した日付を含む週(日曜始まり)の7日分の情報(日付キー・曜日・日にち)を返します。週表示カレンダーで使います。
+- `getSwipeDayDelta(dx, dy)`: 週表示カレンダーのスワイプ操作から、フォーカス移動量(前日: `-1` / 翌日: `1` / 移動なし: `0`)を判定する純粋関数です。水平移動が閾値以上かつ垂直移動より大きい場合のみスワイプとして扱います。
+
+[`app/(tabs)/index.tsx`](<../app/(tabs)/index.tsx>)、[`app/day-entries/[date].tsx`](<../app/day-entries/[date].tsx>)、[`components/diary-entry-composer-modal.tsx`](../components/diary-entry-composer-modal.tsx)から利用されます。
+
+## `diary-draft-storage.ts` の構成
+
+保存前の日記下書き(自動保存)をAsyncStorageへ暗号化して読み書きするためのユーティリティです。保存済みエントリ(`diary-storage.ts`)と同じAES-256-GCM暗号化を通すことで、未保存の下書きだけが平文で端末に残らないようにしています。
+
+- `DIARY_DRAFT_STORAGE_KEY`: ホーム画面下部の入力欄(composer)の下書きを保存するキーです。
+- `DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX` / `DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX`: 日付指定の新規作成モーダル、および編集画面の下書きキーの接頭辞です。実際のキーは、それぞれ接頭辞に対象日付(`YYYY-MM-DD`)・エントリIDを付けたものです。
+- `isDraftStorageKey(key)`: キーが下書き系(完全一致または接頭辞一致)かを判定します。`clearAllDiaryEntries()`が全件削除の対象キーを漏れなく拾うために使います。
+- `saveDraftText(key, text)` / `loadDraftText(key)`: 下書き本文を暗号化して保存・復号して復元します。暗号化対応前に保存された平文の下書きも読み込めます(後方互換)。保存が無い場合、`loadDraftText`は`null`を返します。
+
+[`app/(tabs)/index.tsx`](<../app/(tabs)/index.tsx>)と[`app/edit-entry/[id].tsx`](<../app/edit-entry/[id].tsx>)から利用されます。
 
 ## `diary-encryption.ts` の構成
 
@@ -21,6 +62,31 @@ utils/
 
 利用箇所は [`app/(tabs)/index.tsx`](../app/(tabs)/index.tsx) です。日記データの保存フォーマットの詳細はルートの [README.md](../README.md#日記エントリdiaryentry) を参照してください。
 
+## `diary-export.ts` の構成
+
+日記データをJSON形式でエクスポートするための純粋関数群です。ファイルの書き出し・共有シート表示のI/Oは[`app/(tabs)/settings.tsx`](<../app/(tabs)/settings.tsx>)側で行い、このファイルは外部I/Oを持たないためユニットテストしやすくしています。
+
+- `buildDiaryExportFileName(date?)`: エクスポート先のファイル名(`diary-export-YYYYMMDD-HHmmss.json`)を生成します。複数回エクスポートしても上書きされないよう、日時(秒単位)を含めています。
+- `serializeDiaryEntriesForExport(entries)`: 日記データ一覧をインデント付きのJSON文字列に変換します。復号済みの平文をそのまま書き出すため、書き出し先ファイルは暗号化されません。
+
+## `diary-import.ts` の構成
+
+JSONファイルから日記データをインポート(再取り込み)するための、パース・検証ロジックです。ファイル選択・確認ダイアログのI/Oは[`app/(tabs)/settings.tsx`](<../app/(tabs)/settings.tsx>)側で行い、このファイルは外部I/Oを持ちません(`diary-export.ts`と同方針)。
+
+- `parseDiaryEntriesForImport(content)`: JSON文字列を`DiaryEntry[]`としてパース・検証し、`{ validEntries, invalidCount }`(`DiaryImportParseResult`)を返します。JSONとして不正な場合、およびトップレベルが配列でない場合は例外を投げます。`DiaryEntry`の形を満たさない要素や、本文が`BODY_MAX_LENGTH`を超える要素は、1件の不整合でファイル全体が失敗しないようその要素だけを除外し、`invalidCount`に数えます。
+
+## `diary-reminder-notifications.ts` の構成
+
+日記リマインダー(毎日決まった時刻に送るローカル通知)のための、`expo-notifications`のラッパーです。
+
+- `ReminderPermissionStatus`: 通知の許可状態(`'granted'` / `'denied'` / `'undetermined'`)です。`'denied'`の場合、OSによっては確認ダイアログが再表示されず、端末のOS設定から許可し直す必要があります。
+- `getReminderPermissionStatusAsync()`: OSの確認ダイアログを表示せずに、現在の許可状態を取得します。
+- `requestReminderPermissionAsync()`: 通知の許可をリクエストします。
+- `scheduleDailyReminderAsync(hour, minute)`: 毎日指定した時刻(端末のローカル時刻)に通知するようスケジュールします。常に同じ識別子で登録し直す(既存の通知を先にキャンセルする)ため、時刻を変更しても通知が重複しません。Androidでは、通知チャンネルを先に登録します。
+- `cancelDailyReminderAsync()`: スケジュール済みの通知をキャンセルします。未登録の状態で呼んでも例外にはなりません。
+
+このファイルは読み込み時に、フォアグラウンド中でも通知をバナー表示するための通知ハンドラーを登録します。[`contexts/diary-reminder-context.tsx`](../contexts/diary-reminder-context.tsx)から利用されます。
+
 ## `diary-storage.ts` の構成
 
 日記データのAsyncStorageキーを`app/(tabs)/index.tsx`(保存・読み込み)と設定画面(全件削除・エクスポート)で共有するためのユーティリティです。エントリ1件ごとに個別のAsyncStorageキー(`diary-entry:<id>`)へ保存する方式を採用しており(Issue #83)、1件の保存/削除の書き込みコストがエントリ総数に依存しない(O(1))ようにしています。
@@ -30,6 +96,16 @@ utils/
 - `getAllDiaryEntries()`: 保存済みの日記データを全件取得します。呼び出しの冒頭で`DIARY_ENTRIES_STORAGE_KEY`にレガシーデータが残っていないか確認し、残っていれば個別キー方式へ自動移行してから読み込みます(移行は複数回呼ばれても安全)。`createdAt`の降順(新しい順)にソートして返します。
 - `saveDiaryEntry(entry)` / `deleteDiaryEntry(id)`: エントリ1件を、対応する個別キーに対してのみ保存・削除します。
 - `clearAllDiaryEntries()`: 日記データ(個別キー方式のエントリ、および念のためレガシーキー)のみをAsyncStorageから削除します。暗号鍵(`expo-secure-store`側)など日記データ以外のキーには影響しません。ストアのデータ削除要件(Google Play/Apple双方でユーザーによるデータ削除手段の提供が求められる)に対応するため、[`app/(tabs)/settings.tsx`](<../app/(tabs)/settings.tsx>)の確認ダイアログ付きボタンから呼び出されます。
+
+## `diary-text.ts` の構成
+
+日記本文の文字数上限と切り詰めに関する共通ユーティリティです。新規作成・編集の両画面から使うため切り出しています。
+
+- `BODY_MAX_LENGTH`: 日記本文の最大文字数(1000)です。
+- `splitIntoGraphemes(text)`: 文字列を「見た目上の1文字」(書記素クラスタ)単位の配列に分割します。ZWJ結合絵文字やサロゲートペアを途中で分断しないよう、`Intl.Segmenter`が使える環境ではそれを使い、未実装の環境では`Array.from()`にフォールバックします。
+- `truncateToBodyMaxLength(text)`: `BODY_MAX_LENGTH`を超えないよう、書記素クラスタ単位で切り詰めます。`TextInput`の`maxLength`はUTF-16コードユニット単位でしか制限できないため、`onChangeText`側でこの関数を使います。
+
+[`app/(tabs)/index.tsx`](<../app/(tabs)/index.tsx>)、[`app/edit-entry/[id].tsx`](<../app/edit-entry/[id].tsx>)、[`components/diary-entry-composer-modal.tsx`](../components/diary-entry-composer-modal.tsx)、[`hooks/use-save-diary-entry.ts`](../hooks/use-save-diary-entry.ts)から利用されます。
 
 ## `onboarding-storage.ts` の構成
 

@@ -6,8 +6,23 @@
 
 ```
 constants/
-  theme.ts    ライト/ダークモードのカラーパレットとフォント設定
+  onboarding-slides.ts   初回起動時のオンボーディングで案内するスライドの定義
+  settings-menu.ts       設定画面のメニュー項目(法的情報・サポートなど)の定義
+  theme.ts               ライト/ダークモードのカラーパレットとフォント設定
 ```
+
+## `onboarding-slides.ts` の構成
+
+- `OnboardingSlide`: スライド1枚分の型(`key` / `title` / `description`)です。
+- `ONBOARDING_SLIDES`: 初回起動時のオンボーディングで案内するスライドの配列です(日記を書く・カレンダーで一覧を見る・設定でデータを管理、の3枚)。[`components/onboarding.tsx`](../components/onboarding.tsx)から参照されます。
+
+## `settings-menu.ts` の構成
+
+設定画面のメニュー項目の定義です。セクション・配列駆動の構成にしており、項目を追加する際は配列に要素を足すだけで済みます。テーマ切替のようなボタン形式のインタラクティブなUIはこの型に当てはまらないため、[`app/(tabs)/settings.tsx`](<../app/(tabs)/settings.tsx>)に直接実装しています。
+
+- `SettingsMenuItem`: メニュー項目の型です。遷移先の種類に応じて、外部ブラウザで開く`'external'`、アプリ内の別画面へ遷移する`'internal'`、メールクライアントを開く`'mailto'`の3種類があります。
+- `SettingsSection`: セクション(`key` / `title` / `items`)の型です。
+- `SETTINGS_SECTIONS`: 設定画面に表示するセクションの配列です。現在は「法的情報」(プライバシーポリシー・利用規約・OSSライセンス)と「サポート」(お問い合わせ)を定義しています。プライバシーポリシー・利用規約のURLとお問い合わせ先メールアドレスはプレースホルダーです。[`app/(tabs)/settings.tsx`](<../app/(tabs)/settings.tsx>)から参照されます。
 
 ## `theme.ts` の構成
 
