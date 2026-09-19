@@ -19,14 +19,15 @@ import { useModalSlideTransition } from '@/hooks/use-modal-slide-transition';
 import { useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { formatDateHeading } from '@/utils/diary-date';
+import { loadDraftText, saveDraftText } from '@/utils/diary-draft-storage';
 import { BODY_MAX_LENGTH, splitIntoGraphemes, truncateToBodyMaxLength } from '@/utils/diary-text';
 
 // 下書きの自動保存をデバウンスする間隔(ミリ秒)。他画面の新規作成・編集下書きと合わせる
 const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
 
-// 本文入力欄の高さ上限(画面高さに対する比率)。超過分は入力欄自体がスクロールするため、
-// 長文でもフッター(文字数カウンター・保存ボタン)がキーボード表示中でも画面内に留まる
-const INPUT_MAX_HEIGHT_RATIO = 0.25;
+const MODAL_MAX_HEIGHT_RATIO = 0.7;
+const INPUT_MIN_HEIGHT = 80;
+const INPUT_MAX_HEIGHT_RATIO = 0.35;
 
 export type DiaryEntryComposerModalProps = {
   /** 対象日付('YYYY-MM-DD')。nullの間はモーダルを閉じた状態にする */
@@ -59,16 +60,19 @@ export function DiaryEntryComposerModal({
   onClose,
 }: DiaryEntryComposerModalProps) {
   const [draft, setDraft] = useState('');
+  const [inputContentHeight, setInputContentHeight] = useState(0);
   // 下書き復元が完了したか。完了前に自動保存effectを動かすと、初期値(空文字列)で
   // 保存済みの下書きを誤って上書き・削除してしまうため、完了までは自動保存の対象外にする
   const [isDraftRestored, setIsDraftRestored] = useState(false);
   // 保留中の下書き自動保存タイマーID。保存成功時・破棄確定時にAsyncStorageの下書きキーを
   // 削除する際、クリーンアップ(モーダルを閉じるタイミング)を待たずに明示的にキャンセルするために使う
   const draftAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftEditedRef = useRef(false);
   // アンマウント後にstate更新を行わないようにするためのフラグ。保存処理の完了を待つ間に
   // 呼び出し画面側の遷移でアンマウントされ得るため、useSaveDiaryEntryへ渡して安全性を確保する
   const isMountedRef = useRef(true);
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
     };
@@ -85,12 +89,16 @@ export function DiaryEntryComposerModal({
   const errorColor = useThemeColor({}, 'error');
 
   const draftKey = dateKey ? draftStorageKeyPrefix + dateKey : null;
+  const inputMaxHeight = Math.max(INPUT_MIN_HEIGHT, windowHeight * INPUT_MAX_HEIGHT_RATIO);
+  const isInputScrollable = inputContentHeight > inputMaxHeight;
 
   // モーダルを開いた際(dateKeyがセットされた際)、自動保存されていた下書きが残っていれば復元する。
   // 日付ごとにキーが分かれるため、対象日付が変わるたびにやり直す
   useEffect(() => {
+    draftEditedRef.current = false;
     setIsDraftRestored(false);
     setDraft('');
+    setInputContentHeight(0);
     setError(null);
     if (!draftKey) {
       return;
@@ -98,8 +106,8 @@ export function DiaryEntryComposerModal({
     let isCancelled = false;
     (async () => {
       try {
-        const storedDraft = await AsyncStorage.getItem(draftKey);
-        if (!isCancelled && storedDraft) {
+        const storedDraft = await loadDraftText(draftKey);
+        if (!isCancelled && !draftEditedRef.current && storedDraft) {
           setDraft(truncateToBodyMaxLength(storedDraft));
         }
       } catch {
@@ -124,7 +132,7 @@ export function DiaryEntryComposerModal({
     const timer = setTimeout(() => {
       draftAutoSaveTimerRef.current = null;
       const persistDraft = draft
-        ? AsyncStorage.setItem(draftKey, draft)
+        ? saveDraftText(draftKey, draft)
         : AsyncStorage.removeItem(draftKey);
       // 下書きの自動保存は補助的な処理のため、失敗しても静かに無視する(本保存の失敗はhandleSave側で伝える)
       persistDraft.catch(() => {});
@@ -146,6 +154,7 @@ export function DiaryEntryComposerModal({
   };
 
   const handleChangeDraft = (text: string) => {
+    draftEditedRef.current = true;
     setDraft(truncateToBodyMaxLength(text));
   };
 
@@ -221,9 +230,14 @@ export function DiaryEntryComposerModal({
             {/* オーバーレイ側へのタップ伝播で意図せず閉じないよう、modalContentをPressableで包んで止める */}
             <Pressable onPress={() => {}}>
               <ThemedView
+                testID="diary-entry-composer-content"
                 style={[
                   styles.modalContent,
-                  { borderColor: iconColor, paddingBottom: contentBottomPadding },
+                  {
+                    borderColor: iconColor,
+                    paddingBottom: contentBottomPadding,
+                    maxHeight: windowHeight * MODAL_MAX_HEIGHT_RATIO,
+                  },
                 ]}
               >
                 <View style={styles.modalHeader}>
@@ -244,15 +258,25 @@ export function DiaryEntryComposerModal({
                   style={[
                     styles.input,
                     { color: textColor, borderColor: tintColor },
-                    { maxHeight: windowHeight * INPUT_MAX_HEIGHT_RATIO },
+                    { maxHeight: inputMaxHeight },
                   ]}
                   placeholder="その日の出来事や気持ちを書いてみましょう"
                   placeholderTextColor={iconColor}
                   value={draft}
                   onChangeText={handleChangeDraft}
+                  onContentSizeChange={(event) =>
+                    setInputContentHeight(event.nativeEvent.contentSize.height)
+                  }
                   multiline
+                  scrollEnabled
                   accessibilityLabel="日記本文"
+                  accessibilityHint="長文は入力欄内でスクロールできます"
                 />
+                {isInputScrollable ? (
+                  <ThemedText style={[styles.scrollHint, { color: iconColor }]}>
+                    入力欄内をスクロールできます
+                  </ThemedText>
+                ) : null}
                 <View style={styles.composerFooter}>
                   <ThemedText
                     style={[
@@ -307,7 +331,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.4)',
   },
   modalContent: {
-    maxHeight: '70%',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
@@ -326,9 +349,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 8,
     padding: 12,
-    minHeight: 80,
+    minHeight: INPUT_MIN_HEIGHT,
     textAlignVertical: 'top',
     fontSize: 16,
+  },
+  scrollHint: {
+    fontSize: 12,
   },
   composerFooter: {
     flexDirection: 'row',

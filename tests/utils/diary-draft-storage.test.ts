@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
 import {
+  DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX,
   DIARY_DRAFT_STORAGE_KEY,
   DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX,
   DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX,
@@ -76,6 +77,17 @@ describe('utils/diary-draft-storage', () => {
       await expect(loadDraftText(DIARY_DRAFT_STORAGE_KEY)).resolves.toBe('保存して復元する下書き');
     });
 
+    it('encrypts and restores a draft from the day-entries composer', async () => {
+      const key = `${DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX}2026-09-19`;
+
+      await saveDraftText(key, '日別一覧から書いた下書き');
+
+      const stored = await AsyncStorage.getItem(key);
+      expect(stored).not.toBe('日別一覧から書いた下書き');
+      expect(stored && isEncryptedPayload(stored)).toBe(true);
+      await expect(loadDraftText(key)).resolves.toBe('日別一覧から書いた下書き');
+    });
+
     it('returns null when nothing has been saved for the key yet (境界値: 未保存状態)', async () => {
       await expect(loadDraftText(DIARY_DRAFT_STORAGE_KEY)).resolves.toBeNull();
     });
@@ -146,6 +158,12 @@ describe('utils/diary-draft-storage', () => {
 
     it('returns true for a new-entry-modal draft key built from the prefix (正常系)', () => {
       expect(isDraftStorageKey(`${DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX}2026-01-05`)).toBe(true);
+    });
+
+    it('returns true for a day-entries composer draft key built from the prefix', () => {
+      expect(
+        isDraftStorageKey(`${DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX}2026-09-19`),
+      ).toBe(true);
     });
 
     it('returns true for an edit-screen draft key built from the prefix (正常系)', () => {
