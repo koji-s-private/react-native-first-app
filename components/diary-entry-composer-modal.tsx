@@ -107,7 +107,10 @@ export function DiaryEntryComposerModal({
 
   const handleCancel = () => {
     if (!draft.trim()) {
-      void clearDraft();
+      // 復元前に消すと、まだ読み込んでいない保存済みの下書きまで失われる
+      if (isDraftRestored) {
+        void clearDraft();
+      }
       onClose();
       return;
     }

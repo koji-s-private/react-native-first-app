@@ -5655,6 +5655,14 @@ describe('HomeScreen', () => {
         jest.useRealTimers();
       });
 
+      // 日記の読み込み完了(ローディング表示の消滅)まで待ってから検証に入る
+      async function renderInWeekLayoutAfterLoad() {
+        await renderInWeekLayout();
+        await waitFor(() =>
+          expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0),
+        );
+      }
+
       function queryWeekCreateButtons() {
         return screen
           .queryAllByRole('button')
@@ -5679,13 +5687,37 @@ describe('HomeScreen', () => {
       }
 
       it('shows a create button only for days without entries that are today or in the past, and none for future days (正常系・境界値: 今日と未来日の境界)', async () => {
-        await renderInWeekLayout();
+        await renderInWeekLayoutAfterLoad();
 
         const createButtons = queryWeekCreateButtons();
         expect(createButtons.map((button) => button.props.accessibilityLabel)).toEqual([
           `${formatDateHeading(PAST_DATE_KEY)}の日記を新規作成`,
           `${formatDateHeading(TODAY_DATE_KEY)}の日記を新規作成`,
         ]);
+      });
+
+      it('does not show any create button while the entries are still loading, and shows them once loading has finished (境界値: 読み込み中は日記の有無が未確定)', async () => {
+        let resolveGetAllKeys: (value: string[]) => void = () => {};
+        jest.spyOn(AsyncStorage, 'getAllKeys').mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveGetAllKeys = resolve as (value: string[]) => void;
+            }),
+        );
+
+        await AsyncStorage.setItem(CALENDAR_LAYOUT_PREFERENCE_STORAGE_KEY, 'week');
+        renderHomeScreenWithLayoutProvider();
+        await waitFor(() => expect(screen.UNSAFE_queryAllByType(Calendar)).toHaveLength(0));
+
+        expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(1);
+        expect(queryWeekCreateButtons()).toHaveLength(0);
+
+        await act(async () => {
+          resolveGetAllKeys([]);
+        });
+
+        expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
+        expect(queryWeekCreateButtons()).toHaveLength(2);
       });
 
       it('does not show a create button for a day that already has an entry (正常系)', async () => {
@@ -5697,7 +5729,7 @@ describe('HomeScreen', () => {
         );
         jest.clearAllMocks();
 
-        await renderInWeekLayout();
+        await renderInWeekLayoutAfterLoad();
 
         expect(queryWeekCreateButtons()).toHaveLength(1);
         expect(
@@ -5707,7 +5739,7 @@ describe('HomeScreen', () => {
       });
 
       it('gives the create button a button role and a touch target of at least 44pt (アクセシビリティ)', async () => {
-        await renderInWeekLayout();
+        await renderInWeekLayoutAfterLoad();
 
         const button = getWeekCreateButton(PAST_DATE_KEY);
         expect(button.props.accessibilityRole).toBe('button');
@@ -5715,7 +5747,7 @@ describe('HomeScreen', () => {
       });
 
       it('shows a create button on every day of a fully past week (境界値: 全日が過去の週)', async () => {
-        await renderInWeekLayout();
+        await renderInWeekLayoutAfterLoad();
 
         fireEvent.press(screen.getByLabelText('前の日へ移動'));
         fireEvent.press(screen.getByLabelText('前の日へ移動'));
@@ -5724,7 +5756,7 @@ describe('HomeScreen', () => {
       });
 
       it('opens the new-entry modal for the tapped past day without navigating or moving the focus (正常系)', async () => {
-        await renderInWeekLayout();
+        await renderInWeekLayoutAfterLoad();
 
         fireEvent.press(getWeekCreateButton(PAST_DATE_KEY));
 
@@ -5737,7 +5769,7 @@ describe('HomeScreen', () => {
       });
 
       it('saves an entry anchored to the tapped day and replaces its create button with the entry (正常系: 保存後の反映)', async () => {
-        await renderInWeekLayout();
+        await renderInWeekLayoutAfterLoad();
 
         fireEvent.press(getWeekCreateButton(PAST_DATE_KEY));
         fireEvent.changeText(getNewEntryInput(), '過去日の日記');
@@ -5754,7 +5786,7 @@ describe('HomeScreen', () => {
       });
 
       it('keeps moving the focus, not opening the modal, when a day header is pressed (回帰: 日付ヘッダーの既存操作)', async () => {
-        await renderInWeekLayout();
+        await renderInWeekLayoutAfterLoad();
 
         fireEvent.press(
           screen.getByLabelText(`${formatDateHeading(PAST_DATE_KEY)}にフォーカスを移動`),

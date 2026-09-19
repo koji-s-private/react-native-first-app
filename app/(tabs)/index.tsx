@@ -273,10 +273,13 @@ function WeekCalendarView({
   entriesByDate,
   onEntryPress,
   onCreateEntry,
+  isLoading,
 }: {
   entriesByDate: Record<string, DiaryEntry[]>;
   onEntryPress: (dateKey: string) => void;
   onCreateEntry: (dateKey: string) => void;
+  // 日記の有無が未確定の間は新規作成ボタンを出さない
+  isLoading: boolean;
 }) {
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
@@ -407,7 +410,7 @@ function WeekCalendarView({
                       </ThemedText>
                     </Pressable>
                   ))}
-                  {dayEntries.length === 0 && weekDay.dateKey <= todayDateKey ? (
+                  {!isLoading && dayEntries.length === 0 && weekDay.dateKey <= todayDateKey ? (
                     <Pressable
                       onPress={() => onCreateEntry(weekDay.dateKey)}
                       style={[styles.weekCreateButton, { borderColor: tintColor }]}
@@ -1084,6 +1087,7 @@ export default function HomeScreen() {
                   entriesByDate={entriesByDate}
                   onEntryPress={handleWeekEntryPress}
                   onCreateEntry={openNewEntryModal}
+                  isLoading={isLoading}
                 />
               ) : (
                 <View

@@ -192,6 +192,19 @@ describe('DiaryEntryComposerModal', () => {
       expect(removeItemSpy).toHaveBeenCalledWith(KEY_0919);
     });
 
+    it('keeps the stored draft when the modal is closed with an empty input before the draft restoration has finished (境界値: 復元前に閉じる)', async () => {
+      loadDraftTextMock.mockImplementationOnce(() => new Promise(() => {}));
+      render(<DiaryEntryComposerModal {...defaultProps} />);
+      await advance(0);
+
+      fireEvent.press(screen.getByRole('button', { name: '閉じる' }));
+      await advance(DEBOUNCE_MS * 2);
+
+      expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
+      expect(removeItemSpy).not.toHaveBeenCalled();
+      expect(saveDraftTextMock).not.toHaveBeenCalled();
+    });
+
     it('does not close, and keeps auto-saving, when "キャンセル" is chosen in the discard confirmation (正常系)', async () => {
       render(<Host />);
       await advance(0);
