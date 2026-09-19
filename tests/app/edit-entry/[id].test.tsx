@@ -16,6 +16,16 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
+let mockSafeAreaBottom = 0;
+jest.mock('react-native-safe-area-context', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const safeAreaMock = require('react-native-safe-area-context/jest/mock').default;
+  return {
+    ...safeAreaMock,
+    useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: mockSafeAreaBottom, left: 0 }),
+  };
+});
+
 // jest-expoのオートモックは`getRandomBytes`を提供しないため、Node標準の`crypto`モジュールで代替する
 // (tests/utils/diary-storage.test.tsと同じ方式)。
 jest.mock('expo-crypto', () => {
@@ -185,6 +195,7 @@ describe('EditEntryScreen', () => {
     secureStoreMock.__reset();
     jest.clearAllMocks();
     setMockIdParam(ENTRY_ID);
+    mockSafeAreaBottom = 0;
   });
 
   afterEach(() => {
@@ -201,6 +212,39 @@ describe('EditEntryScreen', () => {
     render(<EditEntryScreen />);
 
     expect(await screen.findByDisplayValue('編集前の日記')).toBeTruthy();
+  });
+
+  it('adds the bottom safe-area inset to the editor padding', async () => {
+    mockSafeAreaBottom = 34;
+    await seedDiaryEntry({
+      id: ENTRY_ID,
+      text: 'セーフエリアを確認する日記',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    render(<EditEntryScreen />);
+    await screen.findByDisplayValue('セーフエリアを確認する日記');
+
+    const containerStyle = StyleSheet.flatten(
+      screen.getByTestId('edit-entry-container').props.style,
+    );
+    expect(containerStyle.paddingBottom).toBe(50);
+  });
+
+  it('loads the entry when StrictMode re-runs the mount effect', async () => {
+    await seedDiaryEntry({
+      id: ENTRY_ID,
+      text: 'StrictModeで読み込む日記',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    render(
+      <React.StrictMode>
+        <EditEntryScreen />
+      </React.StrictMode>,
+    );
+
+    expect(await screen.findByDisplayValue('StrictModeで読み込む日記')).toBeTruthy();
   });
 
   it('shows a message instead of the editor when no entry matches the given id (異常系/境界値)', async () => {

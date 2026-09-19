@@ -11,6 +11,7 @@ import {
   StyleSheet,
   TextInput,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SaveToast } from '@/components/save-toast';
 import { ThemedText } from '@/components/themed-text';
@@ -34,7 +35,7 @@ const SAVE_SUCCESS_MESSAGE = '保存しました';
 // 遷移が早すぎると保存できたかを確認できないため、トーストを読める長さだけ画面に留める
 const NAVIGATE_BACK_DELAY_AFTER_SAVE_MS = 1200;
 
-// 日記1件を編集する専用画面(Issue #221)。従来はカレンダー画面
+// 日記1件を編集する専用画面。従来はカレンダー画面
 // (`app/(tabs)/index.tsx`)の日付一覧モーダルの上にさらに重ねて表示する編集モーダルだったが、
 // 編集専用の画面へ遷移する方式に置き換えている。未保存の変更を持ったまま画面を離れようとした
 // 場合の破棄確認は、ヘッダーの戻る操作・Android物理戻るボタン・スワイプ戻るジェスチャーの
@@ -44,6 +45,7 @@ export default function EditEntryScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
 
   const [isLoaded, setIsLoaded] = useState(false);
   const [editDraft, setEditDraft] = useState('');
@@ -78,6 +80,7 @@ export default function EditEntryScreen() {
   const [saveToastMessage, setSaveToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       cancelNavigateBackDelayRef.current?.();
@@ -322,7 +325,10 @@ export default function EditEntryScreen() {
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ThemedView style={styles.container}>
+      <ThemedView
+        style={[styles.container, { paddingBottom: 16 + insets.bottom }]}
+        testID="edit-entry-container"
+      >
         <TextInput
           style={[styles.input, { color: textColor, borderColor: tintColor }]}
           value={editDraft}

@@ -1,7 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
 import { randomUUID } from 'expo-crypto';
 import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -28,9 +28,17 @@ import {
 // コピー成功時に一時的に表示するトーストのメッセージ
 const COPY_SUCCESS_MESSAGE = 'コピーしました';
 const EMPTY_STATE_MESSAGE = 'この日の日記はまだありません';
+const DELETE_UNDO_DELAY_MS = 5000;
 // 全件読み込みに失敗した場合に、「その日は日記が無い」と区別して表示するメッセージ
 const LOAD_ERROR_MESSAGE =
   '日記データを読み込めませんでした。アプリを再起動しても解決しない場合は端末の復元設定をご確認ください。';
+
+function sortEntriesByCreatedAt(entries: DiaryEntry[]): DiaryEntry[] {
+  return [...entries].sort((a, b) => {
+    const timeDifference = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    return timeDifference !== 0 ? timeDifference : a.id.localeCompare(b.id);
+  });
+}
 
 // 指定した日付('YYYY-MM-DD')の日記一覧を表示する専用画面。
 // 従来はカレンダー画面(`app/(tabs)/index.tsx`)にモーダル(ドロワー)として重ねて
@@ -45,6 +53,16 @@ export default function DayEntriesScreen() {
   const [hasLoadError, setHasLoadError] = useState(false);
   // コピー成功時に一時的に表示するトーストのメッセージ。nullの間は非表示
   const [copyToastMessage, setCopyToastMessage] = useState<string | null>(null);
+  const [pendingDeletedEntries, setPendingDeletedEntries] = useState<DiaryEntry[]>([]);
+  const [isRestoringDeletedEntries, setIsRestoringDeletedEntries] = useState(false);
+  const [hasUndoError, setHasUndoError] = useState(false);
+  const pendingDeletedEntriesRef = useRef<DiaryEntry[]>([]);
+  const isRestoringDeletedEntriesRef = useRef(false);
+  const isDeletingEntryRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const activeDateRef = useRef(date);
+  const previousDateRef = useRef(date);
+  activeDateRef.current = date;
   // この日の新規作成モーダルを開いているか
   const [isComposerOpen, setIsComposerOpen] = useState(false);
 
@@ -54,6 +72,22 @@ export default function DayEntriesScreen() {
   // このスタック画面はタブバーを持たないため、セーフエリア下端(ホームインジケータ等)ぶんのみ
   // モーダルコンテンツの下端に加算すればよい(タブバー分の加算はapp/(tabs)/index.tsx側のみ必要)
   const insets = useSafeAreaInsets();
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (previousDateRef.current !== date) {
+      pendingDeletedEntriesRef.current = [];
+      setPendingDeletedEntries([]);
+      setHasUndoError(false);
+      previousDateRef.current = date;
+    }
+  }, [date]);
 
   const handleOpenComposer = useCallback(() => {
     setIsComposerOpen(true);
@@ -92,10 +126,9 @@ export default function DayEntriesScreen() {
       },
     });
     setEntries(
-      allEntries
-        .filter((entry) => toDateKey(new Date(entry.createdAt)) === date)
-        // 各日付内は書かれた時刻の昇順に揃える(カレンダー画面の一覧表示と同じ並び順)
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
+      sortEntriesByCreatedAt(
+        allEntries.filter((entry) => toDateKey(new Date(entry.createdAt)) === date),
+      ),
     );
     setHasLoadError(loadFailed);
     setHasLoadedEntries(true);
@@ -146,6 +179,15 @@ export default function DayEntriesScreen() {
     setCopyToastMessage(null);
   }, []);
 
+  const handleHideDeleteUndoToast = useCallback(() => {
+    if (isRestoringDeletedEntriesRef.current) {
+      return;
+    }
+    pendingDeletedEntriesRef.current = [];
+    setPendingDeletedEntries([]);
+    setHasUndoError(false);
+  }, []);
+
   const handleCopyEntry = useCallback(async (entry: DiaryEntry) => {
     try {
       await Clipboard.setStringAsync(entry.text);
@@ -162,27 +204,100 @@ export default function DayEntriesScreen() {
     [router],
   );
 
+  const handleUndoDelete = useCallback(async () => {
+    if (isRestoringDeletedEntriesRef.current || pendingDeletedEntriesRef.current.length === 0) {
+      return;
+    }
+
+    isRestoringDeletedEntriesRef.current = true;
+    setIsRestoringDeletedEntries(true);
+    setHasUndoError(false);
+    const entriesToRestore = [...pendingDeletedEntriesRef.current];
+    const restoreDate = activeDateRef.current;
+
+    try {
+      const results = await Promise.allSettled(entriesToRestore.map(saveDiaryEntry));
+      const restoredEntries = entriesToRestore.filter(
+        (_, index) => results[index].status === 'fulfilled',
+      );
+      const restoredIds = new Set(restoredEntries.map((entry) => entry.id));
+
+      if (!isMountedRef.current || activeDateRef.current !== restoreDate) {
+        return;
+      }
+
+      setEntries((current) =>
+        sortEntriesByCreatedAt([
+          ...current.filter((entry) => !restoredIds.has(entry.id)),
+          ...restoredEntries,
+        ]),
+      );
+      setPendingDeletedEntries((current) => {
+        const remaining = current.filter((entry) => !restoredIds.has(entry.id));
+        pendingDeletedEntriesRef.current = remaining;
+        return remaining;
+      });
+
+      if (restoredEntries.length !== entriesToRestore.length) {
+        setHasUndoError(true);
+        Alert.alert(
+          '復元に失敗しました',
+          '復元できなかった日記があります。もう一度お試しください。',
+        );
+      }
+    } finally {
+      isRestoringDeletedEntriesRef.current = false;
+      if (isMountedRef.current) {
+        setIsRestoringDeletedEntries(false);
+      }
+    }
+  }, []);
+
   const handleDeleteEntry = useCallback(
-    async (entryId: string) => {
-      setEntries((current) => current.filter((entry) => entry.id !== entryId));
+    async (entry: DiaryEntry) => {
+      if (isDeletingEntryRef.current) {
+        return;
+      }
+      isDeletingEntryRef.current = true;
+      const deleteDate = date;
+      setEntries((current) => current.filter((item) => item.id !== entry.id));
 
       try {
-        await deleteDiaryEntry(entryId);
+        await deleteDiaryEntry(entry.id);
+        if (!isMountedRef.current || activeDateRef.current !== deleteDate) {
+          return;
+        }
+        setPendingDeletedEntries((current) => {
+          const next = [...current.filter((item) => item.id !== entry.id), entry];
+          pendingDeletedEntriesRef.current = next;
+          return next;
+        });
+        setHasUndoError(false);
       } catch {
-        // 永続化に失敗した場合は最新の内容で読み直し、削除前の状態に戻す
+        if (!isMountedRef.current || activeDateRef.current !== deleteDate) {
+          return;
+        }
         await loadEntries();
-        Alert.alert('削除に失敗しました', 'もう一度お試しください。');
+        if (isMountedRef.current) {
+          Alert.alert('削除に失敗しました', 'もう一度お試しください。');
+        }
+      } finally {
+        isDeletingEntryRef.current = false;
       }
     },
-    [loadEntries],
+    [date, loadEntries],
   );
 
   const handleDeletePress = useCallback(
     (entry: DiaryEntry) => {
-      Alert.alert('日記を削除しますか?', 'この操作は取り消せません。', [
-        { text: 'キャンセル', style: 'cancel' },
-        { text: '削除', style: 'destructive', onPress: () => handleDeleteEntry(entry.id) },
-      ]);
+      Alert.alert(
+        '日記を削除しますか?',
+        `削除後、${DELETE_UNDO_DELAY_MS / 1000}秒間は元に戻せます。`,
+        [
+          { text: 'キャンセル', style: 'cancel' },
+          { text: '削除', style: 'destructive', onPress: () => handleDeleteEntry(entry) },
+        ],
+      );
     },
     [handleDeleteEntry],
   );
@@ -207,6 +322,24 @@ export default function DayEntriesScreen() {
     <ThemedView style={styles.container}>
       {copyToastMessage ? (
         <SaveToast message={copyToastMessage} onHide={handleHideCopyToast} testID="copy-toast" />
+      ) : null}
+      {pendingDeletedEntries.length > 0 ? (
+        <SaveToast
+          message={
+            isRestoringDeletedEntries
+              ? '日記を復元しています'
+              : hasUndoError
+                ? '復元できなかった日記があります'
+                : pendingDeletedEntries.length === 1
+                  ? '日記を削除しました'
+                  : `${pendingDeletedEntries.length}件の日記を削除しました`
+          }
+          onHide={handleHideDeleteUndoToast}
+          testID="delete-undo-toast"
+          actionLabel={isRestoringDeletedEntries ? undefined : hasUndoError ? '再試行' : '元に戻す'}
+          onAction={isRestoringDeletedEntries ? undefined : handleUndoDelete}
+          autoHideDelayMs={isRestoringDeletedEntries ? null : DELETE_UNDO_DELAY_MS}
+        />
       ) : null}
       <FlatList
         data={entries}
