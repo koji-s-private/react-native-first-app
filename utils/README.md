@@ -50,7 +50,7 @@ utils/
 - `isDraftStorageKey(key)`: キーが下書き系(完全一致または接頭辞一致)かを判定します。`clearAllDiaryEntries()`が全件削除の対象キーを漏れなく拾うために使います。
 - `saveDraftText(key, text)` / `loadDraftText(key)`: 下書き本文を暗号化して保存・復号して復元します。暗号化対応前に保存された平文の下書きも読み込めます(後方互換)。保存が無い場合、`loadDraftText`は`null`を返します。
 
-[`app/(tabs)/index.tsx`](<../app/(tabs)/index.tsx>)、[`app/day-entries/[date].tsx`](<../app/day-entries/[date].tsx>)、[`app/edit-entry/[id].tsx`](<../app/edit-entry/[id].tsx>)、[`components/diary-entry-composer-modal.tsx`](../components/diary-entry-composer-modal.tsx)から利用されます。`isDraftStorageKey`は[`utils/diary-storage.ts`](diary-storage.ts)の`clearAllDiaryEntries()`が利用します。
+`saveDraftText` / `loadDraftText`は[`app/(tabs)/index.tsx`](<../app/(tabs)/index.tsx>)、[`app/edit-entry/[id].tsx`](<../app/edit-entry/[id].tsx>)、[`components/diary-entry-composer-modal.tsx`](../components/diary-entry-composer-modal.tsx)から利用されます。[`app/day-entries/[date].tsx`](<../app/day-entries/[date].tsx>)は下書きキー接頭辞の定数(`DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX`)を参照して新規作成モーダルへ渡すのみで、保存・復元はモーダル側が行います。`isDraftStorageKey`は[`utils/diary-storage.ts`](diary-storage.ts)の`clearAllDiaryEntries()`が利用します。
 
 ## `diary-encryption.ts` の構成
 
@@ -95,7 +95,7 @@ JSONファイルから日記データをインポート(再取り込み)する�
 - `isDiaryEntry(value)`: 値が`DiaryEntry`として妥当な形かを判定する型ガードです。AsyncStorageから読み込んだJSONは実行時に型が保証されないため、`as`で決め打ちせずここで検証します。[`diary-import.ts`](diary-import.ts)のインポート時の検証でも再利用します。
 - `DIARY_ENTRIES_STORAGE_KEY`: 旧方式(全件を1つの配列としてまとめて保存する単一キー)のAsyncStorageキーの定数。現在は移行(マイグレーション)元としてのみ参照されます。
 - `DIARY_ENTRY_KEY_PREFIX` / `buildDiaryEntryKey(id)`: エントリ単位の個別キー(`diary-entry:<id>`)のプレフィックスと、idからキー文字列を組み立てる関数です。
-- `getAllDiaryEntries(options?)`: 保存済みの日記データを全件取得します。呼び出しの冒頭で`DIARY_ENTRIES_STORAGE_KEY`にレガシーデータが残っていないか確認し、残っていれば個別キー方式へ自動移行してから読み込みます(移行は複数回呼ばれても安全)。`createdAt`の降順(新しい順)にソートして返します。復号・パースに失敗した要素はその1件だけをスキップし、レガシーデータの移行失敗やストレージ全体の読み込み失敗など全件に影響する例外の場合は、例外を投げず空配列を返します。「0件」と「読み込みエラー」を呼び出し側で区別したい場合は、`options.onError`(`GetAllDiaryEntriesOptions`)に渡したコールバックが、後者の例外発生時に呼ばれます。
+- `getAllDiaryEntries(options?)`: 保存済みの日記データを全件取得します。呼び出しの冒頭で`DIARY_ENTRIES_STORAGE_KEY`にレガシーデータが残っていないか確認し、残っていれば個別キー方式へ自動移行してから読み込みます(移行は複数回呼ばれても安全)。`createdAt`の降順(新しい順)にソートして返します。復号・パースに失敗した要素はその1件だけをスキップします。暗号鍵の取得失敗・レガシーデータの移行失敗・ストレージ全体の読み込み失敗など全件に影響する例外の場合は、例外を投げず空配列を返します。「0件」と「読み込みエラー」を呼び出し側で区別したい場合は、`options.onError`(`GetAllDiaryEntriesOptions`)に渡したコールバックが、後者の例外発生時に呼ばれます。
 - `getDiaryEntryById(id)`: idを指定して日記エントリ1件だけを取得します。全件取得の`getAllDiaryEntries`を使わずO(1)で取得できるため、編集画面が利用します。見つからない場合・復号に失敗した場合は`null`を返します。
 - `saveDiaryEntry(entry)` / `deleteDiaryEntry(id)`: エントリ1件を、対応する個別キーに対してのみ保存・削除します。
 - `clearAllDiaryEntries()`: 日記データ(個別キー方式のエントリ、未保存の下書き(`diary-draft-storage.ts`の`isDraftStorageKey`に該当するキー)、および念のためレガシーキー)のみをAsyncStorageから削除します。暗号鍵(`expo-secure-store`側)など日記データ以外のキーには影響しません。ストアのデータ削除要件(Google Play/Apple双方でユーザーによるデータ削除手段の提供が求められる)に対応するため、[`app/(tabs)/settings.tsx`](<../app/(tabs)/settings.tsx>)の確認ダイアログ付きボタンから呼び出されます。
