@@ -8,7 +8,6 @@ import {
   TabScreenContainer,
 } from '@/components/tab-screen-container';
 
-// 実機では`expo-router`の`ExpoRoot`が自動的に`SafeAreaProvider`で全体をラップするが、
 describe('TabScreenContainer (Issue #125: タブ画面共通のセーフエリア対応コンテナ)', () => {
   it('renders its children', () => {
     render(
