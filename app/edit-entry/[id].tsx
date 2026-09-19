@@ -209,7 +209,11 @@ export default function EditEntryScreen() {
 
         lastSaveSucceededRef.current = true;
 
-        // 待機中も保存処理中(isSavingEdit)のままにすることで、保存ボタンの再押下を防ぎ、
+        // 下書きキー削除のawait中にアンマウントされた場合、解除できないタイマーを作らない
+        if (!isMountedRef.current) {
+          return;
+        }
+        // 待機中も保存処理中(isSavingEdit)のままにすることで、保存ボタンの再押下と本文入力を防ぎ、
         // 戻る操作はbeforeRemoveでブロックされて待機完了後に再送される
         setSaveToastMessage(SAVE_SUCCESS_MESSAGE);
         await new Promise<void>((resolve) => {
@@ -324,6 +328,7 @@ export default function EditEntryScreen() {
           value={editDraft}
           onChangeText={handleChangeEditDraft}
           multiline
+          editable={!isSavingEdit}
           accessibilityLabel="日記本文"
           // 他の本文入力欄と同様、grapheme単位の切り詰めをonChangeText側で行うため
           // maxLength propはあえて指定しない
