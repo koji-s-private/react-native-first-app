@@ -129,6 +129,11 @@ const secureStoreMock = SecureStore as unknown as { __reset: () => void };
 
 const ENTRY_ID = 'entry-1';
 
+// 実装(`app/edit-entry/[id].tsx`)の保存成功トースト表示から画面遷移までの待機時間(1200ms)と対応させる
+const NAVIGATE_BACK_DELAY_AFTER_SAVE_MS = 1200;
+// 実タイマーで遷移を待つテスト向け。既定のタイムアウト(1000ms)は待機時間より短いため延ばす
+const NAVIGATE_BACK_WAIT_OPTIONS = { timeout: NAVIGATE_BACK_DELAY_AFTER_SAVE_MS + 2000 };
+
 async function seedDiaryEntry(entry: DiaryEntry): Promise<void> {
   const key = await getOrCreateEncryptionKey();
   await AsyncStorage.setItem(buildDiaryEntryKey(entry.id), encryptText(JSON.stringify(entry), key));
@@ -406,10 +411,120 @@ describe('EditEntryScreen', () => {
     fireEvent.changeText(input, '編集後の日記');
     fireEvent.press(screen.getByRole('button', { name: '保存' }));
 
-    await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1), NAVIGATE_BACK_WAIT_OPTIONS);
 
     const persisted = await readPersistedEntry(ENTRY_ID);
     expect(persisted).toEqual({ id: ENTRY_ID, text: '編集後の日記', createdAt });
+  });
+
+  describe('保存成功トーストの表示と画面遷移までの待機', () => {
+    async function renderAndPressSave(originalText: string, editedText: string) {
+      await seedDiaryEntry({
+        id: ENTRY_ID,
+        text: originalText,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      (AsyncStorage.setItem as jest.Mock).mockClear();
+      render(<EditEntryScreen />);
+      const input = await screen.findByDisplayValue(originalText);
+      fireEvent.changeText(input, editedText);
+      fireEvent.press(screen.getByRole('button', { name: '保存' }));
+    }
+
+    it('shows the save success toast and navigates back only after the delay has elapsed (正常系)', async () => {
+      jest.useFakeTimers();
+      try {
+        await renderAndPressSave('トースト確認前の日記', 'トースト確認後の日記');
+
+        expect(await screen.findByTestId('save-toast')).toBeTruthy();
+        expect(screen.getByText('保存しました')).toBeTruthy();
+        expect(mockBack).not.toHaveBeenCalled();
+
+        await act(async () => {
+          jest.advanceTimersByTime(NAVIGATE_BACK_DELAY_AFTER_SAVE_MS - 1);
+        });
+        expect(mockBack).not.toHaveBeenCalled();
+
+        await act(async () => {
+          jest.advanceTimersByTime(1);
+        });
+        expect(mockBack).toHaveBeenCalledTimes(1);
+        expect(mockDispatch).toHaveBeenCalledWith({ type: 'GO_BACK' });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('keeps the save button disabled and ignores extra presses while waiting to navigate back (連打)', async () => {
+      jest.useFakeTimers();
+      try {
+        await renderAndPressSave('連打確認前の日記', '連打確認後の日記');
+        await screen.findByTestId('save-toast');
+        const saveButton = screen.getByRole('button', { name: '保存' });
+        expect(saveButton.props.accessibilityState).toEqual({ disabled: true });
+
+        fireEvent.press(saveButton);
+        fireEvent.press(saveButton);
+        await act(async () => {
+          jest.advanceTimersByTime(NAVIGATE_BACK_DELAY_AFTER_SAVE_MS);
+        });
+
+        expect(mockBack).toHaveBeenCalledTimes(1);
+        const persistedWrites = (AsyncStorage.setItem as jest.Mock).mock.calls.filter(
+          ([key]) => key === buildDiaryEntryKey(ENTRY_ID),
+        );
+        expect(persistedWrites).toHaveLength(1);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('blocks a leave attempt made while waiting to navigate back and navigates only once after the delay (戻る操作)', async () => {
+      jest.useFakeTimers();
+      try {
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+        await renderAndPressSave('待機中に戻る日記', '待機中に戻る編集後の日記');
+        await screen.findByTestId('save-toast');
+
+        const preventDefault = jest.fn();
+        getBeforeRemoveListener()(buildBeforeRemoveEvent(preventDefault));
+        expect(preventDefault).toHaveBeenCalledTimes(1);
+        expect(Alert.alert).not.toHaveBeenCalled();
+        expect(mockDispatch).not.toHaveBeenCalled();
+
+        await act(async () => {
+          jest.advanceTimersByTime(NAVIGATE_BACK_DELAY_AFTER_SAVE_MS);
+        });
+
+        expect(mockDispatch).toHaveBeenCalledTimes(1);
+        expect(Alert.alert).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('does not navigate back and releases its timers when unmounted while waiting to navigate back (アンマウント)', async () => {
+      jest.useFakeTimers();
+      try {
+        await renderAndPressSave(
+          '待機中にアンマウントされる日記',
+          '待機中にアンマウントされる編集後の日記',
+        );
+        await screen.findByTestId('save-toast');
+
+        const timerCountBeforeUnmount = jest.getTimerCount();
+        screen.unmount();
+        // 画面遷移の待機タイマーとトーストの自動非表示タイマーの2本がアンマウントで解放される
+        expect(jest.getTimerCount()).toBe(timerCountBeforeUnmount - 2);
+
+        await act(async () => {
+          jest.advanceTimersByTime(NAVIGATE_BACK_DELAY_AFTER_SAVE_MS);
+        });
+        expect(mockBack).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
   });
 
   it('does not save when the edited text is emptied out (defense in depth)', async () => {
@@ -445,6 +560,7 @@ describe('EditEntryScreen', () => {
     expect(await screen.findByText('更新に失敗しました。もう一度お試しください。')).toBeTruthy();
     expect(mockBack).not.toHaveBeenCalled();
     expect(screen.getByDisplayValue('失敗するはずの編集')).toBeTruthy();
+    expect(screen.queryByTestId('save-toast')).toBeNull();
   });
 
   it('ignores a second press of the save button while an update is still in flight, preventing a duplicate write', async () => {
@@ -477,7 +593,7 @@ describe('EditEntryScreen', () => {
     await act(async () => {
       resolveSetItem();
     });
-    await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1), NAVIGATE_BACK_WAIT_OPTIONS);
   });
 
   describe('インポート等で紛れ込んだ本文上限超過データを開いた場合の自動切り詰め', () => {
@@ -528,7 +644,7 @@ describe('EditEntryScreen', () => {
 
       fireEvent.press(screen.getByRole('button', { name: '保存' }));
 
-      await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1), NAVIGATE_BACK_WAIT_OPTIONS);
       expect(screen.queryByText('更新に失敗しました。もう一度お試しください。')).toBeNull();
 
       const persisted = await readPersistedEntry(ENTRY_ID);
@@ -688,7 +804,7 @@ describe('EditEntryScreen', () => {
       });
 
       // 保存完了後はhandleSaveEdit内のrouter.back()によってのみ画面を離れる
-      await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1), NAVIGATE_BACK_WAIT_OPTIONS);
       expect(Alert.alert).not.toHaveBeenCalled();
     });
 
@@ -728,7 +844,7 @@ describe('EditEntryScreen', () => {
         resolveSetItem();
       });
 
-      await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1), NAVIGATE_BACK_WAIT_OPTIONS);
       expect(Alert.alert).not.toHaveBeenCalled();
     });
 
@@ -784,7 +900,7 @@ describe('EditEntryScreen', () => {
       const input = await screen.findByDisplayValue('保存後に戻る対象の日記');
       fireEvent.changeText(input, '保存される内容');
       fireEvent.press(screen.getByRole('button', { name: '保存' }));
-      await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1), NAVIGATE_BACK_WAIT_OPTIONS);
 
       // 保存成功後は「未保存の変更」ではなくなるため、以降のbeforeRemoveチェックでは
       // 確認ダイアログを出さない(保存後にeditOriginalTextRefが更新されていることの確認)
@@ -811,7 +927,10 @@ describe('EditEntryScreen', () => {
       // router.back()自体はhandleSaveEdit完了前(isSavingEdit === true)に呼ばれるため、
       // 一度は自身のbeforeRemoveガードでブロックされる。それでも保存完了後にアクションが
       // 再送され、実際に画面遷移(navigation.dispatch)まで完了することを確認する
-      await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith({ type: 'GO_BACK' }));
+      await waitFor(
+        () => expect(mockDispatch).toHaveBeenCalledWith({ type: 'GO_BACK' }),
+        NAVIGATE_BACK_WAIT_OPTIONS,
+      );
       expect(mockBack).toHaveBeenCalledTimes(1);
       expect(Alert.alert).not.toHaveBeenCalled();
 
@@ -855,7 +974,10 @@ describe('EditEntryScreen', () => {
       // handleSaveEdit完了後のrouter.back()がGO_BACKアクションで自身のbeforeRemoveガードを
       // 再度ブロックし、保持していたアクションを上書きする。保存完了後に再送されるのは
       // 最新のGO_BACKであり、先に保持されていた古いPOPアクションではないことを確認する
-      await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith({ type: 'GO_BACK' }));
+      await waitFor(
+        () => expect(mockDispatch).toHaveBeenCalledWith({ type: 'GO_BACK' }),
+        NAVIGATE_BACK_WAIT_OPTIONS,
+      );
       expect(mockDispatch).not.toHaveBeenCalledWith(staleAction);
       expect(mockDispatch).toHaveBeenCalledTimes(1);
     });
@@ -1107,7 +1229,6 @@ describe('EditEntryScreen', () => {
 
         // デバウンスタイマーが発火する(1000ms経過する)前に保存する
         fireEvent.press(screen.getByRole('button', { name: '保存' }));
-        await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
         await waitFor(() =>
           expect(AsyncStorage.removeItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY),
         );
@@ -1123,6 +1244,11 @@ describe('EditEntryScreen', () => {
           DRAFT_STORAGE_KEY,
           expect.any(String),
         );
+
+        await act(async () => {
+          jest.advanceTimersByTime(NAVIGATE_BACK_DELAY_AFTER_SAVE_MS);
+        });
+        expect(mockBack).toHaveBeenCalledTimes(1);
       } finally {
         jest.useRealTimers();
       }
