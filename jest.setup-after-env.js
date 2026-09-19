@@ -1,6 +1,5 @@
-// AsyncStorageモックは`jest.spyOn(...).mockImplementation`等で上書きされても、
-// `jest.clearAllMocks()`/`jest.restoreAllMocks()`では初期実装に戻らず後続のテストへ漏れる。
-// ランダム順でも各テストが独立して動くよう、テストごとに初期実装へ戻し、未消化のOnce設定も破棄する。
+// ランダム順でも各テストが独立して動くよう、AsyncStorageモックの実装を各テスト前に初期状態へ戻す
+// (`jest.clearAllMocks()`/`jest.restoreAllMocks()`ではモックの実装上書きが戻らないため)。
 const asyncStorageInitialImplementations = new Map();
 
 beforeEach(() => {
