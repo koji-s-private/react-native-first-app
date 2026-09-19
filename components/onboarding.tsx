@@ -57,6 +57,8 @@ export function Onboarding({ visible, onFinish }: OnboardingProps) {
       animationType="fade"
       onRequestClose={onFinish}
       onDismiss={handleDismiss}
+      statusBarTranslucent
+      navigationBarTranslucent
     >
       <ThemedView style={styles.container}>
         <View style={styles.header} testID="onboarding-header">

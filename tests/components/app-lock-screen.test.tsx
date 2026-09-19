@@ -45,6 +45,21 @@ describe('AppLockScreen', () => {
     expect(modal.props.visible).toBe(true);
   });
 
+  it('sets statusBarTranslucent and navigationBarTranslucent on the Modal so it matches the edge-to-edge display of the screen behind it', () => {
+    render(
+      <AppLockScreen
+        visible={true}
+        isSupported={true}
+        onAuthenticate={jest.fn().mockResolvedValue('success')}
+        onDisableAppLock={jest.fn()}
+      />,
+    );
+
+    const modal = screen.UNSAFE_getByType(Modal);
+    expect(modal.props.statusBarTranslucent).toBe(true);
+    expect(modal.props.navigationBarTranslucent).toBe(true);
+  });
+
   it('renders the Modal with visible=false when the visible prop is false (正常系: 非表示制御)', () => {
     render(
       <AppLockScreen

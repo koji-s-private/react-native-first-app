@@ -16,6 +16,14 @@ describe('Onboarding', () => {
     expect(modal.props.visible).toBe(false);
   });
 
+  it('sets statusBarTranslucent and navigationBarTranslucent on the Modal so it matches the edge-to-edge display of the screen behind it', () => {
+    render(<Onboarding visible={true} onFinish={jest.fn()} />);
+
+    const modal = screen.UNSAFE_getByType(Modal);
+    expect(modal.props.statusBarTranslucent).toBe(true);
+    expect(modal.props.navigationBarTranslucent).toBe(true);
+  });
+
   it("shows the first slide's title and description when visible becomes true (正常系: 初回起動時の表示)", () => {
     render(<Onboarding visible={true} onFinish={jest.fn()} />);
 

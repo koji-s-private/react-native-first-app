@@ -73,7 +73,7 @@ export function AppLockScreen({
   const showFailureGuidance = consecutiveFailureCount >= CONSECUTIVE_FAILURE_GUIDANCE_THRESHOLD;
 
   return (
-    <Modal visible={visible} animationType="none">
+    <Modal visible={visible} animationType="none" statusBarTranslucent navigationBarTranslucent>
       <ThemedView style={styles.container}>
         <ThemedText type="title" style={styles.title}>
           ロック中
