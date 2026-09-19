@@ -12,6 +12,7 @@ import {
   TextInput,
 } from 'react-native';
 
+import { SaveToast } from '@/components/save-toast';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
@@ -26,6 +27,12 @@ import { getDiaryEntryById, saveDiaryEntry, type DiaryEntry } from '@/utils/diar
 
 // 下書きの自動保存をデバウンスする間隔(ミリ秒)。app/(tabs)/index.tsxの新規作成composerと合わせる
 const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
+
+const SAVE_SUCCESS_MESSAGE = '保存しました';
+
+// 保存成功のトーストを表示してから前の画面へ戻るまでの待ち時間(ミリ秒)。
+// 遷移が早すぎると保存できたかを確認できないため、トーストを読める長さだけ画面に留める
+const NAVIGATE_BACK_DELAY_AFTER_SAVE_MS = 1200;
 
 // 日記1件を編集する専用画面(Issue #221)。従来はカレンダー画面
 // (`app/(tabs)/index.tsx`)の日付一覧モーダルの上にさらに重ねて表示する編集モーダルだったが、
@@ -65,11 +72,20 @@ export default function EditEntryScreen() {
   // 一瞬の間に離脱操作が発生しても、この値は既に正しい結果を保持している。保存失敗時に
   // ブロック済みの離脱アクションを誤って再送しないための判定に使う
   const lastSaveSucceededRef = useRef(false);
+  // 保存成功のトーストを表示中の待機をアンマウント時に打ち切るための関数。待機中のタイマーを
+  // 残さず、保存処理の完了待ち(saveEditのawait)も確実に解消させる
+  const cancelNavigateBackDelayRef = useRef<(() => void) | null>(null);
+  const [saveToastMessage, setSaveToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
+      cancelNavigateBackDelayRef.current?.();
     };
+  }, []);
+
+  const handleHideSaveToast = useCallback(() => {
+    setSaveToastMessage(null);
   }, []);
 
   const textColor = useThemeColor({}, 'text');
@@ -192,6 +208,25 @@ export default function EditEntryScreen() {
         }
 
         lastSaveSucceededRef.current = true;
+
+        // 下書きキー削除のawait中にアンマウントされた場合、解除できないタイマーを作らない
+        if (!isMountedRef.current) {
+          return;
+        }
+        // 待機中も保存処理中(isSavingEdit)のままにすることで、保存ボタンの再押下と本文入力を防ぎ、
+        // 戻る操作はbeforeRemoveでブロックされて待機完了後に再送される
+        setSaveToastMessage(SAVE_SUCCESS_MESSAGE);
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, NAVIGATE_BACK_DELAY_AFTER_SAVE_MS);
+          cancelNavigateBackDelayRef.current = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+        });
+        cancelNavigateBackDelayRef.current = null;
+        if (!isMountedRef.current) {
+          return;
+        }
         router.back();
       },
       onError: () => {
@@ -293,6 +328,7 @@ export default function EditEntryScreen() {
           value={editDraft}
           onChangeText={handleChangeEditDraft}
           multiline
+          editable={!isSavingEdit}
           accessibilityLabel="日記本文"
           // 他の本文入力欄と同様、grapheme単位の切り詰めをonChangeText側で行うため
           // maxLength propはあえて指定しない
@@ -327,6 +363,9 @@ export default function EditEntryScreen() {
         </ThemedView>
         {editError ? (
           <ThemedText style={[styles.errorText, { color: errorColor }]}>{editError}</ThemedText>
+        ) : null}
+        {saveToastMessage ? (
+          <SaveToast message={saveToastMessage} onHide={handleHideSaveToast} />
         ) : null}
       </ThemedView>
     </KeyboardAvoidingView>
