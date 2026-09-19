@@ -1310,8 +1310,9 @@ describe('HomeScreen', () => {
       expect(persisted.text).toBe('保存中の日記');
 
       // 成功パスはcatch節を通らずdraftに触れないため、ユーザーが新しく入力した内容が
-      // そのまま保持され、エラーメッセージも表示されない
+      // そのまま保持され、保存中に編集された下書きキーも削除されず、エラーメッセージも表示されない
       expect(input.props.value).toBe('書きかけの新しい下書き');
+      expect(AsyncStorage.removeItem).not.toHaveBeenCalledWith('diary-draft');
       expect(screen.queryByText('保存に失敗しました。もう一度お試しください。')).toBeNull();
     });
 
@@ -1524,8 +1525,42 @@ describe('HomeScreen', () => {
           await Promise.resolve();
         });
 
-        // draftEditedRefにより、入力済みの内容が古い下書きで上書きされない
+        // 復元前の編集が記録され、入力済みの内容が古い下書きで上書きされない
         expect(input.props.value).toBe('ユーザーが入力中の新しい内容');
+      } finally {
+        if (originalGetItemImpl) {
+          getItemSpy.mockImplementation(originalGetItemImpl);
+        }
+      }
+    });
+
+    it('does not restore an older draft after the user edits the input back to empty before restore resolves', async () => {
+      let resolveDraftRead: (value: string | null) => void = () => {};
+      const originalGetItemImpl = (AsyncStorage.getItem as jest.Mock).getMockImplementation();
+      const getItemSpy = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key: string) => {
+        if (key === DRAFT_STORAGE_KEY) {
+          return new Promise<string | null>((resolve) => {
+            resolveDraftRead = resolve;
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      try {
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY));
+
+        const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+        fireEvent.changeText(input, '一時的な入力');
+        fireEvent.changeText(input, '');
+
+        await act(async () => {
+          resolveDraftRead('保存済みの古い下書き');
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        expect(input.props.value).toBe('');
       } finally {
         if (originalGetItemImpl) {
           getItemSpy.mockImplementation(originalGetItemImpl);
@@ -1677,7 +1712,7 @@ describe('HomeScreen', () => {
       expect(AsyncStorage.removeItem).not.toHaveBeenCalledWith(DRAFT_STORAGE_KEY);
     });
 
-    it('does not leave an unhandled promise rejection when the initial draft restore getItem() call rejects, and still enables auto-save afterward (regression for the f63bc33 fix)', async () => {
+    it('does not leave an unhandled promise rejection when the initial draft restore getItem() call rejects, and still enables auto-save afterward', async () => {
       // async-storage-mockは元々jest.fn()のため、jest.spyOnの`mockRestore()`では元の実装に
       // 戻らない(既知の挙動)。上書き前の実装を保存しておき、finallyで明示的に復元する
       const originalGetItemImpl = (AsyncStorage.getItem as jest.Mock).getMockImplementation();
@@ -4448,14 +4483,14 @@ describe('HomeScreen', () => {
       expect(StyleSheet.flatten(dayHeader.props.style).color).toBe(Colors.dark.text);
     });
 
-    // PR #288のレビュー指摘に対する回帰テスト。月ピッカーを使わずスワイプ・矢印操作(ここでは
+    // 月ピッカーを使わずスワイプ・矢印操作(ここでは
     // それらと同じ経路であるCalendarのonMonthChangeを直接呼び出して再現する)で表示月を進めた後に
     // テーマを切り替えると、key={colorScheme}によるCalendarの強制再マウントが発生する。
     // react-native-calendarsのCalendarは`useDidUpdate`(初回マウント時はスキップされるフック)
     // 経由でしかonMonthChangeを呼ばないため、再マウント時(新規インスタンスの初回マウント扱い)には
     // onMonthChangeが発火せず、calendarInitialDateを同期していないとヘッダー表示(進めた月のまま)と
     // 実際の日付グリッド(calendarInitialDateが古いままなら今日の月へ巻き戻る)が食い違ってしまう
-    it('keeps the actually rendered day grid in sync with the month reached via swipe/arrow navigation (not the month picker) after a theme-driven remount (回帰: PR #288 レビュー指摘)', async () => {
+    it('keeps the actually rendered day grid in sync with the month reached via swipe/arrow navigation (not the month picker) after a theme-driven remount (回帰)', async () => {
       const now = new Date();
       mockedUseColorScheme.mockReturnValue('light');
       const { rerender } = render(<HomeScreen />);
@@ -4609,7 +4644,7 @@ describe('HomeScreen', () => {
       expect(mockPush).toHaveBeenCalledWith(`/day-entries/${toDateKeyForTest(now, dayWithEntry)}`);
     });
 
-    it('sets accessibilityRole="button" and an accessibilityLabel combining the date heading and full text on each search result item, so screen readers can identify it (アクセシビリティ)', async () => {
+    it('sets accessibilityRole="button" and an accessibilityLabel combining the date heading and text on each search result item, so screen readers can identify it (アクセシビリティ)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -4631,6 +4666,33 @@ describe('HomeScreen', () => {
         `${formatDateHeading(dateKey)}の日記: 今日は公園を散歩した`,
       );
       expect(resultButton.props.accessibilityRole).toBe('button');
+    });
+
+    it('truncates long search result text in the accessibilityLabel while keeping the rendered excerpt available', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const longEntryText = `検索キーワード${'あ'.repeat(60)}`;
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: longEntryText, createdAt: isoAt(now, dayWithEntry) }]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '検索キーワード');
+      expect(await screen.findByText(/検索キーワード/)).toBeTruthy();
+
+      const dateKey = toDateKeyForTest(now, dayWithEntry);
+      expect(
+        screen.getByLabelText(
+          `${formatDateHeading(dateKey)}の日記: ${longEntryText.slice(0, 50)}…`,
+        ),
+      ).toBeTruthy();
+      expect(
+        screen.queryByLabelText(`${formatDateHeading(dateKey)}の日記: ${longEntryText}`),
+      ).toBeNull();
     });
 
     it('excerpts the matched portion of the entry text (with surrounding context) rather than only the first line, unlike the calendar cell title', async () => {
@@ -5637,7 +5699,7 @@ describe('HomeScreen', () => {
       });
     });
 
-    describe('日付フォーカスの移動(#284: ヘッダーの日付タップ・前後日ボタンのタップ・週をまたぐ移動)', () => {
+    describe('日付フォーカスの移動(ヘッダーの日付タップ・前後日ボタンのタップ・週をまたぐ移動)', () => {
       afterEach(() => {
         jest.useRealTimers();
       });
@@ -5713,7 +5775,7 @@ describe('HomeScreen', () => {
       });
     });
 
-    describe('スワイプ操作によるフォーカス移動(#284: PanResponderによる左右スワイプ)', () => {
+    describe('スワイプ操作によるフォーカス移動(PanResponderによる左右スワイプ)', () => {
       afterEach(() => {
         jest.useRealTimers();
       });

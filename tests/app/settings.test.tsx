@@ -5,7 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as Sharing from 'expo-sharing';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, Text } from 'react-native';
+import { AccessibilityInfo, Alert, Platform, ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import SettingsScreen from '@/app/(tabs)/settings';
@@ -1290,7 +1290,7 @@ describe('日記データをインポートボタン(データ管理セクショ
     );
   });
 
-  // reviewerからの指摘(PR #222): 暗号鍵が未生成の状態(=まさにバックアップ復元時に起きる状況)で
+  // 暗号鍵が未生成の状態(=まさにバックアップ復元時に起きる状況)で
   // 複数件を並列(Promise.all)保存すると、各保存処理が同時に鍵の生成・書き込みを行い、
   // 最後に勝った鍵以外で暗号化されたエントリが復号不能になり消失していた。逐次保存への
   // 修正(for...of)によりこれが起きないことを回帰テストとして固定する。
@@ -1662,7 +1662,7 @@ describe('外観セクション(ライト/ダーク/端末に合わせるの切�
   });
 });
 
-describe('カレンダー表示レイアウトセクション(月表示/週表示の切り替え #283)', () => {
+describe('カレンダー表示レイアウトセクション(月表示/週表示の切り替え)', () => {
   const SECTION_TITLE = 'カレンダー表示レイアウト';
   const MONTH_LABEL = '月表示';
   const WEEK_LABEL = '週表示';
@@ -1812,6 +1812,8 @@ describe('リマインダーセクション(日記を書く習慣化のための
     );
   }
 
+  const originalPlatformOS = Platform.OS;
+
   beforeEach(async () => {
     await AsyncStorage.clear();
     jest.clearAllMocks();
@@ -1823,6 +1825,10 @@ describe('リマインダーセクション(日記を書く習慣化のための
     );
     mockedDiaryReminderNotifications.scheduleDailyReminderAsync.mockResolvedValue(undefined);
     mockedDiaryReminderNotifications.cancelDailyReminderAsync.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    Platform.OS = originalPlatformOS;
   });
 
   it('renders the "リマインダー" section with the toggle switch and time stepper, defaulting to OFF/21:00 (操作導線の存在確認・初期値)', () => {
@@ -1932,11 +1938,61 @@ describe('リマインダーセクション(日記を書く習慣化のための
     // 21時(既定値)から+3時間で0時に繰り上がることを確認する(21 -> 22 -> 23 -> 0)
     await act(async () => {
       fireEvent.press(screen.getByLabelText(HOUR_INCREASE_LABEL));
+    });
+    await act(async () => {
       fireEvent.press(screen.getByLabelText(HOUR_INCREASE_LABEL));
+    });
+    await act(async () => {
       fireEvent.press(screen.getByLabelText(HOUR_INCREASE_LABEL));
     });
 
-    expect(screen.getByText('00')).toBeTruthy();
+    expect(screen.getByLabelText('時 00')).toBeTruthy();
+  });
+
+  it('exposes the changed stepper value as a polite live region on Android without using the iOS announcement API', async () => {
+    Platform.OS = 'android';
+    const announceSpy = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
+    try {
+      renderSettingsScreen();
+
+      const initialHour = screen.getByLabelText('時 21');
+      expect(initialHour.props.accessibilityLiveRegion).toBe('polite');
+      expect(announceSpy).not.toHaveBeenCalled();
+
+      await act(async () => {
+        fireEvent.press(screen.getByLabelText(HOUR_INCREASE_LABEL));
+      });
+
+      expect(screen.getByLabelText('時 22').props.accessibilityLiveRegion).toBe('polite');
+      expect(announceSpy).not.toHaveBeenCalled();
+    } finally {
+      announceSpy.mockRestore();
+    }
+  });
+
+  it('announces the changed stepper value on iOS without relying on the Android live region', async () => {
+    Platform.OS = 'ios';
+    const announceSpy = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
+    try {
+      renderSettingsScreen();
+
+      const initialHour = screen.getByLabelText('時 21');
+      expect(initialHour.props.accessibilityLiveRegion).toBeUndefined();
+      expect(announceSpy).not.toHaveBeenCalled();
+
+      await act(async () => {
+        fireEvent.press(screen.getByLabelText(HOUR_INCREASE_LABEL));
+      });
+
+      expect(screen.getByLabelText('時 22').props.accessibilityLiveRegion).toBeUndefined();
+      expect(announceSpy).toHaveBeenCalledWith('時 22');
+    } finally {
+      announceSpy.mockRestore();
+    }
   });
 
   it('wraps the hour from 0 to 23 when decreased past the minimum (境界値: 時の繰り下がり)', async () => {
@@ -2854,7 +2910,7 @@ describe('リマインダーセクション(日記を書く習慣化のための
   });
 });
 
-describe('アプリロックセクション(生体認証によるアプリロック #155)', () => {
+describe('アプリロックセクション(生体認証によるアプリロック)', () => {
   const APP_LOCK_SECTION_TITLE = 'アプリロック';
   const APP_LOCK_TOGGLE_LABEL = 'アプリロック';
   const UNSUPPORTED_TEXT =
@@ -2978,7 +3034,7 @@ describe('アプリロックセクション(生体認証によるアプリロッ
     );
   });
 
-  // Issue #230: 永続化失敗時にスイッチの表示がONのまま(実際には保存されていない)になり、
+  // 永続化失敗時にスイッチの表示がONのまま(実際には保存されていない)になり、
   // かつ未処理のPromise rejectionが発生していた不具合の回帰テスト。
   // リマインダーセクションの同種テスト(異常系: 通知登録失敗時のフィードバック)と
   // 同じパターン・粒度で検証する。
