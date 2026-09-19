@@ -140,6 +140,45 @@ describe('Onboarding', () => {
     expect(screen.getByText(ONBOARDING_SLIDES[searchIndex].description)).toBeTruthy();
   });
 
+  it('renders one pagination dot per slide (境界値: ドット数とスライド数の一致)', () => {
+    render(<Onboarding visible={true} onFinish={jest.fn()} />);
+
+    for (let i = 0; i < ONBOARDING_SLIDES.length; i += 1) {
+      expect(screen.getByLabelText(`${i + 1}枚目のスライドへ移動`)).toBeTruthy();
+    }
+    expect(
+      screen.queryByLabelText(`${ONBOARDING_SLIDES.length + 1}枚目のスライドへ移動`),
+    ).toBeNull();
+  });
+
+  it('switches the button to "はじめる" when jumping straight to the last slide via its dot, and returns to "次へ" after going back (境界値: 最終ドットへの直接移動と戻り)', () => {
+    render(<Onboarding visible={true} onFinish={jest.fn()} />);
+
+    fireEvent.press(screen.getByLabelText(`${ONBOARDING_SLIDES.length}枚目のスライドへ移動`));
+
+    const lastSlide = ONBOARDING_SLIDES[ONBOARDING_SLIDES.length - 1];
+    expect(screen.getByText(lastSlide.title)).toBeTruthy();
+    expect(screen.getByText(lastSlide.description)).toBeTruthy();
+    expect(screen.getByText('はじめる')).toBeTruthy();
+    expect(screen.queryByText('次へ')).toBeNull();
+
+    fireEvent.press(screen.getByLabelText('前のスライドに戻る'));
+
+    expect(screen.getByText(ONBOARDING_SLIDES[ONBOARDING_SLIDES.length - 2].title)).toBeTruthy();
+    expect(screen.getByText('次へ')).toBeTruthy();
+    expect(screen.queryByText('はじめる')).toBeNull();
+  });
+
+  it('calls onFinish when "スキップ" is pressed on the last slide too (境界値: 最終スライドでのスキップ)', () => {
+    const onFinish = jest.fn();
+    render(<Onboarding visible={true} onFinish={onFinish} />);
+
+    fireEvent.press(screen.getByLabelText(`${ONBOARDING_SLIDES.length}枚目のスライドへ移動`));
+    fireEvent.press(screen.getByText('スキップ'));
+
+    expect(onFinish).toHaveBeenCalledTimes(1);
+  });
+
   it('walks through every slide in order as "次へ" is pressed repeatedly, and switches the button label to "はじめる" on the last slide (正常系: 全スライド遷移・境界値: 最終ページのボタン切り替え)', () => {
     render(<Onboarding visible={true} onFinish={jest.fn()} />);
 
