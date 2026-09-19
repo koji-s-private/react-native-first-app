@@ -1380,6 +1380,13 @@ describe('日記データをインポートボタン(データ管理セクショ
       await waitFor(() => expect(Alert.alert).toHaveBeenCalledTimes(1));
     }
 
+    it('makes the dialog cancelable so it can be closed with the back button or an outside tap (戻る操作・外側タップで閉じられる)', async () => {
+      await openConfirmDialog();
+
+      const options = (Alert.alert as jest.Mock).mock.calls[0][3] as { cancelable?: boolean };
+      expect(options?.cancelable).toBe(true);
+    });
+
     async function dismissConfirmDialog() {
       const options = (Alert.alert as jest.Mock).mock.calls[0][3] as { onDismiss?: () => void };
       expect(options?.onDismiss).toBeInstanceOf(Function);
@@ -1415,6 +1422,49 @@ describe('日記データをインポートボタン(データ管理セクショ
 
       await waitFor(() => expect(Alert.alert).toHaveBeenCalledTimes(2));
       expect((Alert.alert as jest.Mock).mock.calls[1][0]).toBe(CONFIRM_DIALOG_TITLE);
+    });
+
+    it('restores the button state when the cancel button is pressed on the dialog (キャンセルボタンでも固着しない)', async () => {
+      await openConfirmDialog();
+      expect(
+        screen.getByRole('button', { name: IMPORT_BUTTON_LABEL }).props.accessibilityState,
+      ).toEqual(expect.objectContaining({ disabled: true }));
+
+      await pressAlertButtonByLabel('キャンセル');
+
+      const button = screen.getByRole('button', { name: IMPORT_BUTTON_LABEL });
+      expect(button.props.accessibilityState).toEqual(expect.objectContaining({ disabled: false }));
+      expect(StyleSheet.flatten(button.props.style).opacity).toBe(1);
+      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+    });
+
+    it('keeps the button disabled while the confirmed import is still saving, then restores it once finished (境界値: 取り込み中は無効のまま)', async () => {
+      await openConfirmDialog();
+      let resolveSave: () => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSave = resolve;
+          }),
+      );
+
+      await pressAlertButtonByLabel('取り込む');
+
+      const buttonWhileSaving = screen.getByRole('button', { name: IMPORT_BUTTON_LABEL });
+      expect(buttonWhileSaving.props.accessibilityState).toEqual(
+        expect.objectContaining({ disabled: true }),
+      );
+      expect(StyleSheet.flatten(buttonWhileSaving.props.style).opacity).toBe(0.5);
+
+      await act(async () => {
+        resolveSave();
+      });
+
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: IMPORT_BUTTON_LABEL }).props.accessibilityState,
+        ).toEqual(expect.objectContaining({ disabled: false })),
+      );
     });
   });
 

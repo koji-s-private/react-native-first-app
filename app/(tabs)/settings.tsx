@@ -652,9 +652,9 @@ function ImportDiaryDataButton() {
           { text: 'キャンセル', style: 'cancel', onPress: () => setIsImporting(false) },
           { text: '取り込む', onPress: () => importEntries(entries) },
         ],
-        // Androidの戻る操作・ダイアログ外タップではボタンのonPressが呼ばれないため、
-        // ここで解除しないと取り込みボタンが無効のまま固着する
-        { onDismiss: () => setIsImporting(false) },
+        // Androidは既定でcancelable: falseのため、戻る操作・外側タップで閉じられるようにした上で、
+        // ボタンのonPressが呼ばれないその場合もonDismissで解除し、取り込みボタンの固着を防ぐ
+        { cancelable: true, onDismiss: () => setIsImporting(false) },
       );
     },
     [importEntries],
