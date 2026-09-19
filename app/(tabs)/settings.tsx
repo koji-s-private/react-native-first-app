@@ -3,7 +3,15 @@ import { File, Paths } from 'expo-file-system';
 import { Link } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch } from 'react-native';
+import {
+  AccessibilityInfo,
+  Alert,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ExternalLink } from '@/components/external-link';
@@ -218,8 +226,30 @@ function TimeStepper({
 }) {
   const tintColor = useThemeColor({}, 'tint');
   const formattedValue = String(value).padStart(2, '0');
-  const decreaseAutoRepeat = useStepperAutoRepeat(onDecrease, disabled);
-  const increaseAutoRepeat = useStepperAutoRepeat(onIncrease, disabled);
+  const previousValueRef = useRef(value);
+  const shouldAnnounceValueChangeRef = useRef(false);
+  const handleDecrease = useCallback(() => {
+    shouldAnnounceValueChangeRef.current = true;
+    onDecrease();
+  }, [onDecrease]);
+  const handleIncrease = useCallback(() => {
+    shouldAnnounceValueChangeRef.current = true;
+    onIncrease();
+  }, [onIncrease]);
+  const decreaseAutoRepeat = useStepperAutoRepeat(handleDecrease, disabled);
+  const increaseAutoRepeat = useStepperAutoRepeat(handleIncrease, disabled);
+
+  useEffect(() => {
+    if (
+      previousValueRef.current !== value &&
+      shouldAnnounceValueChangeRef.current &&
+      Platform.OS === 'ios'
+    ) {
+      AccessibilityInfo.announceForAccessibility(`${label} ${formattedValue}`);
+    }
+    shouldAnnounceValueChangeRef.current = false;
+    previousValueRef.current = value;
+  }, [formattedValue, label, value]);
 
   return (
     <ThemedView style={styles.reminderStepperGroup}>
@@ -236,7 +266,11 @@ function TimeStepper({
       >
         <ThemedText style={[styles.reminderStepButtonText, { color: tintColor }]}>−</ThemedText>
       </Pressable>
-      <ThemedText style={[styles.reminderStepperValue, { opacity: disabled ? 0.4 : 1 }]}>
+      <ThemedText
+        accessibilityLabel={`${label} ${formattedValue}`}
+        accessibilityLiveRegion={Platform.OS === 'android' ? 'polite' : undefined}
+        style={[styles.reminderStepperValue, { opacity: disabled ? 0.4 : 1 }]}
+      >
         {formattedValue}
       </ThemedText>
       <Pressable
@@ -370,7 +404,7 @@ function DiaryReminderSection() {
 }
 
 // アプリ起動時・バックグラウンドから復帰した際に生体認証(またはOS標準パスコード)でロックする
-// 機能(#155)の設定導線。端末を家族・同僚と共有・一時的に貸す際、端末のロック解除だけで
+// 端末を家族・同僚と共有・一時的に貸す際、端末のロック解除だけで
 // 日記本文を覗き見されてしまうことを防ぐ。既存ユーザーの体験を変えないよう既定値はOFF(オプトイン)。
 function AppLockSection() {
   const { enabled, isSupported, setEnabled } = useAppLock();
