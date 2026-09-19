@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { randomUUID } from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -32,6 +31,8 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useCalendarLayoutPreference } from '@/contexts/calendar-layout-preference-context';
 import { useThemePreference } from '@/contexts/theme-preference-context';
+import { useDraftAutoSave } from '@/hooks/use-draft-auto-save';
+import { useDraftRestore } from '@/hooks/use-draft-restore';
 import { useModalSlideTransition } from '@/hooks/use-modal-slide-transition';
 import { useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
 import { useThemeColor } from '@/hooks/use-theme-color';
@@ -46,8 +47,6 @@ import {
 import {
   DIARY_DRAFT_STORAGE_KEY,
   DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX,
-  loadDraftText,
-  saveDraftText,
 } from '@/utils/diary-draft-storage';
 import {
   BODY_MAX_LENGTH,
@@ -56,9 +55,6 @@ import {
   truncateToBodyMaxLength,
 } from '@/utils/diary-text';
 import { getAllDiaryEntries, saveDiaryEntry, type DiaryEntry } from '@/utils/diary-storage';
-
-// 下書きの自動保存をデバウンスする間隔(ミリ秒)
-const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
 
 // 週表示レイアウトの「今日」判定を再評価する間隔(ミリ秒)。タブ画面が保持され続けても
 // 日付をまたいだタイミングから1分以内には追従できるようにする
@@ -442,9 +438,6 @@ export default function HomeScreen() {
   // 空状態メッセージの表示を切り替えるために使う
   const [hasLoadError, setHasLoadError] = useState(false);
   const [draft, setDraft] = useState('');
-  // 下書き復元が完了したか。完了前に自動保存effectを動かすと、初期値(空文字列)で
-  // 保存済みの下書きを誤って上書き・削除してしまうため、完了までは自動保存の対象外にする
-  const [isDraftRestored, setIsDraftRestored] = useState(false);
   // 保存成功時に一時的に表示するトーストのメッセージ。nullの間は非表示
   const [saveToastMessage, setSaveToastMessage] = useState<string | null>(null);
   // 日記本文のキーワード検索用の入力値(composerの入力とは独立したstate)
@@ -553,48 +546,16 @@ export default function HomeScreen() {
 
   // 起動時・画面マウント時に、自動保存されていた下書きが残っていればTextInputへ復元する。
   // 画面はアンマウントされず保持されるため、マウント時に一度だけ読めば済む
-  useEffect(() => {
-    let isCancelled = false;
-    const editRevisionAtRestoreStart = draftEditRevisionRef.current;
-    (async () => {
-      try {
-        const storedDraft = await loadDraftText(DIARY_DRAFT_STORAGE_KEY);
-        if (
-          !isCancelled &&
-          storedDraft &&
-          draftEditRevisionRef.current === editRevisionAtRestoreStart
-        ) {
-          setDraft(storedDraft);
-        }
-      } catch {
-        // 復元を諦めるだけにとどめる。finallyでisDraftRestoredをtrueにするため、
-        // 以降の自動保存が無効化されたままにはならない
-      } finally {
-        if (!isCancelled) {
-          setIsDraftRestored(true);
-        }
-      }
-    })();
-    return () => {
-      isCancelled = true;
-    };
-  }, []);
-
-  // draftの変更をデバウンスし、入力が止まってからAsyncStorageへ自動保存する
-  useEffect(() => {
-    // 復元完了前は、初期値(空文字列)で保存済みの下書きを上書きしないよう何もしない
-    if (!isDraftRestored) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      const persist = draft
-        ? saveDraftText(DIARY_DRAFT_STORAGE_KEY, draft)
-        : AsyncStorage.removeItem(DIARY_DRAFT_STORAGE_KEY);
-      // 下書きの自動保存は補助的な処理のため、失敗しても静かに無視する(本保存の失敗はhandleSave側で伝える)
-      persist.catch(() => {});
-    }, DRAFT_AUTO_SAVE_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [draft, isDraftRestored]);
+  const isDraftRestored = useDraftRestore({
+    draftKey: DIARY_DRAFT_STORAGE_KEY,
+    onRestore: setDraft,
+    editRevisionRef: draftEditRevisionRef,
+  });
+  const { clearDraft } = useDraftAutoSave({
+    draftKey: DIARY_DRAFT_STORAGE_KEY,
+    draft,
+    isRestored: isDraftRestored,
+  });
 
   const handleSave = useCallback(async () => {
     // ロールバック用に保存前の状態をpersist内で退避し、失敗時にonErrorから参照する
@@ -625,11 +586,7 @@ export default function HomeScreen() {
         // 既に保存済みの内容を誤って復元してしまう。ただし保存中に編集された下書きは残す
         // 必要があるため、保存開始時からrevisionが変わっていない場合だけ削除する
         if (draftEditRevisionRef.current === editRevisionAtSave) {
-          try {
-            await AsyncStorage.removeItem(DIARY_DRAFT_STORAGE_KEY);
-          } catch {
-            // 下書きキーのクリアに失敗しても、日記本体は既に保存済みで致命的ではないため無視する
-          }
+          await clearDraft();
         }
 
         // 保存成功をユーザーに明示するため、トーストとハプティックフィードバックを発火する
@@ -647,7 +604,7 @@ export default function HomeScreen() {
       },
       errorMessage: '保存に失敗しました。もう一度お試しください。',
     });
-  }, [draft, entries, enqueueDiaryWrite, saveDraftEntry]);
+  }, [draft, entries, enqueueDiaryWrite, saveDraftEntry, clearDraft]);
 
   // 入力が空文字列に戻った場合も、復元や保存失敗による古い内容で上書きしないよう編集revisionを進める
   const handleChangeDraft = useCallback((text: string) => {
