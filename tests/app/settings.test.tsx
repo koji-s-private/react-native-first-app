@@ -1361,6 +1361,63 @@ describe('日記データをインポートボタン(データ管理セクショ
     ).toEqual(expect.objectContaining({ disabled: false }));
   });
 
+  // Androidの戻る操作・ダイアログ外タップでは、ボタンのonPressではなくonDismissのみが呼ばれる。
+  describe('確認ダイアログをボタン以外の操作(戻る操作など)で閉じた場合', () => {
+    async function openConfirmDialog() {
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+      (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
+        canceled: false,
+        assets: [pickedAsset],
+      });
+      mockedFileSystem.__mockText.mockResolvedValueOnce(
+        JSON.stringify([{ id: '1', text: '取り込む日記', createdAt: '2026-02-01T00:00:00.000Z' }]),
+      );
+      render(<SettingsScreen />);
+
+      await act(async () => {
+        fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+      });
+      await waitFor(() => expect(Alert.alert).toHaveBeenCalledTimes(1));
+    }
+
+    async function dismissConfirmDialog() {
+      const options = (Alert.alert as jest.Mock).mock.calls[0][3] as { onDismiss?: () => void };
+      expect(options?.onDismiss).toBeInstanceOf(Function);
+      await act(async () => {
+        options.onDismiss?.();
+      });
+    }
+
+    it('restores the button state and saves nothing when the dialog is dismissed without pressing a button (ボタンの固着解除・保存しない)', async () => {
+      await openConfirmDialog();
+      expect(
+        screen.getByRole('button', { name: IMPORT_BUTTON_LABEL }).props.accessibilityState,
+      ).toEqual(expect.objectContaining({ disabled: true }));
+
+      await dismissConfirmDialog();
+
+      const button = screen.getByRole('button', { name: IMPORT_BUTTON_LABEL });
+      expect(button.props.accessibilityState).toEqual(expect.objectContaining({ disabled: false }));
+      expect(StyleSheet.flatten(button.props.style).opacity).toBe(1);
+      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+    });
+
+    it('allows starting the import again after the dialog was dismissed (再度インポートを開始できる)', async () => {
+      await openConfirmDialog();
+      await dismissConfirmDialog();
+      mockedFileSystem.__mockText.mockResolvedValueOnce(
+        JSON.stringify([{ id: '2', text: '再取り込み', createdAt: '2026-02-02T00:00:00.000Z' }]),
+      );
+
+      await act(async () => {
+        fireEvent.press(screen.getByText(IMPORT_BUTTON_LABEL));
+      });
+
+      await waitFor(() => expect(Alert.alert).toHaveBeenCalledTimes(2));
+      expect((Alert.alert as jest.Mock).mock.calls[1][0]).toBe(CONFIRM_DIALOG_TITLE);
+    });
+  });
+
   describe('Web版(Platform.OS === "web")', () => {
     beforeEach(() => {
       Platform.OS = 'web';
