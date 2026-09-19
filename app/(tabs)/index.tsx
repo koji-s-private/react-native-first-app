@@ -1474,7 +1474,8 @@ export default function HomeScreen() {
                     />
                   </Pressable>
                 </View>
-                <View style={styles.monthGrid}>
+                {/* maxHeightに収まらない画面でも全ての月に到達できるようスクロール可能にする */}
+                <ScrollView contentContainerStyle={styles.monthGrid} testID="month-picker-scroll">
                   {JA_MONTH_NAMES.map((monthName, index) => {
                     const month = index + 1;
                     const isSelected = pickerYear === displayedYear && month === displayedMonth;
@@ -1504,7 +1505,7 @@ export default function HomeScreen() {
                       </Pressable>
                     );
                   })}
-                </View>
+                </ScrollView>
               </ThemedView>
             </Animated.View>
           </Pressable>

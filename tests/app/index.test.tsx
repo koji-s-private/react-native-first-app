@@ -12,6 +12,7 @@ import {
   Keyboard,
   Modal,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   useColorScheme,
@@ -2412,6 +2413,29 @@ describe('HomeScreen', () => {
       for (const monthName of MONTH_NAMES_JA) {
         expect(screen.getByText(monthName)).toBeTruthy();
       }
+    });
+
+    it('renders the 12 month buttons inside a ScrollView within the month picker modal content, so that every month stays reachable even if the content exceeds the modal maxHeight (境界値: 小さい画面)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+
+      const modal = getMonthPickerModal();
+      const [modalContent] = modal.findAllByType(ThemedView);
+      expect(StyleSheet.flatten(modalContent.props.style).maxHeight).toBe('70%');
+
+      const scrollViews = modal.findAllByType(ScrollView);
+      expect(scrollViews).toHaveLength(1);
+      const [monthScroll] = scrollViews;
+      for (const monthName of MONTH_NAMES_JA) {
+        expect(monthScroll.findByProps({ children: monthName })).toBeTruthy();
+      }
+      expect(StyleSheet.flatten(monthScroll.props.contentContainerStyle)).toMatchObject({
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+      });
     });
 
     it('sets accessibilityRole="button" and a descriptive accessibilityLabel on the header heading, so it is discoverable as a tappable control by screen readers (正常系)', async () => {
