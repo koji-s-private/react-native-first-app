@@ -369,6 +369,129 @@ describe('DayEntriesScreen', () => {
         (useColorScheme as jest.Mock).mockReturnValue('light');
       }
     });
+
+    it('shows the load-error message in Colors.light.error when in light mode', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'getAllKeys').mockRejectedValueOnce(new Error('storage failure'));
+
+      render(<DayEntriesScreen />);
+
+      const message = await screen.findByText(LOAD_ERROR_MESSAGE);
+      expect(StyleSheet.flatten(message.props.style).color).toBe(Colors.light.error);
+    });
+
+    it('does not show the load-error message when only some stored entries are corrupted (partial corruption is skipped, valid entries still shown)', async () => {
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+      await seedDiaryEntries([
+        { id: '1', text: '壊れていない日記', createdAt: localIso(DATE_KEY, 9, 0) },
+      ]);
+      await AsyncStorage.setItem(buildDiaryEntryKey('broken'), 'not valid json');
+
+      render(<DayEntriesScreen />);
+
+      expect(await screen.findByText('壊れていない日記')).toBeTruthy();
+      expect(screen.queryByText(LOAD_ERROR_MESSAGE)).toBeNull();
+      expect(screen.queryByText(EMPTY_STATE_MESSAGE)).toBeNull();
+    });
+
+    it('replaces the previously shown entries with the load-error message when a later reload fails (前回読み込み済みの内容は残さない)', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      await seedDiaryEntries([
+        { id: '1', text: '一度は表示された日記', createdAt: localIso(DATE_KEY, 9, 0) },
+      ]);
+
+      render(<DayEntriesScreen />);
+      expect(await screen.findByText('一度は表示された日記')).toBeTruthy();
+
+      jest.spyOn(AsyncStorage, 'getAllKeys').mockRejectedValueOnce(new Error('storage failure'));
+      act(() => {
+        triggerRefocus();
+      });
+
+      expect(await screen.findByText(LOAD_ERROR_MESSAGE)).toBeTruthy();
+      expect(screen.queryByText('一度は表示された日記')).toBeNull();
+      expect(screen.queryByText(EMPTY_STATE_MESSAGE)).toBeNull();
+    });
+
+    it('does not carry the load-error message over to another date when the date param changes and that reload succeeds', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'getAllKeys').mockRejectedValueOnce(new Error('storage failure'));
+      await seedDiaryEntries([
+        { id: '1', text: '別の日の日記', createdAt: localIso('2026-08-16', 9, 0) },
+      ]);
+
+      const { rerender } = render(<DayEntriesScreen />);
+      expect(await screen.findByText(LOAD_ERROR_MESSAGE)).toBeTruthy();
+
+      setMockDateParam('2026-08-16');
+      rerender(<DayEntriesScreen />);
+
+      expect(await screen.findByText('別の日の日記')).toBeTruthy();
+      expect(screen.queryByText(LOAD_ERROR_MESSAGE)).toBeNull();
+    });
+
+    it('shows the plain empty state (not the load-error message) when the date param changes to a date without entries and that reload succeeds', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'getAllKeys').mockRejectedValueOnce(new Error('storage failure'));
+
+      const { rerender } = render(<DayEntriesScreen />);
+      expect(await screen.findByText(LOAD_ERROR_MESSAGE)).toBeTruthy();
+
+      setMockDateParam('2026-08-20');
+      rerender(<DayEntriesScreen />);
+
+      expect(await screen.findByText(EMPTY_STATE_MESSAGE)).toBeTruthy();
+      expect(screen.queryByText(LOAD_ERROR_MESSAGE)).toBeNull();
+    });
+
+    it('shows the load-error message (not the empty state) when the reload after a failed deletion also fails', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      await seedDiaryEntries([
+        { id: '1', text: '削除も再読み込みも失敗する日記', createdAt: localIso(DATE_KEY, 9, 0) },
+      ]);
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<DayEntriesScreen />);
+      await screen.findByText('削除も再読み込みも失敗する日記');
+
+      jest.spyOn(AsyncStorage, 'removeItem').mockRejectedValueOnce(new Error('remove failed'));
+      jest.spyOn(AsyncStorage, 'getAllKeys').mockRejectedValueOnce(new Error('storage failure'));
+
+      fireEvent.press(screen.getByText('削除'));
+      const [, , buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+      const confirmButton = buttons.find((b: { text: string }) => b.text === '削除');
+      await act(async () => {
+        await confirmButton.onPress();
+      });
+
+      expect(await screen.findByText(LOAD_ERROR_MESSAGE)).toBeTruthy();
+      expect(screen.queryByText(EMPTY_STATE_MESSAGE)).toBeNull();
+    });
+
+    it('still allows creating a new entry from the header "+" button while the load-error message is shown, and replaces the message with the saved entry', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'getAllKeys').mockRejectedValueOnce(new Error('storage failure'));
+
+      render(<DayEntriesScreen />);
+      expect(await screen.findByText(LOAD_ERROR_MESSAGE)).toBeTruthy();
+
+      await openNewEntryComposer();
+      fireEvent.changeText(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL), 'エラー中に書いた日記');
+      fireEvent.press(screen.getByText(NEW_ENTRY_SAVE_LABEL));
+
+      expect(await screen.findByText('エラー中に書いた日記')).toBeTruthy();
+      expect(screen.queryByText(LOAD_ERROR_MESSAGE)).toBeNull();
+      await waitFor(() => expect(screen.queryByText(NEW_ENTRY_HEADING)).toBeNull(), {
+        timeout: 5000,
+      });
+
+      // 実ストレージへ永続化されており、再フォーカスで読み直しても消えず、エラー表示も戻らない
+      act(() => {
+        triggerRefocus();
+      });
+      expect(await screen.findByText('エラー中に書いた日記')).toBeTruthy();
+      expect(screen.queryByText(LOAD_ERROR_MESSAGE)).toBeNull();
+    }, 15000); // 暗号化を伴う保存のwaitFor(5000ms)にマージンを持たせる
   });
 
   describe('コピー', () => {
