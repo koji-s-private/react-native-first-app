@@ -126,6 +126,41 @@ describe('useDraftAutoSave', () => {
     expect(saveDraftText).toHaveBeenCalledTimes(1);
   });
 
+  it('discards the pending save for the old key and saves only under the new key when the draft key changes (境界値: キー切り替え)', () => {
+    const { rerender } = renderHook(
+      ({ draftKey }: { draftKey: string }) =>
+        useDraftAutoSave({ draftKey, draft: '本文', isRestored: true }),
+      { initialProps: { draftKey: 'key-a' } },
+    );
+
+    act(() => {
+      jest.advanceTimersByTime(DEBOUNCE_MS - 100);
+    });
+    rerender({ draftKey: 'key-b' });
+    act(() => {
+      jest.advanceTimersByTime(DEBOUNCE_MS * 2);
+    });
+
+    expect(saveDraftText).toHaveBeenCalledTimes(1);
+    expect(saveDraftText).toHaveBeenCalledWith('key-b', '本文');
+  });
+
+  it('cancels the pending save when the draft key becomes null (境界値: モーダルを閉じた状態への遷移)', () => {
+    const { rerender } = renderHook(
+      ({ draftKey }: { draftKey: string | null }) =>
+        useDraftAutoSave({ draftKey, draft: '本文', isRestored: true }),
+      { initialProps: { draftKey: KEY as string | null } },
+    );
+
+    rerender({ draftKey: null });
+    act(() => {
+      jest.advanceTimersByTime(DEBOUNCE_MS * 2);
+    });
+
+    expect(saveDraftText).not.toHaveBeenCalled();
+    expect(removeItemSpy).not.toHaveBeenCalled();
+  });
+
   describe('clearDraft', () => {
     it('cancels the pending save and removes the key so the cleared draft is not written back (正常系)', async () => {
       const { result } = renderHook(() =>
@@ -142,6 +177,41 @@ describe('useDraftAutoSave', () => {
       expect(removeItemSpy).toHaveBeenCalledTimes(1);
       expect(removeItemSpy).toHaveBeenCalledWith(KEY);
       expect(saveDraftText).not.toHaveBeenCalled();
+    });
+
+    it('keeps auto-saving later edits after clearDraft (正常系: クリア後の再入力)', async () => {
+      const { result, rerender } = renderHook(
+        ({ draft }: { draft: string }) =>
+          useDraftAutoSave({ draftKey: KEY, draft, isRestored: true }),
+        { initialProps: { draft: '本文' } },
+      );
+
+      await act(async () => {
+        await result.current.clearDraft();
+      });
+      rerender({ draft: '本文に追記' });
+      act(() => {
+        jest.advanceTimersByTime(DEBOUNCE_MS);
+      });
+
+      expect(saveDraftText).toHaveBeenCalledTimes(1);
+      expect(saveDraftText).toHaveBeenCalledWith(KEY, '本文に追記');
+    });
+
+    it('removes the key that is current at the time of the call after the draft key changed (境界値: キー切り替え後)', async () => {
+      const { result, rerender } = renderHook(
+        ({ draftKey }: { draftKey: string }) =>
+          useDraftAutoSave({ draftKey, draft: '', isRestored: true }),
+        { initialProps: { draftKey: 'key-a' } },
+      );
+      rerender({ draftKey: 'key-b' });
+
+      await act(async () => {
+        await result.current.clearDraft();
+      });
+
+      expect(removeItemSpy).toHaveBeenCalledTimes(1);
+      expect(removeItemSpy).toHaveBeenCalledWith('key-b');
     });
 
     it('resolves without throwing even when removing the key fails (異常系)', async () => {
