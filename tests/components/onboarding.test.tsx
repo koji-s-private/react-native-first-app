@@ -106,6 +106,40 @@ describe('Onboarding', () => {
     expect(description).toContain('件数');
   });
 
+  it('introduces search with the actual search field label on the home tab (正常系: 検索スライドの内容確認)', () => {
+    const slide = ONBOARDING_SLIDES.find((item) => item.key === 'search-diary');
+
+    expect(slide).toBeDefined();
+    expect(slide?.description).toContain('日記を検索');
+    expect(slide?.description).toContain('日記」タブ');
+  });
+
+  it('introduces reminders, app lock, and export/import on the settings slide (正常系: 設定スライドの内容確認)', () => {
+    const slide = ONBOARDING_SLIDES.find((item) => item.key === 'settings');
+
+    expect(slide).toBeDefined();
+    expect(slide?.description).toContain('リマインダー');
+    expect(slide?.description).toContain('アプリロック');
+    expect(slide?.description).toContain('エクスポート');
+    expect(slide?.description).toContain('インポート');
+  });
+
+  it('keeps slide keys unique so pagination dots render with stable keys (境界値: キーの一意性)', () => {
+    const keys = ONBOARDING_SLIDES.map((slide) => slide.key);
+
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('shows the search slide content when its pagination dot is pressed (正常系: 検索スライドへの移動)', () => {
+    render(<Onboarding visible={true} onFinish={jest.fn()} />);
+
+    const searchIndex = ONBOARDING_SLIDES.findIndex((slide) => slide.key === 'search-diary');
+    fireEvent.press(screen.getByLabelText(`${searchIndex + 1}枚目のスライドへ移動`));
+
+    expect(screen.getByText(ONBOARDING_SLIDES[searchIndex].title)).toBeTruthy();
+    expect(screen.getByText(ONBOARDING_SLIDES[searchIndex].description)).toBeTruthy();
+  });
+
   it('walks through every slide in order as "次へ" is pressed repeatedly, and switches the button label to "はじめる" on the last slide (正常系: 全スライド遷移・境界値: 最終ページのボタン切り替え)', () => {
     render(<Onboarding visible={true} onFinish={jest.fn()} />);
 
