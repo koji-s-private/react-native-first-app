@@ -4695,6 +4695,34 @@ describe('HomeScreen', () => {
       ).toBeNull();
     });
 
+    it('keeps a multi-code-unit grapheme intact when truncating a search result accessibilityLabel', async () => {
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const familyEmoji = '👨‍👩‍👧‍👦';
+      const longEntryText = `${'あ'.repeat(49)}${familyEmoji}検索キーワード${'い'.repeat(5)}`;
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([{ id: '1', text: longEntryText, createdAt: isoAt(now, dayWithEntry) }]),
+      );
+      jest.clearAllMocks();
+
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '検索キーワード');
+      await screen.findByText(/検索キーワード/);
+
+      const dateKey = toDateKeyForTest(now, dayWithEntry);
+      expect(
+        screen.getByLabelText(
+          `${formatDateHeading(dateKey)}の日記: ${'あ'.repeat(49)}${familyEmoji}…`,
+        ),
+      ).toBeTruthy();
+      expect(
+        screen.queryByLabelText(`${formatDateHeading(dateKey)}の日記: ${'あ'.repeat(49)}👨‍👩‍👧…`),
+      ).toBeNull();
+    });
+
     it('excerpts the matched portion of the entry text (with surrounding context) rather than only the first line, unlike the calendar cell title', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
