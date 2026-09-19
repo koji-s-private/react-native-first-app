@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import React from 'react';
 import { AccessibilityInfo } from 'react-native';
 
@@ -17,6 +17,23 @@ describe('SaveToast', () => {
     render(<SaveToast message="保存しました" onHide={jest.fn()} />);
 
     expect(screen.getByText('保存しました')).toBeTruthy();
+  });
+
+  it('renders an accessible action and calls it when pressed', () => {
+    const onAction = jest.fn();
+    render(
+      <SaveToast
+        message="日記を削除しました"
+        onHide={jest.fn()}
+        actionLabel="元に戻す"
+        onAction={onAction}
+      />,
+    );
+
+    const action = screen.getByRole('button', { name: '元に戻す' });
+    fireEvent.press(action);
+
+    expect(onAction).toHaveBeenCalledTimes(1);
   });
 
   it('exposes accessibilityLiveRegion="polite" so screen readers announce the state change', () => {
@@ -115,6 +132,32 @@ describe('SaveToast', () => {
 
     act(() => {
       jest.advanceTimersByTime(2499);
+    });
+
+    expect(onHide).not.toHaveBeenCalled();
+  });
+
+  it('uses a custom auto-dismiss delay', () => {
+    const onHide = jest.fn();
+    render(<SaveToast message="削除しました" onHide={onHide} autoHideDelayMs={5000} />);
+
+    act(() => {
+      jest.advanceTimersByTime(4999);
+    });
+    expect(onHide).not.toHaveBeenCalled();
+
+    act(() => {
+      jest.advanceTimersByTime(1);
+    });
+    expect(onHide).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the toast visible when auto-dismiss is disabled', () => {
+    const onHide = jest.fn();
+    render(<SaveToast message="復元しています" onHide={onHide} autoHideDelayMs={null} />);
+
+    act(() => {
+      jest.advanceTimersByTime(30000);
     });
 
     expect(onHide).not.toHaveBeenCalled();

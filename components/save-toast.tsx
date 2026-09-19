@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { AccessibilityInfo, StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 
@@ -11,6 +11,9 @@ export type SaveToastProps = {
   message: string;
   onHide: () => void;
   testID?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  autoHideDelayMs?: number | null;
 };
 
 // 保存成功時などに一時的なフィードバックを表示する軽量なトースト(スナックバー)。
@@ -18,12 +21,22 @@ export type SaveToastProps = {
 // スクリーンリーダー利用者にも状態変化(保存が完了したこと)が伝わるようにする。
 // `testID`は既定値"save-toast"だが、同一画面内でこのコンポーネントを複数箇所(保存用・
 // コピー用など)で使う場合に理論上同時マウントされ得るため、呼び出し側で個別に指定できる。
-export function SaveToast({ message, onHide, testID = 'save-toast' }: SaveToastProps) {
+export function SaveToast({
+  message,
+  onHide,
+  testID = 'save-toast',
+  actionLabel,
+  onAction,
+  autoHideDelayMs = AUTO_HIDE_DELAY_MS,
+}: SaveToastProps) {
   useEffect(() => {
-    const timer = setTimeout(onHide, AUTO_HIDE_DELAY_MS);
+    if (autoHideDelayMs === null) {
+      return;
+    }
+    const timer = setTimeout(onHide, autoHideDelayMs);
     return () => clearTimeout(timer);
     // messageが変わる(=新しいトーストが表示される)たびにタイマーを張り直す
-  }, [message, onHide]);
+  }, [message, onHide, autoHideDelayMs]);
 
   useEffect(() => {
     // `accessibilityLiveRegion="polite"`はAndroid専用のpropであり、iOS(VoiceOver)には
@@ -46,6 +59,18 @@ export function SaveToast({ message, onHide, testID = 'save-toast' }: SaveToastP
       <ThemedText style={styles.text} lightColor="#fff" darkColor="#fff">
         {message}
       </ThemedText>
+      {actionLabel && onAction ? (
+        <Pressable
+          onPress={onAction}
+          accessibilityRole="button"
+          accessibilityLabel={actionLabel}
+          hitSlop={8}
+        >
+          <ThemedText style={styles.actionText} lightColor="#fff" darkColor="#fff">
+            {actionLabel}
+          </ThemedText>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -53,6 +78,9 @@ export function SaveToast({ message, onHide, testID = 'save-toast' }: SaveToastP
 const styles = StyleSheet.create({
   container: {
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
     backgroundColor: '#2e7d32',
     borderRadius: 8,
     paddingVertical: 6,
@@ -61,5 +89,10 @@ const styles = StyleSheet.create({
   text: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  actionText: {
+    fontSize: 14,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
 });

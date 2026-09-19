@@ -589,7 +589,7 @@ describe('DayEntriesScreen', () => {
       expect(Alert.alert).toHaveBeenCalledTimes(1);
       const [title, message, buttons] = (Alert.alert as jest.Mock).mock.calls[0];
       expect(title).toBe('日記を削除しますか?');
-      expect(message).toBe('この操作は取り消せません。');
+      expect(message).toBe('削除後、5秒間は元に戻せます。');
       expect(buttons).toHaveLength(2);
       expect(buttons[0]).toMatchObject({ text: 'キャンセル', style: 'cancel' });
       expect(buttons[1]).toMatchObject({ text: '削除', style: 'destructive' });
@@ -620,6 +620,178 @@ describe('DayEntriesScreen', () => {
       expect(screen.getByText('残る日記')).toBeTruthy();
       expect(await AsyncStorage.getItem(buildDiaryEntryKey('2'))).toBeNull();
       expect(await AsyncStorage.getItem(buildDiaryEntryKey('1'))).not.toBeNull();
+      expect(screen.getByTestId('delete-undo-toast')).toBeTruthy();
+      expect(screen.getByRole('button', { name: '元に戻す' })).toBeTruthy();
+    });
+
+    it('restores the deleted entry in the list and AsyncStorage when undo is pressed', async () => {
+      const deletedEntry = {
+        id: '1',
+        text: '元に戻す日記',
+        createdAt: localIso(DATE_KEY, 9, 0),
+      };
+      await seedDiaryEntries([deletedEntry]);
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<DayEntriesScreen />);
+      await screen.findByText(deletedEntry.text);
+
+      fireEvent.press(screen.getByText('削除'));
+      const [, , buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+      await act(async () => {
+        await buttons.find((button: { text: string }) => button.text === '削除').onPress();
+      });
+      fireEvent.press(await screen.findByRole('button', { name: '元に戻す' }));
+
+      expect(await screen.findByText(deletedEntry.text)).toBeTruthy();
+      expect(await AsyncStorage.getItem(buildDiaryEntryKey(deletedEntry.id))).not.toBeNull();
+      expect(screen.queryByTestId('delete-undo-toast')).toBeNull();
+    });
+
+    it('collects consecutive deletions into one undo action and restores every entry in chronological order', async () => {
+      const earlierEntry = {
+        id: '1',
+        text: '1件目の削除対象',
+        createdAt: localIso(DATE_KEY, 8, 0),
+      };
+      const laterEntry = {
+        id: '2',
+        text: '2件目の削除対象',
+        createdAt: localIso(DATE_KEY, 18, 0),
+      };
+      await seedDiaryEntries([earlierEntry, laterEntry]);
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<DayEntriesScreen />);
+      await screen.findByText(laterEntry.text);
+
+      fireEvent.press(screen.getAllByText('削除')[0]);
+      let latestButtons = (Alert.alert as jest.Mock).mock.calls.at(-1)?.[2];
+      await act(async () => {
+        await latestButtons.find((button: { text: string }) => button.text === '削除').onPress();
+      });
+
+      fireEvent.press(screen.getByText('削除'));
+      latestButtons = (Alert.alert as jest.Mock).mock.calls.at(-1)?.[2];
+      await act(async () => {
+        await latestButtons.find((button: { text: string }) => button.text === '削除').onPress();
+      });
+
+      expect(await screen.findByText('2件の日記を削除しました')).toBeTruthy();
+      fireEvent.press(screen.getByRole('button', { name: '元に戻す' }));
+
+      expect(await screen.findByText(earlierEntry.text)).toBeTruthy();
+      expect(await screen.findByText(laterEntry.text)).toBeTruthy();
+      expect(await AsyncStorage.getItem(buildDiaryEntryKey(earlierEntry.id))).not.toBeNull();
+      expect(await AsyncStorage.getItem(buildDiaryEntryKey(laterEntry.id))).not.toBeNull();
+    });
+
+    it('expires the pending undo when the route changes to another date', async () => {
+      const deletedEntry = {
+        id: '1',
+        text: '別の日へ移動前に削除する日記',
+        createdAt: localIso(DATE_KEY, 9, 0),
+      };
+      const nextDateEntry = {
+        id: '2',
+        text: '移動先の日記',
+        createdAt: localIso('2026-08-16', 9, 0),
+      };
+      await seedDiaryEntries([deletedEntry, nextDateEntry]);
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      const { rerender } = render(<DayEntriesScreen />);
+      await screen.findByText(deletedEntry.text);
+
+      fireEvent.press(screen.getByText('削除'));
+      const [, , buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+      await act(async () => {
+        await buttons.find((button: { text: string }) => button.text === '削除').onPress();
+      });
+      expect(screen.getByTestId('delete-undo-toast')).toBeTruthy();
+
+      setMockDateParam('2026-08-16');
+      rerender(<DayEntriesScreen />);
+
+      expect(await screen.findByText(nextDateEntry.text)).toBeTruthy();
+      expect(screen.queryByTestId('delete-undo-toast')).toBeNull();
+      expect(await AsyncStorage.getItem(buildDiaryEntryKey(deletedEntry.id))).toBeNull();
+    });
+
+    it('keeps a failed restore available for retry and restores it on the next attempt', async () => {
+      const deletedEntry = {
+        id: '1',
+        text: '復元を再試行する日記',
+        createdAt: localIso(DATE_KEY, 9, 0),
+      };
+      await seedDiaryEntries([deletedEntry]);
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<DayEntriesScreen />);
+      await screen.findByText(deletedEntry.text);
+
+      fireEvent.press(screen.getByText('削除'));
+      const [, , buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+      await act(async () => {
+        await buttons.find((button: { text: string }) => button.text === '削除').onPress();
+      });
+
+      jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('restore failed'));
+      fireEvent.press(await screen.findByRole('button', { name: '元に戻す' }));
+
+      expect(await screen.findByText('復元できなかった日記があります')).toBeTruthy();
+      expect(screen.queryByText(deletedEntry.text)).toBeNull();
+      expect(screen.getByRole('button', { name: '再試行' })).toBeTruthy();
+      expect(Alert.alert).toHaveBeenLastCalledWith(
+        '復元に失敗しました',
+        '復元できなかった日記があります。もう一度お試しください。',
+      );
+
+      fireEvent.press(screen.getByRole('button', { name: '再試行' }));
+
+      expect(await screen.findByText(deletedEntry.text)).toBeTruthy();
+      expect(await AsyncStorage.getItem(buildDiaryEntryKey(deletedEntry.id))).not.toBeNull();
+      expect(screen.queryByTestId('delete-undo-toast')).toBeNull();
+    });
+
+    it('does not start a duplicate restore when undo is pressed repeatedly while persistence is pending', async () => {
+      const deletedEntry = {
+        id: '1',
+        text: '復元連打を確認する日記',
+        createdAt: localIso(DATE_KEY, 9, 0),
+      };
+      await seedDiaryEntries([deletedEntry]);
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<DayEntriesScreen />);
+      await screen.findByText(deletedEntry.text);
+
+      fireEvent.press(screen.getByText('削除'));
+      const [, , buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+      await act(async () => {
+        await buttons.find((button: { text: string }) => button.text === '削除').onPress();
+      });
+
+      let resolveRestore: () => void = () => {};
+      const setItemMock = AsyncStorage.setItem as jest.Mock;
+      setItemMock.mockClear();
+      setItemMock.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveRestore = resolve;
+          }),
+      );
+      const undoButton = await screen.findByRole('button', { name: '元に戻す' });
+
+      fireEvent.press(undoButton);
+      fireEvent.press(undoButton);
+
+      await waitFor(() => expect(setItemMock).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        resolveRestore();
+      });
+      expect(await screen.findByText(deletedEntry.text)).toBeTruthy();
     });
 
     it('shows the empty state message after deleting the only entry for the date (境界値: 最後の1件を削除)', async () => {
