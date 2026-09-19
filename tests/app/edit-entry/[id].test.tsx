@@ -193,6 +193,92 @@ describe('EditEntryScreen', () => {
     expect(await screen.findByText('編集対象の日記が見つかりませんでした。')).toBeTruthy();
   });
 
+  // 補足: React 18以降はアンマウント済みコンポーネントへのstate更新を検知するコンソール警告自体が
+  // 撤廃されたため、以下2件のテストはisMountedRefガードの有無に関わらずpassし得る
+  // (画面を離れる際の未保存変更の破棄確認(beforeRemove)にある同種テストの補足コメントと同じ理由)
+  it('does not crash or update state after unmounting while the initial entry lookup is still in flight', async () => {
+    await seedDiaryEntry({
+      id: ENTRY_ID,
+      text: '読み込み中にアンマウントされる日記',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const entryKey = buildDiaryEntryKey(ENTRY_ID);
+    // async-storage-mockは元々jest.fn()のため、jest.spyOnの`mockRestore()`では元の実装に
+    // 戻らない(既知の挙動)。上書き前の実装を保存しておき、finallyで明示的に復元する
+    const originalGetItemImpl = (AsyncStorage.getItem as jest.Mock).getMockImplementation();
+    let resolveEntryLookup: (value: string | null) => void = () => {};
+    const deferredLookup = new Promise<string | null>((resolve) => {
+      resolveEntryLookup = resolve;
+    });
+    const getItemSpy = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key: string) => {
+      if (key === entryKey) {
+        return deferredLookup;
+      }
+      return originalGetItemImpl ? originalGetItemImpl(key) : Promise.resolve(null);
+    });
+
+    try {
+      const { unmount } = render(<EditEntryScreen />);
+      unmount();
+
+      await act(async () => {
+        resolveEntryLookup(originalGetItemImpl ? await originalGetItemImpl(entryKey) : null);
+      });
+
+      const stateUpdateWarning = consoleErrorSpy.mock.calls.find(([message]) =>
+        String(message).includes('a component'),
+      );
+      expect(stateUpdateWarning).toBeUndefined();
+    } finally {
+      consoleErrorSpy.mockRestore();
+      if (originalGetItemImpl) {
+        getItemSpy.mockImplementation(originalGetItemImpl);
+      }
+    }
+  });
+
+  it('does not crash or update state after unmounting while restoring the auto-saved draft is still in flight', async () => {
+    await seedDiaryEntry({
+      id: ENTRY_ID,
+      text: '下書き復元中にアンマウントされる日記',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const draftKey = `diary-edit-draft-${ENTRY_ID}`;
+    const originalGetItemImpl = (AsyncStorage.getItem as jest.Mock).getMockImplementation();
+    let resolveDraftLookup: (value: string | null) => void = () => {};
+    const deferredDraftLookup = new Promise<string | null>((resolve) => {
+      resolveDraftLookup = resolve;
+    });
+    const getItemSpy = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key: string) => {
+      if (key === draftKey) {
+        return deferredDraftLookup;
+      }
+      return originalGetItemImpl ? originalGetItemImpl(key) : Promise.resolve(null);
+    });
+
+    try {
+      const { unmount } = render(<EditEntryScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(draftKey));
+      unmount();
+
+      await act(async () => {
+        resolveDraftLookup(originalGetItemImpl ? await originalGetItemImpl(draftKey) : null);
+      });
+
+      const stateUpdateWarning = consoleErrorSpy.mock.calls.find(([message]) =>
+        String(message).includes('a component'),
+      );
+      expect(stateUpdateWarning).toBeUndefined();
+    } finally {
+      consoleErrorSpy.mockRestore();
+      if (originalGetItemImpl) {
+        getItemSpy.mockImplementation(originalGetItemImpl);
+      }
+    }
+  });
+
   it('sets accessibilityLabel="日記本文" on the TextInput, and accessibilityRole="button"/accessibilityLabel="保存" on the save button', async () => {
     await seedDiaryEntry({
       id: ENTRY_ID,
