@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -9,6 +10,8 @@ import { useThemeColor } from '@/hooks/use-theme-color';
 // 認証失敗が続いた場合にフォールバック案内を表示するまでの連続失敗回数。
 // 生体認証の一時的な読み取りミス程度ではノイズにならないよう、複数回失敗した場合にのみ表示する
 const CONSECUTIVE_FAILURE_GUIDANCE_THRESHOLD = 3;
+
+const CONTENT_PADDING = 24;
 
 type AppLockScreenProps = {
   // ロック画面を表示するかどうか(アプリロックがONで、かつ未認証の間はtrue)
@@ -44,6 +47,8 @@ export function AppLockScreen({
   const tintColor = useThemeColor({}, 'tint');
   const backgroundColor = useThemeColor({}, 'background');
   const errorColor = useThemeColor({}, 'error');
+  // translucentなModalはシステムバーの背後まで描画されるため、Modalの外側で取得したインセットを加算する
+  const insets = useSafeAreaInsets();
   const [consecutiveFailureCount, setConsecutiveFailureCount] = useState(0);
   // 生体認証プロンプトの表示にはわずかな遅延があるため、完了を待たずにボタンを連打できてしまう。
   // 実行中はボタンをdisabledにして連打自体を防ぐ
@@ -74,7 +79,16 @@ export function AppLockScreen({
 
   return (
     <Modal visible={visible} animationType="none" statusBarTranslucent navigationBarTranslucent>
-      <ThemedView style={styles.container}>
+      <ThemedView
+        style={[
+          styles.container,
+          {
+            paddingTop: CONTENT_PADDING + insets.top,
+            paddingBottom: CONTENT_PADDING + insets.bottom,
+          },
+        ]}
+        testID="app-lock-container"
+      >
         <ThemedText type="title" style={styles.title}>
           ロック中
         </ThemedText>
@@ -127,7 +141,7 @@ export function AppLockScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 24,
+    paddingHorizontal: CONTENT_PADDING,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 16,

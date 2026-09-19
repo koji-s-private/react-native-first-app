@@ -1,9 +1,32 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import React from 'react';
 import { Modal, StyleSheet } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { Onboarding } from '@/components/onboarding';
 import { ONBOARDING_SLIDES } from '@/constants/onboarding-slides';
+
+// `useSafeAreaInsets`は`SafeAreaProvider`配下でないと投げるため、ライブラリ公式のjestモック
+// (プロバイダ無しでもゼロインセットを返す)に差し替える。
+jest.mock(
+  'react-native-safe-area-context',
+  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
+  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  () => require('react-native-safe-area-context/jest/mock').default,
+);
+
+const INSETS = { top: 44, left: 0, right: 0, bottom: 34 };
+
+function renderWithInsets(ui: React.ReactElement) {
+  return render(
+    <SafeAreaProvider
+      initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: INSETS }}
+    >
+      {ui}
+    </SafeAreaProvider>,
+  );
+}
 
 describe('Onboarding', () => {
   it('renders nothing (no slide content) when visible is false (正常系: 起動直後の判定待ち状態)', () => {
@@ -82,6 +105,35 @@ describe('Onboarding', () => {
     const headerStyle = StyleSheet.flatten(screen.getByTestId('onboarding-header').props.style);
     expect(headerStyle.zIndex).toBeGreaterThan(0);
     expect(headerStyle.elevation).toBeGreaterThan(0);
+  });
+
+  it('offsets the header (skip/back) below the status bar by the safe area top inset (正常系: インセット加算)', () => {
+    renderWithInsets(<Onboarding visible={true} onFinish={jest.fn()} />);
+
+    const headerStyle = StyleSheet.flatten(screen.getByTestId('onboarding-header').props.style);
+    expect(headerStyle.top).toBe(16 + INSETS.top);
+  });
+
+  it('adds the safe area top/bottom insets to the container padding so the next button stays clear of the navigation bar (正常系: インセット加算)', () => {
+    renderWithInsets(<Onboarding visible={true} onFinish={jest.fn()} />);
+
+    const containerStyle = StyleSheet.flatten(
+      screen.getByTestId('onboarding-container').props.style,
+    );
+    expect(containerStyle.paddingTop).toBe(24 + INSETS.top);
+    expect(containerStyle.paddingBottom).toBe(24 + INSETS.bottom);
+  });
+
+  it('keeps the base spacing when the safe area insets are zero (境界値: インセット0)', () => {
+    render(<Onboarding visible={true} onFinish={jest.fn()} />);
+
+    const headerStyle = StyleSheet.flatten(screen.getByTestId('onboarding-header').props.style);
+    const containerStyle = StyleSheet.flatten(
+      screen.getByTestId('onboarding-container').props.style,
+    );
+    expect(headerStyle.top).toBe(16);
+    expect(containerStyle.paddingTop).toBe(24);
+    expect(containerStyle.paddingBottom).toBe(24);
   });
 
   it('moves to the selected slide when a pagination dot is pressed (正常系: ドットから直接移動)', () => {
