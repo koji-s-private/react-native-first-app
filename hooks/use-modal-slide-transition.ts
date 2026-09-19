@@ -1,21 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions } from 'react-native';
+import { Animated, useWindowDimensions } from 'react-native';
 
 // モーダルのフェード・スライドアニメーション時間(ミリ秒)
 const MODAL_ANIMATION_DURATION_MS = 220;
-
-// コンテンツのスライドイン開始位置。modalContentの実際の高さによらず画面外からスライドさせるため、
-// 画面全体の高さを使う
-const MODAL_SLIDE_DISTANCE = Dimensions.get('window').height;
 
 // 背景オーバーレイのフェードとコンテンツのスライドを分離アニメーションさせるフック
 // (`Modal`のanimationTypeは'none'にし、返り値のAnimated.Valueを呼び出し側でstyleに適用する)。
 // `isOpen`がfalseになった瞬間に`visible`もfalseにすると退場アニメーションが再生されないため、
 // 実際に描画するかどうかを表す`isMounted`を別stateで持ち、退場アニメーション完了後にfalseへ戻す
 export function useModalSlideTransition(isOpen: boolean) {
+  const { height: windowHeight } = useWindowDimensions();
   const [isMounted, setIsMounted] = useState(isOpen);
   const overlayOpacity = useRef(new Animated.Value(isOpen ? 1 : 0)).current;
-  const contentTranslateY = useRef(new Animated.Value(isOpen ? 0 : MODAL_SLIDE_DISTANCE)).current;
+  const contentTranslateY = useRef(new Animated.Value(isOpen ? 0 : windowHeight)).current;
 
   useEffect(() => {
     if (isOpen) {
@@ -30,7 +27,7 @@ export function useModalSlideTransition(isOpen: boolean) {
         useNativeDriver: true,
       }),
       Animated.timing(contentTranslateY, {
-        toValue: isOpen ? 0 : MODAL_SLIDE_DISTANCE,
+        toValue: isOpen ? 0 : windowHeight,
         duration: MODAL_ANIMATION_DURATION_MS,
         useNativeDriver: true,
       }),
@@ -42,7 +39,7 @@ export function useModalSlideTransition(isOpen: boolean) {
       }
     });
     return () => animation.stop();
-  }, [isOpen, overlayOpacity, contentTranslateY]);
+  }, [isOpen, overlayOpacity, contentTranslateY, windowHeight]);
 
   return { isMounted, overlayOpacity, contentTranslateY };
 }

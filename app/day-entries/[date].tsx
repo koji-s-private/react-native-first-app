@@ -17,6 +17,7 @@ import {
   formatEntryDateTime,
   toDateKey,
 } from '@/utils/diary-date';
+import { DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX } from '@/utils/diary-draft-storage';
 import {
   deleteDiaryEntry,
   getAllDiaryEntries,
@@ -31,12 +32,7 @@ const EMPTY_STATE_MESSAGE = 'この日の日記はまだありません';
 const LOAD_ERROR_MESSAGE =
   '日記データを読み込めませんでした。アプリを再起動しても解決しない場合は端末の復元設定をご確認ください。';
 
-// この画面の新規作成モーダルの下書き自動保存に使うAsyncStorageキーの接頭辞。
-// ホーム画面(app/(tabs)/index.tsx)の新規作成モーダルと同じ日付でも下書きが混ざらないよう、
-// 画面ごとに別の接頭辞にしている
-const DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX = 'diary-day-entries-new-entry-draft-';
-
-// 指定した日付('YYYY-MM-DD')の日記一覧を表示する専用画面(Issue #221)。
+// 指定した日付('YYYY-MM-DD')の日記一覧を表示する専用画面。
 // 従来はカレンダー画面(`app/(tabs)/index.tsx`)にモーダル(ドロワー)として重ねて
 // 表示していたが、削除時のフェードアウトが途中で止まる不具合の温床になっていたことに加え、
 // 編集も専用画面へ遷移させる方針に合わせ、この一覧自体も独立した画面として切り出している。
@@ -264,7 +260,7 @@ export default function DayEntriesScreen() {
       />
       <DiaryEntryComposerModal
         dateKey={isComposerOpen ? (date ?? null) : null}
-        draftStorageKeyPrefix={DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX}
+        draftStorageKeyPrefix={DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX}
         contentBottomPadding={insets.bottom}
         persist={handlePersistNewEntry}
         onSaved={handleComposerSaved}

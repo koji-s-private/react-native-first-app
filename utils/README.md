@@ -46,11 +46,11 @@ utils/
 保存前の日記下書き(自動保存)をAsyncStorageへ暗号化して読み書きするためのユーティリティです。保存済みエントリ(`diary-storage.ts`)と同じAES-256-GCM暗号化を通すことで、未保存の下書きだけが平文で端末に残らないようにしています。
 
 - `DIARY_DRAFT_STORAGE_KEY`: ホーム画面下部の入力欄(composer)の下書きを保存するキーです。
-- `DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX` / `DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX`: ホーム画面(`app/(tabs)/index.tsx`)の日付指定の新規作成モーダル、および編集画面の下書きキーの接頭辞です。実際のキーは、それぞれ接頭辞に対象日付(`YYYY-MM-DD`)・エントリIDを付けたものです。
+- `DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX` / `DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX` / `DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX`: ホーム画面の日付指定モーダル、日別一覧画面の新規作成モーダル、および編集画面の下書きキーの接頭辞です。実際のキーは、それぞれ接頭辞に対象日付(`YYYY-MM-DD`)・エントリIDを付けたものです。
 - `isDraftStorageKey(key)`: キーが下書き系(完全一致または接頭辞一致)かを判定します。`clearAllDiaryEntries()`が全件削除の対象キーを漏れなく拾うために使います。
 - `saveDraftText(key, text)` / `loadDraftText(key)`: 下書き本文を暗号化して保存・復号して復元します。暗号化対応前に保存された平文の下書きも読み込めます(後方互換)。保存が無い場合、`loadDraftText`は`null`を返します。
 
-[`app/(tabs)/index.tsx`](<../app/(tabs)/index.tsx>)と[`app/edit-entry/[id].tsx`](<../app/edit-entry/[id].tsx>)から利用されます。
+[`app/(tabs)/index.tsx`](<../app/(tabs)/index.tsx>)、[`app/day-entries/[date].tsx`](<../app/day-entries/[date].tsx>)、[`app/edit-entry/[id].tsx`](<../app/edit-entry/[id].tsx>)から利用されます。
 
 ## `diary-encryption.ts` の構成
 
@@ -89,7 +89,7 @@ JSONファイルから日記データをインポート(再取り込み)する�
 
 ## `diary-storage.ts` の構成
 
-日記データのAsyncStorageキーを`app/(tabs)/index.tsx`(保存・読み込み)と設定画面(全件削除・エクスポート)で共有するためのユーティリティです。エントリ1件ごとに個別のAsyncStorageキー(`diary-entry:<id>`)へ保存する方式を採用しており(Issue #83)、1件の保存/削除の書き込みコストがエントリ総数に依存しない(O(1))ようにしています。
+日記データのAsyncStorageキーを`app/(tabs)/index.tsx`(保存・読み込み)と設定画面(全件削除・エクスポート)で共有するためのユーティリティです。エントリ1件ごとに個別のAsyncStorageキー(`diary-entry:<id>`)へ保存する方式を採用しており、1件の保存/削除の書き込みコストがエントリ総数に依存しない(O(1))ようにしています。
 
 - `DIARY_ENTRIES_STORAGE_KEY`: 旧方式(全件を1つの配列としてまとめて保存する単一キー)のAsyncStorageキーの定数。現在は移行(マイグレーション)元としてのみ参照されます。
 - `DIARY_ENTRY_KEY_PREFIX` / `buildDiaryEntryKey(id)`: エントリ単位の個別キー(`diary-entry:<id>`)のプレフィックスと、idからキー文字列を組み立てる関数です。
