@@ -470,6 +470,52 @@ describe('getAllDiaryEntries', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  describe('暗号鍵の取得失敗', () => {
+    const getItemAsyncMock = SecureStore.getItemAsync as jest.Mock;
+    let originalGetItemAsync: ReturnType<typeof getItemAsyncMock.getMockImplementation>;
+
+    beforeEach(() => {
+      originalGetItemAsync = getItemAsyncMock.getMockImplementation();
+    });
+
+    afterEach(() => {
+      getItemAsyncMock.mockImplementation(originalGetItemAsync);
+    });
+
+    it('notifies onError and returns an empty array when the encryption key cannot be retrieved, instead of silently skipping every entry (異常系: 鍵取得失敗は全件の読み込み失敗)', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      for (const entry of sampleEntries) {
+        await seedDiaryEntry(entry);
+      }
+      const thrown = new Error('secure store unavailable');
+      getItemAsyncMock.mockRejectedValue(thrown);
+      const onError = jest.fn();
+
+      const result = await getAllDiaryEntries({ onError });
+
+      expect(result).toEqual([]);
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(thrown);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      // 個別エントリの破損として扱わない(要素単位のスキップ警告を出さない)
+      expect(warnSpy).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    });
+
+    it('still reads plain (unencrypted) entries without touching the encryption key (境界値: 平文のみの場合は鍵を必要としない)', async () => {
+      await AsyncStorage.setItem(buildDiaryEntryKey('1'), JSON.stringify(sampleEntries[1]));
+      getItemAsyncMock.mockRejectedValue(new Error('secure store unavailable'));
+      const onError = jest.fn();
+
+      const result = await getAllDiaryEntries({ onError });
+
+      expect(result).toEqual([sampleEntries[1]]);
+      expect(onError).not.toHaveBeenCalled();
+    });
+  });
+
   describe('レガシーキーからの移行(マイグレーション)', () => {
     it('migrates entries from the legacy single-key (encrypted) storage into per-entry keys (正常系)', async () => {
       const key = await getOrCreateEncryptionKey();
