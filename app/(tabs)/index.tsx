@@ -18,6 +18,7 @@ import {
   ScrollView,
   StyleSheet,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import type { CalendarProps, DateData } from 'react-native-calendars';
@@ -67,6 +68,9 @@ const SAVE_SUCCESS_MESSAGE = '保存しました';
 // コンテンツ高さ(セーフエリア分は含まない)。ボトムシート系モーダルの下端がタブバーと重ならないよう、
 // insets.bottomと合わせてpaddingBottomに加算する(#282)
 const BOTTOM_TAB_BAR_CONTENT_HEIGHT = 49;
+
+// 年月ピッカーモーダルの高さ上限(画面高さに対する割合)
+const MONTH_PICKER_MAX_HEIGHT_RATIO = 0.7;
 
 // 外枠の実測高さがまだ取れていない初回レンダー用のフォールバック値
 const DEFAULT_DAY_CELL_HEIGHT = 48;
@@ -482,6 +486,10 @@ export default function HomeScreen() {
   // 上端のセーフエリア対応のみで下端は扱わないため、ここでの加算は二重加算にはならない
   const insets = useSafeAreaInsets();
   const modalContentBottomPadding = insets.bottom + BOTTOM_TAB_BAR_CONTENT_HEIGHT;
+  // modalContentのmaxHeight(%)は内容量で高さが決まる親ラッパーを基準に解決され上限として機能しないため、
+  // 画面高さからpxで算出して年月ピッカーのみ上書きする
+  const { height: windowHeight } = useWindowDimensions();
+  const monthPickerMaxHeight = windowHeight * MONTH_PICKER_MAX_HEIGHT_RATIO;
 
   // この画面内の保存処理(新規保存・日付指定の新規作成)を直列化するキュー。
   // 編集・削除は専用画面で直接永続化するため対象外。loadEntriesが参照するため宣言順を前にしている
@@ -1418,7 +1426,11 @@ export default function HomeScreen() {
               <ThemedView
                 style={[
                   styles.modalContent,
-                  { borderColor: iconColor, paddingBottom: modalContentBottomPadding },
+                  {
+                    borderColor: iconColor,
+                    paddingBottom: modalContentBottomPadding,
+                    maxHeight: monthPickerMaxHeight,
+                  },
                 ]}
                 // オーバーレイへのタップ伝播を防ぐため、modalContent内のタッチ開始をこのViewが引き受ける
                 onStartShouldSetResponder={() => true}
@@ -1474,7 +1486,8 @@ export default function HomeScreen() {
                     />
                   </Pressable>
                 </View>
-                <View style={styles.monthGrid}>
+                {/* maxHeightに収まらない画面でも全ての月に到達できるようスクロール可能にする */}
+                <ScrollView contentContainerStyle={styles.monthGrid} testID="month-picker-scroll">
                   {JA_MONTH_NAMES.map((monthName, index) => {
                     const month = index + 1;
                     const isSelected = pickerYear === displayedYear && month === displayedMonth;
@@ -1504,7 +1517,7 @@ export default function HomeScreen() {
                       </Pressable>
                     );
                   })}
-                </View>
+                </ScrollView>
               </ThemedView>
             </Animated.View>
           </Pressable>

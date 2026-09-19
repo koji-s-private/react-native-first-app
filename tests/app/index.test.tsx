@@ -8,10 +8,12 @@ import React from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   FlatList,
   Keyboard,
   Modal,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   useColorScheme,
@@ -2412,6 +2414,117 @@ describe('HomeScreen', () => {
       for (const monthName of MONTH_NAMES_JA) {
         expect(screen.getByText(monthName)).toBeTruthy();
       }
+    });
+
+    it('renders the 12 month buttons inside a ScrollView within the month picker modal content, so that every month stays reachable even if the content exceeds the modal maxHeight (境界値: 小さい画面)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+
+      const modal = getMonthPickerModal();
+      const scrollViews = modal.findAllByType(ScrollView);
+      expect(scrollViews).toHaveLength(1);
+      const [monthScroll] = scrollViews;
+      for (const monthName of MONTH_NAMES_JA) {
+        expect(monthScroll.findByProps({ children: monthName })).toBeTruthy();
+      }
+      expect(StyleSheet.flatten(monthScroll.props.contentContainerStyle)).toMatchObject({
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+      });
+    });
+
+    describe('モーダルの高さ上限(画面高さ基準)', () => {
+      const originalWindow = Dimensions.get('window');
+
+      afterEach(() => {
+        Dimensions.set({ window: originalWindow });
+      });
+
+      async function getMonthPickerMaxHeightAtWindowHeight(height: number) {
+        Dimensions.set({ window: { ...originalWindow, height } });
+        const now = new Date();
+        render(<HomeScreen />);
+        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await openMonthPicker(now);
+        const [modalContent] = getMonthPickerModal().findAllByType(ThemedView);
+        return StyleSheet.flatten(modalContent.props.style).maxHeight;
+      }
+
+      it('sets the month picker modal content maxHeight to 70% of the window height in px, not a percentage resolved against the parent wrapper', async () => {
+        expect(await getMonthPickerMaxHeightAtWindowHeight(812)).toBe(812 * 0.7);
+      });
+
+      it('follows the window height so that a low screen gets a smaller maxHeight (境界値: 小さい画面・横向き)', async () => {
+        expect(await getMonthPickerMaxHeightAtWindowHeight(500)).toBe(500 * 0.7);
+      });
+    });
+
+    it('does not change the maxHeight of the new-entry modal content, which stays a percentage of its parent', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      fireEvent.press(
+        screen.getByLabelText(
+          `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日、日記なし、タップして新規作成`,
+        ),
+      );
+      await screen.findByText(
+        `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日の日記を書く`,
+      );
+
+      const [modalContent] = screen.UNSAFE_getAllByType(Modal)[0].findAllByType(ThemedView);
+      expect(StyleSheet.flatten(modalContent.props.style).maxHeight).toBe('70%');
+    });
+
+    it('keeps the modal header and the year stepper outside the month ScrollView, so they stay fixed while only the month grid scrolls (正常系: 固定部分の分離)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+
+      const modal = getMonthPickerModal();
+      const [monthScroll] = modal.findAllByType(ScrollView);
+      const fixedLabels = ['前の年', '次の年', CLOSE_BUTTON_TEXT];
+      for (const label of fixedLabels) {
+        expect(modal.findAllByProps({ accessibilityLabel: label }).length).toBeGreaterThan(0);
+        expect(monthScroll.findAllByProps({ accessibilityLabel: label })).toHaveLength(0);
+      }
+      expect(monthScroll.findAllByProps({ children: '年月を選択' })).toHaveLength(0);
+    });
+
+    it('keeps onStartShouldSetResponder on the modal content so that touches on the month ScrollView do not propagate to the overlay and close the modal (正常系: タップ伝播制御)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+
+      const [modalContent] = getMonthPickerModal().findAllByType(ThemedView);
+      expect(modalContent.props.onStartShouldSetResponder()).toBe(true);
+      expect(screen.getByText('年月を選択')).toBeTruthy();
+    });
+
+    it('marks the currently displayed month button as selected and enabled inside the ScrollView, and closes the modal when it is pressed (境界値: 上限月の選択済みボタン)', async () => {
+      const now = new Date();
+      render(<HomeScreen />);
+      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+      await openMonthPicker(now);
+
+      const currentMonth = now.getMonth() + 1;
+      const [currentMonthButton] = screen.UNSAFE_getAllByProps({
+        accessibilityLabel: `${now.getFullYear()}年${currentMonth}月へ移動`,
+      });
+      expect(currentMonthButton.props.accessibilityState?.disabled).toBe(false);
+      expect(currentMonthButton.props.accessibilityState?.selected).toBe(true);
+
+      fireEvent.press(currentMonthButton);
+      await waitFor(() => expect(screen.queryByText('年月を選択')).toBeNull());
+      expect(await findCalendarHeaderText(now.getFullYear(), currentMonth)).toBeTruthy();
     });
 
     it('sets accessibilityRole="button" and a descriptive accessibilityLabel on the header heading, so it is discoverable as a tappable control by screen readers (正常系)', async () => {
