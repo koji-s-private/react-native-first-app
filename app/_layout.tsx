@@ -105,7 +105,12 @@ function RootLayoutContent() {
           読み込み完了前はenabled/isUnlockedがまだ暫定値であり、これを未ロック扱いにしたまま
           下のタブ画面(カレンダー)を先に描画してしまうと、ONで再起動したユーザーの日記データが
           一瞬でも見えてしまう。認証は発生させず、単に読み込み完了を待つだけの表示にする */}
-      <Modal visible={!isAppLockReady} animationType="none">
+      <Modal
+        visible={!isAppLockReady}
+        animationType="none"
+        statusBarTranslucent
+        navigationBarTranslucent
+      >
         <ThemedView testID={APP_LOCK_LOADING_OVERLAY_TEST_ID} style={styles.loadingContainer} />
       </Modal>
       {/* 'inactive'遷移(アプリスイッチャーを開いた瞬間)にOSがシステムスナップショットを撮影する前に
@@ -114,6 +119,8 @@ function RootLayoutContent() {
       <Modal
         visible={isAppLockEnabled && isUnlocked && isInactiveOverlayVisible}
         animationType="none"
+        statusBarTranslucent
+        navigationBarTranslucent
       >
         <ThemedView testID={APP_LOCK_PRIVACY_OVERLAY_TEST_ID} style={styles.loadingContainer} />
       </Modal>

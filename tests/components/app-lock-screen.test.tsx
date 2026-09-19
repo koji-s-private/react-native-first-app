@@ -1,8 +1,19 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import React from 'react';
-import { Modal } from 'react-native';
+import { Modal, StyleSheet } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AppLockScreen } from '@/components/app-lock-screen';
+
+// `useSafeAreaInsets`は`SafeAreaProvider`配下でないと投げるため、ライブラリ公式のjestモック
+// (プロバイダ無しでもゼロインセットを返す)に差し替える。
+jest.mock(
+  'react-native-safe-area-context',
+  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
+  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  () => require('react-native-safe-area-context/jest/mock').default,
+);
 
 const AUTHENTICATE_BUTTON_TEXT = '認証する';
 const DISABLE_BUTTON_TEXT = 'アプリロックを解除';
@@ -43,6 +54,58 @@ describe('AppLockScreen', () => {
 
     const modal = screen.UNSAFE_getByType(Modal);
     expect(modal.props.visible).toBe(true);
+  });
+
+  it('sets statusBarTranslucent and navigationBarTranslucent on the Modal so it matches the edge-to-edge display of the screen behind it', () => {
+    render(
+      <AppLockScreen
+        visible={true}
+        isSupported={true}
+        onAuthenticate={jest.fn().mockResolvedValue('success')}
+        onDisableAppLock={jest.fn()}
+      />,
+    );
+
+    const modal = screen.UNSAFE_getByType(Modal);
+    expect(modal.props.statusBarTranslucent).toBe(true);
+    expect(modal.props.navigationBarTranslucent).toBe(true);
+  });
+
+  it('adds the safe area top/bottom insets to the container padding so the content stays clear of the system bars (正常系: インセット加算)', () => {
+    render(
+      <SafeAreaProvider
+        initialMetrics={{
+          frame: { x: 0, y: 0, width: 390, height: 844 },
+          insets: { top: 44, left: 0, right: 0, bottom: 34 },
+        }}
+      >
+        <AppLockScreen
+          visible={true}
+          isSupported={true}
+          onAuthenticate={jest.fn().mockResolvedValue('success')}
+          onDisableAppLock={jest.fn()}
+        />
+      </SafeAreaProvider>,
+    );
+
+    const containerStyle = StyleSheet.flatten(screen.getByTestId('app-lock-container').props.style);
+    expect(containerStyle.paddingTop).toBe(24 + 44);
+    expect(containerStyle.paddingBottom).toBe(24 + 34);
+  });
+
+  it('keeps the base padding when the safe area insets are zero (境界値: インセット0)', () => {
+    render(
+      <AppLockScreen
+        visible={true}
+        isSupported={true}
+        onAuthenticate={jest.fn().mockResolvedValue('success')}
+        onDisableAppLock={jest.fn()}
+      />,
+    );
+
+    const containerStyle = StyleSheet.flatten(screen.getByTestId('app-lock-container').props.style);
+    expect(containerStyle.paddingTop).toBe(24);
+    expect(containerStyle.paddingBottom).toBe(24);
   });
 
   it('renders the Modal with visible=false when the visible prop is false (正常系: 非表示制御)', () => {

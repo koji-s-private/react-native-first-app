@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import type { PropsWithChildren } from 'react';
 import React from 'react';
-import { Alert, AppState } from 'react-native';
+import { Alert, AppState, Modal } from 'react-native';
 
 import RootLayout, {
   APP_LOCK_LOADING_OVERLAY_TEST_ID,
@@ -11,6 +11,16 @@ import RootLayout, {
 import { APP_LOCK_ENABLED_STORAGE_KEY } from '@/contexts/app-lock-context';
 import { ONBOARDING_SLIDES } from '@/constants/onboarding-slides';
 import { ONBOARDING_COMPLETED_STORAGE_KEY } from '@/utils/onboarding-storage';
+
+// `useSafeAreaInsets`は`SafeAreaProvider`配下でないと投げるため、ライブラリ公式のjestモック
+// (プロバイダ無しでもゼロインセットを返す)に差し替える。
+jest.mock(
+  'react-native-safe-area-context',
+  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
+  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  () => require('react-native-safe-area-context/jest/mock').default,
+);
 
 // ネイティブの`AsyncStorage`モジュールはJest環境では利用できない(`NativeModule: AsyncStorage is
 // null`になる)ため、パッケージが公式に提供しているインメモリのモックに差し替える。
@@ -422,6 +432,20 @@ describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => 
     // 読み込みが完了すると遮蔽用オーバーレイは消え、保存されていたON設定どおりロック画面へ切り替わる
     expect(screen.queryByTestId(APP_LOCK_LOADING_OVERLAY_TEST_ID)).toBeNull();
     await waitFor(() => expect(screen.getByText(LOCK_SCREEN_TITLE)).toBeTruthy());
+  });
+
+  it('sets statusBarTranslucent and navigationBarTranslucent on every Modal (onboarding, lock screen, loading overlay, privacy overlay) so they match the edge-to-edge display of the screen behind them', async () => {
+    render(<RootLayout />);
+    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+
+    // オンボーディング・ロック画面・読み込み中の遮蔽オーバーレイ・プライバシーオーバーレイの4つが
+    // 常にツリーに存在する(visibleで表示/非表示を切り替えているだけで、条件付きレンダリングではないため)
+    const modals = screen.UNSAFE_getAllByType(Modal);
+    expect(modals).toHaveLength(4);
+    for (const modal of modals) {
+      expect(modal.props.statusBarTranslucent).toBe(true);
+      expect(modal.props.navigationBarTranslucent).toBe(true);
+    }
   });
 
   describe('inactive遷移時のプライバシーオーバーレイ(Issue #225)', () => {

@@ -1,10 +1,14 @@
 import { useCallback, useState } from 'react';
 import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ONBOARDING_SLIDES } from '@/constants/onboarding-slides';
 import { useThemeColor } from '@/hooks/use-theme-color';
+
+const CONTENT_PADDING = 24;
+const HEADER_TOP_OFFSET = 16;
 
 type OnboardingProps = {
   // オンボーディングを表示するかどうか(初回起動判定が完了するまではfalseにしておく想定)
@@ -22,6 +26,9 @@ type OnboardingProps = {
  */
 export function Onboarding({ visible, onFinish }: OnboardingProps) {
   const [stepIndex, setStepIndex] = useState(0);
+  // Modalの外側(このコンポーネント直下)で取得することで、Modal内のネイティブ計測に依存せず
+  // 画面全体のインセットを使える。translucentなModalはシステムバーの背後まで描画されるため加算が必要
+  const insets = useSafeAreaInsets();
   const tintColor = useThemeColor({}, 'tint');
   const iconColor = useThemeColor({}, 'icon');
   const backgroundColor = useThemeColor({}, 'background');
@@ -57,9 +64,23 @@ export function Onboarding({ visible, onFinish }: OnboardingProps) {
       animationType="fade"
       onRequestClose={onFinish}
       onDismiss={handleDismiss}
+      statusBarTranslucent
+      navigationBarTranslucent
     >
-      <ThemedView style={styles.container}>
-        <View style={styles.header} testID="onboarding-header">
+      <ThemedView
+        style={[
+          styles.container,
+          {
+            paddingTop: CONTENT_PADDING + insets.top,
+            paddingBottom: CONTENT_PADDING + insets.bottom,
+          },
+        ]}
+        testID="onboarding-container"
+      >
+        <View
+          style={[styles.header, { top: HEADER_TOP_OFFSET + insets.top }]}
+          testID="onboarding-header"
+        >
           {stepIndex > 0 ? (
             <Pressable
               onPress={handleBack}
@@ -125,12 +146,11 @@ export function Onboarding({ visible, onFinish }: OnboardingProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 24,
+    paddingHorizontal: CONTENT_PADDING,
     justifyContent: 'flex-end',
   },
   header: {
     position: 'absolute',
-    top: 16,
     left: 16,
     right: 16,
     zIndex: 1,
