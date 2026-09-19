@@ -94,6 +94,9 @@ describe('RootLayout の一日日記一覧画面(day-entries/[date])の戻るボ
     expect(mockStackScreenOptionsByName.get('day-entries/[date]')?.headerBackTitle).toBe(
       'カレンダー',
     );
+
+    // アプリロック設定の読み込み完了(遮蔽用オーバーレイの消滅)まで待ってから終える
+    await waitFor(() => expect(screen.queryByTestId(APP_LOCK_LOADING_OVERLAY_TEST_ID)).toBeNull());
   });
 });
 

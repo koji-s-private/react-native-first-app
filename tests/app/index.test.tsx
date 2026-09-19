@@ -349,6 +349,12 @@ function getModalContentTouchAbsorber(modal: TestNode): TestNode {
   return candidates[0];
 }
 
+// 初回の日記読み込みが完了し、ローディング表示が消えるまで待つ(`getItem`の呼び出しだけでは
+// `setEntries`等のstate更新の完了を保証できず、act警告や次のテストへの漏れの原因になる)
+async function waitForInitialLoad() {
+  await waitFor(() => expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0));
+}
+
 describe('HomeScreen', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
@@ -381,12 +387,12 @@ describe('HomeScreen', () => {
     expect(screen.getByText('日記')).toBeTruthy();
 
     // 初回読み込みのeffectを完了させ、次のテストに漏れ出さないようにする
-    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+    await waitForInitialLoad();
   });
 
   it('keeps the title margin at the fixed base value regardless of the safe area top inset (spacing is handled by TabScreenContainer)', async () => {
     render(<HomeScreen />);
-    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+    await waitForInitialLoad();
 
     const title = screen.getByText('日記');
     const flattenedStyle = StyleSheet.flatten(title.props.style);
@@ -396,7 +402,7 @@ describe('HomeScreen', () => {
 
   it('does not add extra top padding via TabScreenContainer when the safe area top inset is zero (e.g. Android without a notch)', async () => {
     render(<HomeScreen />);
-    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+    await waitForInitialLoad();
 
     const safeAreaWrapper = screen.getByTestId(TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID);
     const flattenedStyle = StyleSheet.flatten(safeAreaWrapper.props.style);
@@ -416,7 +422,7 @@ describe('HomeScreen', () => {
         <HomeScreen />
       </SafeAreaProvider>,
     );
-    await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+    await waitForInitialLoad();
 
     const safeAreaWrapper = screen.getByTestId(TAB_SCREEN_CONTAINER_SAFE_AREA_TEST_ID);
     const flattenedStyle = StyleSheet.flatten(safeAreaWrapper.props.style);
@@ -472,7 +478,7 @@ describe('HomeScreen', () => {
     it('adds only the bottom tab bar height as paddingBottom on the new-entry modal content when the safe area bottom inset is zero (default mock)', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openNewEntryModalForToday(now);
 
@@ -494,7 +500,7 @@ describe('HomeScreen', () => {
           <HomeScreen />
         </SafeAreaProvider>,
       );
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openNewEntryModalForToday(now);
 
@@ -507,7 +513,7 @@ describe('HomeScreen', () => {
     it('adds only the bottom tab bar height as paddingBottom on the month picker modal content when the safe area bottom inset is zero (default mock)', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
 
@@ -529,7 +535,7 @@ describe('HomeScreen', () => {
           <HomeScreen />
         </SafeAreaProvider>,
       );
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
 
@@ -553,7 +559,7 @@ describe('HomeScreen', () => {
       Platform.OS = 'android';
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const keyboardAvoidingView = screen.getByTestId(KEYBOARD_AVOIDING_VIEW_TEST_ID);
       expect(keyboardAvoidingView.props.accessibilityValue.text).toBe('height');
@@ -563,7 +569,7 @@ describe('HomeScreen', () => {
       Platform.OS = 'ios';
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const keyboardAvoidingView = screen.getByTestId(KEYBOARD_AVOIDING_VIEW_TEST_ID);
       expect(keyboardAvoidingView.props.accessibilityValue.text).toBe('padding');
@@ -592,7 +598,7 @@ describe('HomeScreen', () => {
       const dismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.press(getBackgroundDismissPressable());
 
@@ -601,7 +607,7 @@ describe('HomeScreen', () => {
 
     it('sets accessible={false} on the background wrapper so the individual accessibility info of the title/composer/buttons inside is not merged into a single element (境界値: アクセシビリティ設定の確認)', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       expect(getBackgroundDismissPressable().props.accessible).toBe(false);
     });
@@ -610,7 +616,7 @@ describe('HomeScreen', () => {
       const dismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '入力内容');
       fireEvent.press(screen.getByText('保存'));
@@ -623,7 +629,7 @@ describe('HomeScreen', () => {
       const dismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       fireEvent.changeText(input, '入力内容');
@@ -640,7 +646,7 @@ describe('HomeScreen', () => {
 
     it('does not mount any FlatList until a search keyword is entered (前提条件の確認)', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       expect(queryAllFlatLists()).toHaveLength(0);
     });
@@ -657,7 +663,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
       await screen.findByText(/公園/);
@@ -680,7 +686,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
       await screen.findByText(/公園/);
@@ -695,7 +701,7 @@ describe('HomeScreen', () => {
   describe('日記の保存', () => {
     it('does not save and does not call AsyncStorage.setItem when the input is empty', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.press(screen.getByText('保存'));
 
@@ -705,7 +711,7 @@ describe('HomeScreen', () => {
 
     it('does not save an entry consisting only of whitespace', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '   \n   ');
       fireEvent.press(screen.getByText('保存'));
@@ -716,7 +722,7 @@ describe('HomeScreen', () => {
 
     it('clears the text input after saving', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       fireEvent.changeText(input, '入力内容');
@@ -728,7 +734,7 @@ describe('HomeScreen', () => {
 
     it('shows a character counter that updates as the user types', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       expect(screen.getByText('0/1000')).toBeTruthy();
@@ -739,7 +745,7 @@ describe('HomeScreen', () => {
 
     it('truncates input exceeding the max length via onChangeText (TextInput no longer has a maxLength prop, since it only limits UTF-16 code units, not grapheme clusters)', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       // maxLength propは指定していないため、handleChangeDraft内のgrapheme単位の切り詰めを直接確認する
@@ -751,7 +757,7 @@ describe('HomeScreen', () => {
 
     it('allows saving when the text length is exactly at the max length (boundary), and persists it encrypted (not as plain JSON)', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       const exactlyMaxLength = 'あ'.repeat(1000);
@@ -774,7 +780,7 @@ describe('HomeScreen', () => {
 
     it('renders the character counter in red once the max length is reached, and in the normal color just below it (boundary)', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
 
@@ -802,7 +808,7 @@ describe('HomeScreen', () => {
 
       it('counts each surrogate-pair/ZWJ emoji as a single grapheme in the character counter, not by UTF-16 code units', async () => {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
         const text = `${familyEmoji}${simpleEmoji}${flagEmoji}`;
@@ -818,7 +824,7 @@ describe('HomeScreen', () => {
 
       it('does not split a ZWJ-joined family emoji in the middle when truncating overlong input via onChangeText (boundary: exactly at the limit)', async () => {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
         // 999文字の'あ' + 家族の絵文字(1000文字目) + さらに超過する10文字、という構成。
@@ -834,7 +840,7 @@ describe('HomeScreen', () => {
 
       it('does not split a surrogate-pair emoji in the middle when truncating overlong input via onChangeText (boundary: exactly at the limit)', async () => {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
         // 999文字の'い' + サロゲートペア絵文字(1000文字目) + さらに超過する5文字。
@@ -850,7 +856,7 @@ describe('HomeScreen', () => {
 
       it('keeps an emoji-ending body of exactly BODY_MAX_LENGTH graphemes intact (boundary: exactly at the limit, no truncation)', async () => {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
         // ちょうど1000文字(999文字の'う' + 絵文字1文字)で、超過していない境界値
@@ -864,7 +870,7 @@ describe('HomeScreen', () => {
 
     it('disables the save button while the input is empty and enables it once text is entered', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       // `getByText('保存')` resolves the innermost `Text` node; the rendered `Pressable`
       // (which carries the `disabled` prop as `accessibilityState.disabled`) is three
@@ -881,7 +887,7 @@ describe('HomeScreen', () => {
     // accessibilityLabel/accessibilityRole/accessibilityStateを検証する
     it('sets accessibilityLabel="日記本文" on the composer TextInput, and accessibilityRole="button"/accessibilityLabel="保存" on the save button so screen readers can identify each control', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       // placeholderはフォーカス後に読み上げられない環境があるため、accessibilityLabelで
       // 入力欄を直接特定できることを確認する
@@ -900,7 +906,7 @@ describe('HomeScreen', () => {
 
     it('renders the save button at reduced opacity (0.5) while the input is empty, and at full opacity (1) once text is entered, so the disabled state is also visible', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const saveButton = screen.getByText('保存').parent?.parent?.parent;
       expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(0.5);
@@ -914,7 +920,7 @@ describe('HomeScreen', () => {
 
     it('keeps the save button at reduced opacity (0.5) when the input contains only whitespace, matching the disabled condition', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const saveButton = screen.getByText('保存').parent?.parent?.parent;
       fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '   \n   ');
@@ -932,7 +938,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       const saveButton = screen.getByText('保存').parent?.parent?.parent;
@@ -971,7 +977,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         // 2件あるため、セルには件数バッジ「2」が表示され、タップするとその日の一覧画面へ遷移する
         // (一覧の内容自体・時刻の昇順表示はtests/app/day-entries/[date].test.tsxで検証する)
@@ -996,7 +1002,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       // マウント時の読み込みで、レガシーの単一キーは個別キー方式(暗号化済み)へ移行済みになっている
       expect(await readPersistedEntry('old')).toEqual(storedEntries[0]);
@@ -1028,7 +1034,7 @@ describe('HomeScreen', () => {
 
     it('persists diary entries encrypted and correctly reloads/decrypts them after remounting (simulating an app restart)', async () => {
       const { unmount } = render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '再起動後も読める日記');
       fireEvent.press(screen.getByText('保存'));
@@ -1042,7 +1048,7 @@ describe('HomeScreen', () => {
       unmount();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
       expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
     });
 
@@ -1057,7 +1063,7 @@ describe('HomeScreen', () => {
       // 日記タブを開いて表示する(expo-routerのTabsは実機ではこの画面をアンマウントしないが、
       // このテストのモックではフォーカス再取得を模すために一度unmountし、下で再度renderする)
       const { unmount } = render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
       unmount();
 
       // 設定タブでの「日記データを全件削除」操作を模して、移行済みの個別キーを直接削除する
@@ -1093,7 +1099,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '今日の日記');
       fireEvent.press(screen.getByText('保存'));
@@ -1151,7 +1157,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
 
@@ -1194,7 +1200,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       fireEvent.changeText(input, '保存中の日記');
@@ -1236,7 +1242,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       fireEvent.changeText(input, '保存中の日記');
@@ -1278,7 +1284,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       fireEvent.changeText(input, '保存中の日記');
@@ -1319,7 +1325,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       const saveButton = screen.getByText('保存');
@@ -1359,7 +1365,7 @@ describe('HomeScreen', () => {
         .mockReturnValueOnce('uuid-3');
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       const saveButton = screen.getByText('保存');
@@ -1405,7 +1411,7 @@ describe('HomeScreen', () => {
 
     it('does not immediately persist the draft key when the user types (debounced)', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '書きかけの下書き');
 
@@ -1417,7 +1423,7 @@ describe('HomeScreen', () => {
       jest.useFakeTimers();
       try {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '書きかけの下書き');
 
@@ -1445,7 +1451,7 @@ describe('HomeScreen', () => {
       jest.useFakeTimers();
       try {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
         fireEvent.changeText(input, '書');
@@ -1562,7 +1568,7 @@ describe('HomeScreen', () => {
       jest.useFakeTimers();
       try {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
         fireEvent.changeText(input, '保存される日記');
@@ -1611,7 +1617,7 @@ describe('HomeScreen', () => {
       jest.useFakeTimers();
       try {
         const { unmount } = render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(
           screen.getByPlaceholderText(INPUT_PLACEHOLDER),
@@ -1769,7 +1775,7 @@ describe('HomeScreen', () => {
     // そのため、常にiOS相当として振る舞う状態でのハプティック発火のみを検証する。
     it('shows a toast with a success message, exposed via accessibilityLiveRegion="polite", after a successful save', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       expect(screen.queryByText('保存しました')).toBeNull();
 
@@ -1788,7 +1794,7 @@ describe('HomeScreen', () => {
       jest.useFakeTimers();
       try {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '自動的に消える日記');
         fireEvent.press(screen.getByText('保存'));
@@ -1810,7 +1816,7 @@ describe('HomeScreen', () => {
       jest.useFakeTimers();
       try {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
         fireEvent.changeText(input, '自動的に消えるはずの日記');
@@ -1846,7 +1852,7 @@ describe('HomeScreen', () => {
       jest.useFakeTimers();
       try {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
 
@@ -1881,7 +1887,7 @@ describe('HomeScreen', () => {
 
     it('triggers a success haptic notification (Haptics.notificationAsync) after a successful save', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), 'ハプティック確認用');
       fireEvent.press(screen.getByText('保存'));
@@ -1898,7 +1904,7 @@ describe('HomeScreen', () => {
       jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '失敗するはずの日記');
       fireEvent.press(screen.getByText('保存'));
@@ -1924,6 +1930,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
+      // 読み込みを意図的に保留しているため、ロード開始(getItem呼び出し)だけを待つ
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       // 読み込みが完了するまでの間は、空状態メッセージの代わりにローディング表示が出る
@@ -1970,7 +1977,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
       expect(screen.queryByText(EMPTY_STATE_TEXT)).toBeNull();
@@ -1991,7 +1998,7 @@ describe('HomeScreen', () => {
       // 1回目のフォーカス(初回マウント)。画面はアンマウントせず、そのままstate(isLoading)を
       // 保持し続ける(実機のexpo-router Tabsがタブ画面をアンマウントしないのと同じ状況)
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
       expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
       expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
 
@@ -2024,7 +2031,7 @@ describe('HomeScreen', () => {
 
     it('keeps showing the empty state message after the async load resolves with no stored entries', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       expect(screen.getByText(EMPTY_STATE_TEXT)).toBeTruthy();
     });
@@ -2038,7 +2045,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
       expect(screen.queryByText(EMPTY_STATE_TEXT)).toBeNull();
@@ -2046,7 +2053,7 @@ describe('HomeScreen', () => {
 
     it('hides the empty state message as soon as the first diary entry is saved', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
       expect(screen.getByText(EMPTY_STATE_TEXT)).toBeTruthy();
 
       fireEvent.changeText(screen.getByPlaceholderText(INPUT_PLACEHOLDER), '最初の日記');
@@ -2107,7 +2114,7 @@ describe('HomeScreen', () => {
     it('shows the current year and month heading in the calendar header', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       // react-native-calendarsのヘッダーは`importantForAccessibility="no-hide-descendants"`で
       // 内部テキストをアクセシビリティツリーから隠している(画面上には表示されている)ため、
@@ -2121,7 +2128,7 @@ describe('HomeScreen', () => {
 
     it('shows a chevron-down IconSymbol next to the calendar header heading, indicating it opens the month picker', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const headerChevrons = screen
         .UNSAFE_getAllByType(IconSymbol)
@@ -2131,7 +2138,7 @@ describe('HomeScreen', () => {
 
     it('shows a weekday header row (日 月 火 水 木 金 土)', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       for (const dayName of ['日', '月', '火', '水', '木', '金', '土']) {
         expect(screen.getByText(dayName, { includeHiddenElements: true })).toBeTruthy();
@@ -2154,7 +2161,7 @@ describe('HomeScreen', () => {
         );
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         // セルへの表示テキスト(タイトル)は空文字列だが、isPressable/statusLabelは
         // タイトルの有無ではなくentriesByDateの有無(handleDayPressと同じ基準)で決まるため、
@@ -2189,7 +2196,7 @@ describe('HomeScreen', () => {
         );
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         // 日記が実際に存在するセルは1つだけ(dayWithEntry分)である
         // (日記の無い日のセルも未来日でなければタップ可能になったため、
@@ -2228,7 +2235,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const expectedLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${dayWithEntry}日、日記あり(1件)`;
       const dayCell = screen.getByLabelText(expectedLabel);
@@ -2246,7 +2253,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const expectedLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日、日記なし、タップして新規作成`;
       const dayCell = screen.getByLabelText(expectedLabel);
@@ -2259,7 +2266,7 @@ describe('HomeScreen', () => {
       const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const expectedLabel = `${tomorrow.getFullYear()}年${tomorrow.getMonth() + 1}月${tomorrow.getDate()}日、日記なし`;
       const dayCell = screen.getByLabelText(expectedLabel);
@@ -2274,7 +2281,7 @@ describe('HomeScreen', () => {
       const now = new Date();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const noEntryCells = screen.getAllByLabelText(/^\d{4}年\d{1,2}月\d{1,2}日、日記なし$/);
       const currentMonthPrefix = `${now.getFullYear()}年${now.getMonth() + 1}月`;
@@ -2295,7 +2302,7 @@ describe('HomeScreen', () => {
       const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const label = `${tomorrow.getFullYear()}年${tomorrow.getMonth() + 1}月${tomorrow.getDate()}日、日記なし`;
       const dayCell = screen.getByLabelText(label);
@@ -2325,7 +2332,7 @@ describe('HomeScreen', () => {
         await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         // 3件になったセルには件数バッジが表示されるため、日付の数字でタップする
         fireEvent.press(screen.getByText(String(dayWithEntry)));
@@ -2357,7 +2364,7 @@ describe('HomeScreen', () => {
         );
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         const dayCell = screen.getByLabelText(
           `${now.getFullYear()}年${now.getMonth() + 1}月${futureDay}日、日記あり(1件)`,
@@ -2376,7 +2383,7 @@ describe('HomeScreen', () => {
 
     it('sets statusBarTranslucent and navigationBarTranslucent on the new-entry creation modal and the month picker modal, so they match the edge-to-edge display of the screen behind them', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       // 新規作成モーダル・年月ピッカーモーダルの2つが常にツリーに存在する
       // (visibleプロパティで表示/非表示を切り替えているだけで、条件付きレンダリングではないため。
@@ -2432,7 +2439,7 @@ describe('HomeScreen', () => {
     it('opens the month picker modal, showing a year stepper and all 12 month buttons, when the calendar header heading is tapped (正常系)', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
 
@@ -2442,10 +2449,10 @@ describe('HomeScreen', () => {
       }
     });
 
-    it('renders all 12 month buttons inside the scrollable month grid (month-picker-scroll), so every month stays reachable even if the content exceeds the modal maxHeight (正常系: 月グリッドのスクロール領域)', async () => {
+    it('renders all 12 month buttons inside the scrollable month grid (month-picker-scroll) laid out as wrapping rows (正常系: 月グリッドのスクロール領域)', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
 
@@ -2462,15 +2469,17 @@ describe('HomeScreen', () => {
     describe('モーダルの高さ上限(画面高さ基準)', () => {
       const originalWindow = Dimensions.get('window');
 
-      afterEach(() => {
-        Dimensions.set({ window: originalWindow });
+      afterEach(async () => {
+        await act(async () => {
+          Dimensions.set({ window: originalWindow });
+        });
       });
 
       async function getMonthPickerMaxHeightAtWindowHeight(height: number) {
         Dimensions.set({ window: { ...originalWindow, height } });
         const now = new Date();
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
         await openMonthPicker(now);
         const [modalContent] = getMonthPickerModal().findAllByType(ThemedView);
         return StyleSheet.flatten(modalContent.props.style).maxHeight;
@@ -2488,7 +2497,7 @@ describe('HomeScreen', () => {
     it('does not change the maxHeight of the new-entry modal content, which stays a percentage of its parent', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
       fireEvent.press(
         screen.getByLabelText(
           `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日、日記なし、タップして新規作成`,
@@ -2505,7 +2514,7 @@ describe('HomeScreen', () => {
     it('keeps the modal header and the year stepper outside the month ScrollView, so they stay fixed while only the month grid scrolls (正常系: 固定部分の分離)', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
 
@@ -2522,7 +2531,7 @@ describe('HomeScreen', () => {
     it('claims the touch start on the modal content via onStartShouldSetResponder, which keeps touches on the month ScrollView from reaching the overlay Pressable (正常系: タップ伝播制御)', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
 
@@ -2534,7 +2543,7 @@ describe('HomeScreen', () => {
     it('keeps the displayed month button selected and enabled even when it is exactly the upper-bound month (the current month), and closes the modal without moving the calendar when it is pressed (境界値: 上限月ちょうど)', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
 
@@ -2553,7 +2562,7 @@ describe('HomeScreen', () => {
     it('sets accessibilityRole="button" and a descriptive accessibilityLabel on the header heading, so it is discoverable as a tappable control by screen readers (正常系)', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const headerButton = screen.getByLabelText(
         `${now.getFullYear()}年${now.getMonth() + 1}月、年月を選択して移動`,
@@ -2575,7 +2584,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
 
@@ -2592,7 +2601,7 @@ describe('HomeScreen', () => {
     it('disables the next-year stepper and future month buttons at the current year/month upper bound, so the picker cannot jump to an all-future calendar (境界値)', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
 
@@ -2624,7 +2633,7 @@ describe('HomeScreen', () => {
         jest.setSystemTime(beforeMonthBoundary);
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         jest.setSystemTime(afterMonthBoundary);
         await openMonthPicker(beforeMonthBoundary);
@@ -2649,7 +2658,7 @@ describe('HomeScreen', () => {
         jest.setSystemTime(beforeYearBoundary);
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         jest.setSystemTime(afterYearBoundary);
         await openMonthPicker(beforeYearBoundary);
@@ -2668,7 +2677,7 @@ describe('HomeScreen', () => {
     it('renders the year stepper buttons as chevron-left/chevron-right IconSymbols, not text glyphs', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
 
@@ -2695,7 +2704,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
 
@@ -2726,7 +2735,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
       fireEvent.press(screen.getByLabelText('前の年'));
@@ -2742,7 +2751,7 @@ describe('HomeScreen', () => {
     it('closes the month picker modal via its own close button ("閉じる"), matching the pattern used by the other modals (正常系)', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
       fireEvent.press(screen.getByText(CLOSE_BUTTON_TEXT));
@@ -2753,7 +2762,7 @@ describe('HomeScreen', () => {
     it('sets accessibilityRole="button" and accessibilityLabel="閉じる" on the month picker modal\'s close button (アクセシビリティ)', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
 
@@ -2775,7 +2784,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
       fireEvent.press(screen.getByLabelText('前の年'));
@@ -2793,7 +2802,7 @@ describe('HomeScreen', () => {
     it("clamps the picker's initial year to the current year when the calendar reports a future year via swipe/arrow navigation (境界値: 未来年)", async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const [calendar] = screen.UNSAFE_getAllByType(Calendar);
       const nextYear = now.getFullYear() + 1;
@@ -2818,7 +2827,7 @@ describe('HomeScreen', () => {
     it('syncs the header heading to the new month when the calendar reports a month change crossing a year boundary backward (境界値: 1月→前年12月)', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const [calendar] = screen.UNSAFE_getAllByType(Calendar);
       const previousYear = now.getFullYear() - 1;
@@ -2838,7 +2847,7 @@ describe('HomeScreen', () => {
     it('marks the month button matching the currently displayed year/month as selected (accessibilityState.selected), and other months as not selected (正常系/境界値)', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
 
@@ -2866,7 +2875,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
       fireEvent.press(screen.getByLabelText('前の年'));
@@ -2897,7 +2906,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       await openMonthPicker(now);
       fireEvent.press(screen.getByLabelText('前の年'));
@@ -2917,7 +2926,7 @@ describe('HomeScreen', () => {
     it('sets minDate to the first day of the current month on the underlying Calendar component when there are no diary entries yet (正常系)', async () => {
       const now = new Date();
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const [calendar] = screen.UNSAFE_getAllByType(Calendar);
       const expectedMinDate = `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-01`;
@@ -2944,7 +2953,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const [calendar] = screen.UNSAFE_getAllByType(Calendar);
       expect(calendar.props.minDate).toBe(`${minYear}-${`${minMonth}`.padStart(2, '0')}-01`);
@@ -2971,7 +2980,7 @@ describe('HomeScreen', () => {
         );
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         // 実際のスワイプ/矢印操作と同じ経路(onMonthChange)で最古エントリの月まで表示を移動する。
         // enableSwipeMonthsによる実際のジェスチャー自体はテストで再現できないため、
@@ -3012,7 +3021,7 @@ describe('HomeScreen', () => {
     describe('カレンダーヘッダー矢印(タップ・スワイプ)による月送りの範囲制限', () => {
       it('disables the left arrow and blocks moving to the previous month when there are no diary entries yet, since the displayed month is exactly the lower bound (境界値)', async () => {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         const [calendar] = screen.UNSAFE_getAllByType(Calendar);
         expect(calendar.props.disableArrowLeft).toBe(true);
@@ -3027,7 +3036,7 @@ describe('HomeScreen', () => {
 
       it('disables the right arrow and blocks moving to a future month when the calendar is showing the current month, since it is exactly the upper bound (境界値)', async () => {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         const [calendar] = screen.UNSAFE_getAllByType(Calendar);
         expect(calendar.props.disableArrowRight).toBe(true);
@@ -3059,7 +3068,7 @@ describe('HomeScreen', () => {
           );
 
           render(<HomeScreen />);
-          await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+          await waitForInitialLoad();
 
           const [calendar] = screen.UNSAFE_getAllByType(Calendar);
           act(() => {
@@ -3116,7 +3125,7 @@ describe('HomeScreen', () => {
           jest.setSystemTime(now);
 
           render(<HomeScreen />);
-          await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+          await waitForInitialLoad();
 
           const [calendar] = screen.UNSAFE_getAllByType(Calendar);
           act(() => {
@@ -3177,7 +3186,7 @@ describe('HomeScreen', () => {
 
     it('shows neither a dot nor a count badge when there are no diary entries at all (境界値: 0件)', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       expect(findEntryDotViews()).toHaveLength(0);
       expect(findEntryCountBadgeViews()).toHaveLength(0);
@@ -3192,7 +3201,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       expect(findEntryDotViews()).toHaveLength(1);
       expect(findEntryCountBadgeViews()).toHaveLength(0);
@@ -3210,7 +3219,7 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       expect(findEntryDotViews()).toHaveLength(0);
       const badgeTexts = findEntryCountBadgeTexts();
@@ -3234,7 +3243,7 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const badgeTexts = findEntryCountBadgeTexts();
       expect(badgeTexts).toHaveLength(1);
@@ -3253,7 +3262,7 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const badgeTexts = findEntryCountBadgeTexts();
       expect(badgeTexts).toHaveLength(1);
@@ -3271,7 +3280,7 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       // 複数件の日には1つだけバッジが表示され、日記の無い日(dayWithoutEntry)には表示されない。
       // dayWithEntryとdayWithoutEntryの範囲は重複しないため、バッジが1個のみであることの確認は
@@ -3289,7 +3298,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const [dotView] = findEntryDotViews();
       expect(StyleSheet.flatten(dotView.props.style).backgroundColor).toBe(Colors.light.tint);
@@ -3305,7 +3314,7 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const [badgeText] = findEntryCountBadgeTexts();
       expect(StyleSheet.flatten(badgeText.props.style).color).toBe(Colors.light.background);
@@ -3324,7 +3333,7 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const [badgeText] = findEntryCountBadgeTexts();
       const flattened = StyleSheet.flatten(badgeText.props.style);
@@ -3345,7 +3354,7 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const badgeTexts = findEntryCountBadgeTexts();
       expect(badgeTexts).toHaveLength(1);
@@ -3371,7 +3380,7 @@ describe('HomeScreen', () => {
         await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
         expect(findEntryCountBadgeViews()).toHaveLength(1);
 
         fireEvent.press(screen.getByText(String(dayWithEntry)));
@@ -3396,7 +3405,7 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
       expect(String(findEntryCountBadgeTexts()[0].props.children)).toBe('2');
 
       // 保存欄からの追加は「今日」の日付にしか保存できない実装のため、pickTestDaysが選ぶ範囲
@@ -3422,7 +3431,7 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
       expect(findEntryDotViews()).toHaveLength(1);
       expect(findEntryCountBadgeViews()).toHaveLength(0);
 
@@ -3450,7 +3459,7 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const expectedLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${dayWithEntry}日、日記あり(3件)`;
       expect(screen.getByLabelText(expectedLabel)).toBeTruthy();
@@ -3465,7 +3474,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const expectedLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${dayWithEntry}日、日記あり(1件)`;
       expect(screen.getByLabelText(expectedLabel)).toBeTruthy();
@@ -3499,7 +3508,7 @@ describe('HomeScreen', () => {
         const day = pickNonTodayDayInRange(now);
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         const dayNumber = screen.getByText(String(day));
         expect(dayNumber.props.maxFontSizeMultiplier).toBe(EXPECTED_MAX_FONT_SCALE);
@@ -3512,7 +3521,7 @@ describe('HomeScreen', () => {
       const now = new Date();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       // 月初/月末の「はみ出し」表示で前後の月にも同じ日付番号が重複することがあるため、
       // 今日バッジ特有のスタイル(丸背景に合わせた太字)を持つものだけを絞り込む
@@ -3536,7 +3545,7 @@ describe('HomeScreen', () => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       // 日付セルの数字(例: 二桁未満の日付)と表示内容が衝突しうるため、バッジテキストに
       // 固有のスタイル(lineHeight: 11)を目印に絞り込む
@@ -3566,7 +3575,7 @@ describe('HomeScreen', () => {
         await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(storedEntries));
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         const badgeViews = screen.UNSAFE_getAllByType(View).filter((node) => {
           const flattened = StyleSheet.flatten(node.props.style ?? {});
@@ -3630,7 +3639,7 @@ describe('HomeScreen', () => {
       const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       openNewEntryModalFor(yesterday);
 
@@ -3648,7 +3657,7 @@ describe('HomeScreen', () => {
       const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
       jest.clearAllMocks();
 
       openNewEntryModalFor(yesterday);
@@ -3689,7 +3698,7 @@ describe('HomeScreen', () => {
       const twoDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2);
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
       jest.clearAllMocks();
 
       openNewEntryModalFor(yesterday);
@@ -3721,7 +3730,7 @@ describe('HomeScreen', () => {
       const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
       jest.clearAllMocks();
       jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
 
@@ -3745,7 +3754,7 @@ describe('HomeScreen', () => {
       const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
       jest.clearAllMocks();
 
       openNewEntryModalFor(yesterday);
@@ -3774,7 +3783,7 @@ describe('HomeScreen', () => {
       const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
       jest.clearAllMocks();
 
       openNewEntryModalFor(yesterday);
@@ -3811,7 +3820,7 @@ describe('HomeScreen', () => {
         jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         openNewEntryModalFor(yesterday);
         const heading = `${yesterday.getFullYear()}年${yesterday.getMonth() + 1}月${yesterday.getDate()}日の日記を書く`;
@@ -3829,7 +3838,7 @@ describe('HomeScreen', () => {
         const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         openNewEntryModalFor(yesterday);
         const heading = `${yesterday.getFullYear()}年${yesterday.getMonth() + 1}月${yesterday.getDate()}日の日記を書く`;
@@ -3847,7 +3856,7 @@ describe('HomeScreen', () => {
         jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         openNewEntryModalFor(yesterday);
         fireEvent.changeText(getNewEntryInput(), '破棄されるはずの下書き');
@@ -3873,7 +3882,7 @@ describe('HomeScreen', () => {
         jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         openNewEntryModalFor(yesterday);
         fireEvent.changeText(getNewEntryInput(), 'キャンセルで残るはずの下書き');
@@ -3894,7 +3903,7 @@ describe('HomeScreen', () => {
         jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         openNewEntryModalFor(yesterday);
         // 下書き復元の非同期読み込み(getItem)がact()の外で解決し警告になるのを防ぐため、
@@ -3936,7 +3945,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.press(screen.getByText(String(dayWithEntry)));
 
@@ -3947,7 +3956,7 @@ describe('HomeScreen', () => {
 
     it("keeps the top composer's save flow (createdAt = the current moment, not local noon of a tapped date) unaffected by the new per-date creation modal", async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
       jest.clearAllMocks();
 
       const beforeSave = Date.now();
@@ -3993,7 +4002,7 @@ describe('HomeScreen', () => {
       it('does not immediately persist the new-entry draft key when the user types (debounced)', async () => {
         const yesterday = getYesterday();
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         openNewEntryModalFor(yesterday);
         // 下書き復元の非同期読み込み(getItem)がact()の外で解決し警告になるのを防ぐため、
@@ -4013,7 +4022,7 @@ describe('HomeScreen', () => {
       it('auto-saves the new-entry draft under a date-specific AsyncStorage key once the debounce interval elapses', async () => {
         const yesterday = getYesterday();
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
         jest.clearAllMocks();
 
         openNewEntryModalFor(yesterday);
@@ -4040,7 +4049,7 @@ describe('HomeScreen', () => {
         await AsyncStorage.setItem(draftKeyFor(yesterday), '前回の続きから書きかけの下書き');
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         openNewEntryModalFor(yesterday);
 
@@ -4052,7 +4061,7 @@ describe('HomeScreen', () => {
       it('clears the auto-saved draft key once the new entry is successfully saved', async () => {
         const yesterday = getYesterday();
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
         jest.clearAllMocks();
 
         openNewEntryModalFor(yesterday);
@@ -4078,7 +4087,7 @@ describe('HomeScreen', () => {
       it('clears the auto-saved draft key once "破棄" is chosen to close the modal without saving', async () => {
         const yesterday = getYesterday();
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
         jest.clearAllMocks();
         jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
@@ -4101,7 +4110,7 @@ describe('HomeScreen', () => {
         await AsyncStorage.setItem(draftKeyFor(yesterday), '昨日専用の下書き');
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         // 無関係な別日(2日前)のモーダルを開いても、昨日専用の下書きは混入しない
         openNewEntryModalFor(twoDaysAgo);
@@ -4119,7 +4128,7 @@ describe('HomeScreen', () => {
         await AsyncStorage.setItem(draftKeyFor(yesterday), overLimitDraft);
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         openNewEntryModalFor(yesterday);
 
@@ -4130,7 +4139,7 @@ describe('HomeScreen', () => {
       it('does not resurrect the discarded draft when the pending debounce timer fires after "破棄" is confirmed (race condition regression)', async () => {
         const yesterday = getYesterday();
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
         jest.clearAllMocks();
         jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
@@ -4161,7 +4170,7 @@ describe('HomeScreen', () => {
       it('does not re-persist the just-cleared draft when the pending debounce timer fires after a successful save (race condition regression)', async () => {
         const yesterday = getYesterday();
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
         jest.clearAllMocks();
 
         openNewEntryModalFor(yesterday);
@@ -4208,7 +4217,7 @@ describe('HomeScreen', () => {
 
         try {
           render(<HomeScreen />);
-          await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+          await waitForInitialLoad();
 
           openNewEntryModalFor(yesterday);
           await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalledWith(key));
@@ -4265,7 +4274,7 @@ describe('HomeScreen', () => {
 
         try {
           render(<HomeScreen />);
-          await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+          await waitForInitialLoad();
 
           openNewEntryModalFor(yesterday);
           fireEvent.changeText(getNewEntryInput(), '保存に失敗するはずの下書き');
@@ -4319,7 +4328,7 @@ describe('HomeScreen', () => {
       );
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
       expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
 
       // 新規保存を開始する。楽観的UI更新は同期的に反映されるが、AsyncStorageへの実際の
@@ -4385,7 +4394,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
       expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
 
       const getItemMock = AsyncStorage.getItem as jest.Mock;
@@ -4426,7 +4435,7 @@ describe('HomeScreen', () => {
     it('renders the character counter in Colors.dark.error once the max length is reached, when in dark mode', async () => {
       mockedUseColorScheme.mockReturnValue('dark');
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       fireEvent.changeText(input, 'あ'.repeat(1000));
@@ -4439,7 +4448,7 @@ describe('HomeScreen', () => {
       jest.spyOn(AsyncStorage, 'setItem').mockRejectedValueOnce(new Error('write failed'));
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
       fireEvent.changeText(input, '今日の日記');
@@ -4461,7 +4470,7 @@ describe('HomeScreen', () => {
     it('re-applies the current color scheme to react-native-calendars-managed styling (e.g. the weekday header row) after the color scheme changes post-mount', async () => {
       mockedUseColorScheme.mockReturnValue('light');
       const { rerender } = render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       mockedUseColorScheme.mockReturnValue('dark');
       rerender(<HomeScreen />);
@@ -4481,7 +4490,7 @@ describe('HomeScreen', () => {
       const now = new Date();
       mockedUseColorScheme.mockReturnValue('light');
       const { rerender } = render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       // 月ピッカーを使わず、カレンダー本体のスワイプ・矢印操作と同じ経路(onMonthChange)で
       // 表示月を翌月へ進める
@@ -4535,7 +4544,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       // 検索欄は表示されているが、キーワード未入力のうちは検索結果一覧(「見つかりませんでした」等)は表示されない
       expect(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER)).toBeTruthy();
@@ -4555,7 +4564,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
       fireEvent.changeText(searchInput, '公園');
@@ -4576,7 +4585,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(
         screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER),
@@ -4598,7 +4607,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
       fireEvent.changeText(searchInput, '該当しないはずのキーワード');
@@ -4622,7 +4631,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
       const resultItem = await screen.findByText(/公園/);
@@ -4643,7 +4652,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
       await screen.findByText(/公園/);
@@ -4666,7 +4675,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '検索キーワード');
       expect(await screen.findByText(/検索キーワード/)).toBeTruthy();
@@ -4694,7 +4703,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '検索キーワード');
       await screen.findByText(/検索キーワード/);
@@ -4723,7 +4732,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'りんご');
 
@@ -4742,7 +4751,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
       await screen.findByText(/公園/);
@@ -4765,7 +4774,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
 
@@ -4791,7 +4800,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       // 空白のみのキーワードはtrim後に空文字列として扱われ、検索結果一覧(0件メッセージ含む)は表示されない
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '   ');
@@ -4817,7 +4826,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園散歩');
       await screen.findByText(/新しい日の公園散歩/);
@@ -4845,7 +4854,7 @@ describe('HomeScreen', () => {
       jest.clearAllMocks();
 
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'りんご');
 
@@ -4862,7 +4871,7 @@ describe('HomeScreen', () => {
 
     it('sets maxLength={1000} (BODY_MAX_LENGTH) on the search input, so it cannot exceed the diary body max length itself', async () => {
       render(<HomeScreen />);
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
       // composer/edit用のTextInputとは異なりgrapheme単位の切り詰めロジックは持たないため、
@@ -4891,7 +4900,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
         await screen.findByText(/公園/);
@@ -4914,7 +4923,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
         await screen.findByText(/公園/);
@@ -4958,7 +4967,7 @@ describe('HomeScreen', () => {
         mockedUseColorScheme.mockReturnValue('dark');
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
         await screen.findByText(/公園/);
@@ -4981,7 +4990,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
         await screen.findByText(/公園/);
@@ -5002,7 +5011,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
         await screen.findByText(/公園/);
@@ -5025,7 +5034,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         // ひらがなの「らーめん」で検索しても、本文中のカタカナ表記「ラーメン」がそのまま
         // ハイライト対象になる(検索キーワードの表記に置き換わらない)ことを確認する
@@ -5053,7 +5062,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'a\n\nb');
 
@@ -5079,7 +5088,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'a\nb');
 
@@ -5098,7 +5107,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'a\nb\n\nc');
 
@@ -5119,14 +5128,14 @@ describe('HomeScreen', () => {
     describe('検索欄のクリアボタン', () => {
       it('does not show the clear button while the search input is empty', async () => {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         expect(screen.queryByLabelText('検索キーワードをクリア')).toBeNull();
       });
 
       it('shows the clear button once a keyword is entered', async () => {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
 
@@ -5145,7 +5154,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
         fireEvent.changeText(searchInput, '公園');
@@ -5162,7 +5171,7 @@ describe('HomeScreen', () => {
 
       it('shows the clear button even for a whitespace-only query, even though the calendar view (not the results list) stays shown (boundary: clear button visibility uses the raw searchQuery, not the trimmed value)', async () => {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '   ');
 
@@ -5174,7 +5183,7 @@ describe('HomeScreen', () => {
 
       it('clears a whitespace-only query when the clear button is pressed', async () => {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         const searchInput = screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER);
         fireEvent.changeText(searchInput, '   ');
@@ -5187,7 +5196,7 @@ describe('HomeScreen', () => {
 
       it('sets accessibilityRole="button" in addition to accessibilityLabel on the clear button', async () => {
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '公園');
 
@@ -5209,7 +5218,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '１２３');
 
@@ -5228,7 +5237,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '123');
 
@@ -5247,7 +5256,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'らーめん');
 
@@ -5266,7 +5275,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'ラーメン');
 
@@ -5285,7 +5294,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), 'ｺｰﾋｰ');
 
@@ -5305,7 +5314,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         // 大文字小文字表記ゆれ(既存機能)と全角/半角表記ゆれ(今回の対応)が両方壊れていないことを、
         // 全て小文字の半角"cafe"で検索して確認する
@@ -5326,7 +5335,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         // 全角へ正規化しても本文には存在しない数字なので、ヒットしない
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '４５６');
@@ -5348,7 +5357,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         // 半角の"123"で検索するが、抜粋には元の本文にある全角の"１２３"がそのまま現れるはず
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '123');
@@ -5377,7 +5386,7 @@ describe('HomeScreen', () => {
         jest.clearAllMocks();
 
         render(<HomeScreen />);
-        await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+        await waitForInitialLoad();
 
         fireEvent.changeText(screen.getByPlaceholderText(SEARCH_INPUT_PLACEHOLDER), '123');
 
@@ -5454,7 +5463,7 @@ describe('HomeScreen', () => {
 
     it("keeps rendering the month Calendar (existing behavior unaffected) when the layout preference is the default 'month' (回帰: 既存の月表示に影響がない)", async () => {
       renderHomeScreenWithLayoutProvider();
-      await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
+      await waitForInitialLoad();
 
       expect(screen.UNSAFE_queryAllByType(Calendar)).toHaveLength(1);
       expect(queryWeekEntryButtons()).toHaveLength(0);
