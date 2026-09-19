@@ -29,7 +29,7 @@ utils/
 
 ## `diary-date.ts` の構成
 
-日記エントリの日付・時刻の整形/変換に関する共通ユーティリティです。カレンダー画面と日付ごとの日記一覧画面の両方から使うため切り出しています。日付キーはいずれも`react-native-calendars`が使う`'YYYY-MM-DD'`形式(端末のローカル日時基準)です。
+日記エントリの日付・時刻の整形/変換に関する共通ユーティリティです。カレンダー画面と日付ごとの日記一覧画面の両方から使うため切り出しています。日付キーは`react-native-calendars`が使う`'YYYY-MM-DD'`形式(端末のローカル日時基準)で、`formatEntryDateTime`のみ日付キーではなくISO文字列を受け取ります。
 
 - `toDateKey(date)` / `dateKeyToDate(dateKey)`: `Date`と日付キーを相互に変換します(`dateKeyToDate`はその日のローカル0時を返します)。
 - `buildCreatedAtForDateKey(dateKey)`: 日付キーからその日の正午(ローカルタイム)のISO文字列を作ります。過去日の新規作成時の`createdAt`に使います。日付境界(0時付近)だとタイムゾーン・サマータイムの影響で日付が前後し得るため、正午を採用しています。
@@ -46,7 +46,7 @@ utils/
 保存前の日記下書き(自動保存)をAsyncStorageへ暗号化して読み書きするためのユーティリティです。保存済みエントリ(`diary-storage.ts`)と同じAES-256-GCM暗号化を通すことで、未保存の下書きだけが平文で端末に残らないようにしています。
 
 - `DIARY_DRAFT_STORAGE_KEY`: ホーム画面下部の入力欄(composer)の下書きを保存するキーです。
-- `DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX` / `DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX`: 日付指定の新規作成モーダル、および編集画面の下書きキーの接頭辞です。実際のキーは、それぞれ接頭辞に対象日付(`YYYY-MM-DD`)・エントリIDを付けたものです。
+- `DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX` / `DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX`: ホーム画面(`app/(tabs)/index.tsx`)の日付指定の新規作成モーダル、および編集画面の下書きキーの接頭辞です。実際のキーは、それぞれ接頭辞に対象日付(`YYYY-MM-DD`)・エントリIDを付けたものです。
 - `isDraftStorageKey(key)`: キーが下書き系(完全一致または接頭辞一致)かを判定します。`clearAllDiaryEntries()`が全件削除の対象キーを漏れなく拾うために使います。
 - `saveDraftText(key, text)` / `loadDraftText(key)`: 下書き本文を暗号化して保存・復号して復元します。暗号化対応前に保存された平文の下書きも読み込めます(後方互換)。保存が無い場合、`loadDraftText`は`null`を返します。
 
