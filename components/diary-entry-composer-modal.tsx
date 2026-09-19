@@ -107,6 +107,7 @@ export function DiaryEntryComposerModal({
 
   const handleCancel = () => {
     if (!draft.trim()) {
+      void clearDraft();
       onClose();
       return;
     }
