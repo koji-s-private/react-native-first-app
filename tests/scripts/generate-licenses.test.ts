@@ -13,7 +13,7 @@ type FakePackageJson = {
   repository?: string | { url?: string };
 };
 
-// package-lock.jsonの"packages"エントリ。Issue #235以降、本番/開発の判定には`dependencies`
+// package-lock.jsonの"packages"エントリ。本番/開発の判定には`dependencies`
 // フィールド(本番依存のみ辿る)を使うため、フィクスチャでは`dev`フラグではなくこちらを使う。
 type FakeLockEntry = {
   dependencies?: Record<string, string>;
@@ -147,7 +147,7 @@ describe('scripts/generate-licenses.js', () => {
     expect(licenses.map((entry: { name: string }) => entry.name)).toEqual(['prod-lib']);
   });
 
-  it('excludes a package reachable only via peerDependencies even when its "dev" flag would be absent/false (Issue #235 core case)', () => {
+  it('excludes a package reachable only via peerDependencies even when its "dev" flag would be absent/false', () => {
     // expo-router → @testing-library/react-native のようなpeerDependency経由の連鎖を模したケース。
     // 「dependencies」フィールドではなく「peerDependencies」でのみ辿れる場合、npm自体は`dev`を
     // 付与しないことがあるが、新ロジックでは`dependencies`しか辿らないため正しく除外される。

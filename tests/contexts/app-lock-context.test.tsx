@@ -81,7 +81,7 @@ describe('AppLockProvider / useAppLock', () => {
 
   it('keeps isReady=false immediately after a previously saved ON setting is restored, and enabled/isUnlocked settle correctly once isReady becomes true (正常系: 起動時のisReadyとisUnlockedの整合性・レースコンディション対策)', async () => {
     await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
-    // isReadyがtrueになった瞬間に起動時の自動認証(#226)が発火し、既定のモックのまま即座に
+    // isReadyがtrueになった瞬間に起動時の自動認証が発火し、既定のモックのまま即座に
     // 成功してisUnlockedがtrueへ戻ってしまうと、ここで検証したいisReady/isUnlockedの
     // レースコンディションを確認できなくなるため、このテストの間だけ認証を保留状態にする
     mockedAuthenticationUtil.authenticateForAppLockAsync.mockReturnValue(new Promise(() => {}));
@@ -188,7 +188,7 @@ describe('AppLockProvider / useAppLock', () => {
 
   it('loads enabled=true and locks the screen when a previously saved setting is restored (正常系: 起動時の復元・ON)', async () => {
     await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
-    // 起動時の自動認証(#226)が既定のモックのまま即座に成功してしまわないよう保留にし、
+    // 起動時の自動認証が既定のモックのまま即座に成功してしまわないよう保留にし、
     // 復元直後の「ロックされた」状態そのものを検証できるようにする
     mockedAuthenticationUtil.authenticateForAppLockAsync.mockReturnValue(new Promise(() => {}));
 
@@ -276,7 +276,7 @@ describe('AppLockProvider / useAppLock', () => {
       expect(AsyncStorage.setItem).toHaveBeenLastCalledWith(APP_LOCK_ENABLED_STORAGE_KEY, 'false');
     });
 
-    // Issue #230: AsyncStorage.setItemが失敗した場合、enabled/isUnlockedの表示状態が
+    // AsyncStorage.setItemが失敗した場合、enabled/isUnlockedの表示状態が
     // 呼び出し前の値へロールバックされず、かつ例外が呼び出し元へ伝播しない
     // (未処理のPromise rejectionになる)不具合の回帰テスト。
     it('rolls back enabled/isUnlocked to their previous values and rethrows when AsyncStorage.setItem rejects (異常系: 永続化失敗時のロールバック)', async () => {
@@ -306,7 +306,7 @@ describe('AppLockProvider / useAppLock', () => {
     });
   });
 
-  describe('自動認証のトリガー(#226)', () => {
+  describe('自動認証のトリガー', () => {
     it('does not call authenticateForAppLockAsync at the moment the app moves to the background (正常系: background遷移では自動認証を呼ばない)', async () => {
       const { result } = renderHook(() => useAppLock(), { wrapper });
       await act(async () => {
@@ -321,8 +321,8 @@ describe('AppLockProvider / useAppLock', () => {
         handleAppStateChange('background');
       });
 
-      // 画面がOFFになっていく過程でOS標準パスコードへフォールバックしてしまう不具合(#226)の
-      // 原因だったため、background遷移の瞬間には認証プロンプトを起動してはいけない
+      // 画面がOFFになっていく過程でOS標準パスコードへフォールバックしてしまうため、
+      // background遷移の瞬間には認証プロンプトを起動してはいけない
       expect(mockedAuthenticationUtil.authenticateForAppLockAsync).not.toHaveBeenCalled();
     });
 
@@ -460,7 +460,7 @@ describe('AppLockProvider / useAppLock', () => {
     });
   });
 
-  describe('inactive遷移時のプライバシーオーバーレイ(#225)', () => {
+  describe('inactive遷移時のプライバシーオーバーレイ', () => {
     it('sets isInactiveOverlayVisible=true on an "inactive" transition while enabled (正常系: ONかつinactive遷移でオーバーレイ表示)', async () => {
       const { result } = renderHook(() => useAppLock(), { wrapper });
       await act(async () => {

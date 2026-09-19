@@ -58,7 +58,7 @@ jest.mock('expo-router', () => {
   return { Stack };
 });
 
-// 「アプリロック」画面(#155)が使う`utils/app-lock-authentication.ts`
+// 「アプリロック」画面が使う`utils/app-lock-authentication.ts`
 // (expo-local-authenticationの薄いラッパー)を、実際のネイティブ生体認証APIを呼ばずに検証できるよう
 // モック化する(個別の挙動はtests/utils/app-lock-authentication.test.ts等で検証済み。ここでは結線確認のみ)。
 jest.mock('@/utils/app-lock-authentication', () => ({
@@ -107,7 +107,7 @@ describe('RootLayout の一日日記一覧画面(day-entries/[date])の戻るボ
   });
 });
 
-describe('RootLayout のオンボーディング表示制御(Issue #104)', () => {
+describe('RootLayout のオンボーディング表示制御', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
     jest.clearAllMocks();
@@ -204,7 +204,7 @@ describe('RootLayout のオンボーディング表示制御(Issue #104)', () =>
   });
 });
 
-describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => {
+describe('RootLayoutのアプリロック画面表示制御', () => {
   const LOCK_SCREEN_TITLE = 'ロック中';
   const AUTHENTICATE_BUTTON_TEXT = '認証する';
 
@@ -244,7 +244,7 @@ describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => 
     await AsyncStorage.setItem(APP_LOCK_ENABLED_STORAGE_KEY, 'true');
     render(<RootLayout />);
     // 起動時に既にON(ロック済み)状態で復元されるため、まず起動時の自動認証(既定で成功する
-    // モック)が完了し、いったん未ロックの状態に戻るまで待つ(#226の2つ目の自動認証トリガー)
+    // モック)が完了し、いったん未ロックの状態に戻るまで待つ(2つ目の自動認証トリガーの検証のため)
     await waitFor(() =>
       expect(mockedAppLockAuthentication.authenticateForAppLockAsync).toHaveBeenCalledTimes(1),
     );
@@ -266,7 +266,7 @@ describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => 
 
     expect(screen.getByText(LOCK_SCREEN_TITLE)).toBeTruthy();
     // 画面がOFFになっていく過程(background遷移の瞬間)ではOS標準パスコードへフォールバックして
-    // しまう不具合(#226)があったため、この時点ではまだ認証プロンプトを起動しない
+    // しまうため、この時点ではまだ認証プロンプトを起動しない
     expect(mockedAppLockAuthentication.authenticateForAppLockAsync).not.toHaveBeenCalled();
 
     act(() => {
@@ -448,7 +448,7 @@ describe('RootLayoutのアプリロック画面表示制御(Issue #155)', () => 
     }
   });
 
-  describe('inactive遷移時のプライバシーオーバーレイ(Issue #225)', () => {
+  describe('inactive遷移時のプライバシーオーバーレイ', () => {
     // ON設定の復元直後は起動時ロック(isUnlocked=false)が発生し、自動認証(既定でモックは成功)を
     // 経て未ロックに戻るため、実際にその一連の遷移が完了するのを待ってから検証する
     async function renderUnlockedWithAppLockEnabled() {
