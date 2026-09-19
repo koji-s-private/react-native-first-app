@@ -26,7 +26,7 @@ constants/
 
 ## `theme.ts` の構成
 
-- `Colors`: ライトモード（`light`）とダークモード（`dark`）それぞれのカラーパレットを定義するオブジェクトです。`text`（文字色）、`background`（背景色）、`tint`（強調色）、`icon`（アイコン色）、`tabIconDefault` / `tabIconSelected`（タブアイコンの通常/選択時の色）を持ちます。[`hooks/use-theme-color.ts`](../hooks/use-theme-color.ts) からテーマに応じた色を取得する際に参照されます。
+- `Colors`: ライトモード（`light`）とダークモード（`dark`）それぞれのカラーパレットを定義するオブジェクトです。`text`（文字色）、`background`（背景色）、`tint`（強調色）、`icon`（アイコン色）、`tabIconDefault` / `tabIconSelected`（タブアイコンの通常/選択時の色）、`error`（エラー・警告・削除など注意喚起の色）、`link`（リンクの色）、`searchHighlightBackground`（検索結果の抜粋内でマッチ箇所を強調する背景色）を持ちます。[`hooks/use-theme-color.ts`](../hooks/use-theme-color.ts) からテーマに応じた色を取得する際に参照されます。
 - `Fonts`: `Platform.select` を使い、iOS / Web / それ以外（デフォルト）でフォント設定を出し分けるオブジェクトです。`sans`（サンセリフ体）、`serif`（セリフ体）、`rounded`（丸ゴシック体）、`mono`（等幅フォント）の4種類を定義しています。
 
 新しい共通定数（例: サイズ、スペーシング、アニメーション設定など）を追加する場合も、用途ごとにこのディレクトリにファイルを追加してください。
