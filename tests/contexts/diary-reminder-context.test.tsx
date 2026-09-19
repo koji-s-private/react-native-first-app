@@ -79,13 +79,16 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
     mockedNotificationsUtil.scheduleDailyReminderAsync.mockResolvedValue(undefined);
   });
 
-  it('defaults to disabled, 21:00, and "undetermined" permission before AsyncStorage/OS state has resolved (初期値)', () => {
+  it('defaults to disabled, 21:00, and "undetermined" permission before AsyncStorage/OS state has resolved (初期値)', async () => {
     const { result } = renderHook(() => useDiaryReminder(), { wrapper });
 
     expect(result.current.enabled).toBe(false);
     expect(result.current.hour).toBe(21);
     expect(result.current.minute).toBe(0);
     expect(result.current.permissionStatus).toBe('undetermined');
+
+    // 初期化の非同期更新をテスト終了前に流し切る
+    await waitFor(() => expect(result.current.isLoaded).toBe(true));
   });
 
   it('loads the current permission status from the OS on mount (正常系: 許可状態の初期取得)', async () => {

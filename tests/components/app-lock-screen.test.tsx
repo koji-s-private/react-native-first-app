@@ -5,16 +5,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AppLockScreen } from '@/components/app-lock-screen';
 
-// `useSafeAreaInsets`は`SafeAreaProvider`配下でないと投げるため、ライブラリ公式のjestモック
-// (プロバイダ無しでもゼロインセットを返す)に差し替える。
-jest.mock(
-  'react-native-safe-area-context',
-  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
-  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  () => require('react-native-safe-area-context/jest/mock').default,
-);
-
 const AUTHENTICATE_BUTTON_TEXT = '認証する';
 const DISABLE_BUTTON_TEXT = 'アプリロックを解除';
 const FAILURE_GUIDANCE_TEXT =

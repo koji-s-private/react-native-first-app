@@ -8,18 +8,6 @@ import {
   TabScreenContainer,
 } from '@/components/tab-screen-container';
 
-// 実機では`expo-router`の`ExpoRoot`が自動的に`SafeAreaProvider`で全体をラップするが、
-// このテストでは`TabScreenContainer`を単体でレンダリングするケースがあるため、
-// `useSafeAreaInsets`が`SafeAreaProvider`配下でないと投げるエラーを避けるべく、
-// ライブラリ公式のjestモック(常にゼロインセットを返す)に差し替える。
-jest.mock(
-  'react-native-safe-area-context',
-  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
-  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  () => require('react-native-safe-area-context/jest/mock').default,
-);
-
 describe('TabScreenContainer (Issue #125: タブ画面共通のセーフエリア対応コンテナ)', () => {
   it('renders its children', () => {
     render(
