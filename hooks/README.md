@@ -11,6 +11,8 @@ hooks/
   use-theme-color.ts          カラースキームに応じたテーマカラーを取得するフック
   use-modal-slide-transition.ts  背景オーバーレイのフェード・コンテンツのスライドインを制御するモーダル用アニメーションフック
   use-save-diary-entry.ts     日記保存処理（バリデーション・保存中フラグ・エラーハンドリング）を共通化するフック
+  use-draft-auto-save.ts      入力内容の変更をデバウンスして下書きとして自動保存し、破棄・保存成功時にキーを削除するフック
+  use-draft-restore.ts        保存済みの下書きを復元し、復元完了フラグを返すフック
 ```
 
 ## 各フックの役割
@@ -19,7 +21,9 @@ hooks/
 - `use-color-scheme.web.ts`: Web版の実装です。Webでは静的レンダリング（サーバー側で生成したHTMLをクライアントで再利用する仕組み）に対応するため、初回描画時は常に `'light'` を返し、クライアント側でのマウント完了後（`useEffect` 実行後）に実際のカラースキームへ切り替えます。
 - `use-theme-color.ts`: [`constants/theme.ts`](../constants/theme.ts) の `Colors` と [`contexts/theme-preference-context.tsx`](../contexts/theme-preference-context.tsx) の `useThemePreference`（OSのカラースキームに加えて、アプリ内で選択されたライト/ダーク/端末に合わせる設定も反映した解決済みのテーマ）を組み合わせ、現在のテーマ（ライト/ダーク）に応じた色を返すフックです。`props.light` / `props.dark` で個別の色指定を上書きすることもできます。[`components/themed-text.tsx`](../components/themed-text.tsx) や [`components/themed-view.tsx`](../components/themed-view.tsx) から利用されています。
 - `use-modal-slide-transition.ts`: 背景オーバーレイのopacityフェードと、コンテンツのtranslateYスライドインを分離して制御するアニメーションフックです。`Modal` の `animationType` は `'none'` にし、返り値の `Animated.Value` を呼び出し側の `style` に適用します。退場アニメーションが完了するまで実際に描画するかどうか（`isMounted`）を別で管理しており、`isOpen` が `false` になった瞬間に消えてしまわないようになっています。[`components/diary-entry-composer-modal.tsx`](../components/diary-entry-composer-modal.tsx) の新規作成モーダルと、`app/(tabs)/index.tsx` の年月ピッカーモーダルから利用されています。
-- `use-save-diary-entry.ts`: 日記の保存処理に共通する「連打防止 → trim → 文字数上限検証 → 保存中フラグON → 永続化 → catchでエラーメッセージ設定 → finallyで保存中フラグOFF」という骨格を切り出したフックです。実際の永続化処理（`persist`）と、成功/失敗時の画面固有の副作用（楽観的更新・ロールバック・トースト表示・画面遷移等、`onSuccess`/`onError`）は呼び出し側からコールバックとして渡します。保存中かどうか（`isSaving`）とエラーメッセージ（`error`/`setError`）を返し、`app/(tabs)/index.tsx`（新規保存・日付指定の新規作成）、`app/edit-entry/[id].tsx`（編集保存）、[`components/diary-entry-composer-modal.tsx`](../components/diary-entry-composer-modal.tsx)（日付指定の新規作成モーダル本体）から利用されています。
+- `use-save-diary-entry.ts`: 日記の保存処理に共通する「連打防止 → trim → 文字数上限検証 → 保存中フラグON → 永続化 → catchでエラーメッセージ設定 → finallyで保存中フラグOFF」という骨格を切り出したフックです。実際の永続化処理（`persist`）と、成功/失敗時の画面固有の副作用（楽観的更新・ロールバック・トースト表示・画面遷移等、`onSuccess`/`onError`）は呼び出し側からコールバックとして渡します。保存中かどうか（`isSaving`）とエラーメッセージ（`error`/`setError`）を返し、`app/(tabs)/index.tsx`（新規保存）、`app/edit-entry/[id].tsx`（編集保存）、[`components/diary-entry-composer-modal.tsx`](../components/diary-entry-composer-modal.tsx)（日付指定の新規作成モーダル本体）から利用されています。
+- `use-draft-auto-save.ts`: 入力内容（`draft`）の変更を1秒デバウンスして、AsyncStorageへ暗号化保存する共通フックです（空文字列の場合はキーを削除）。復元完了前に自動保存すると保存済みの下書きを上書きしてしまうため、復元完了フラグ（`isRestored`）が `true` になるまでは何もしません。返り値の `clearDraft` は、保留中の自動保存をキャンセルしてから下書きキーを削除します（保存成功時・破棄確定時に使います）。`app/(tabs)/index.tsx`（常設composer）、`app/edit-entry/[id].tsx`、[`components/diary-entry-composer-modal.tsx`](../components/diary-entry-composer-modal.tsx) から利用されています。
+- `use-draft-restore.ts`: 保存済みの下書きを読み込んで `onRestore` へ渡し、復元が完了したか（失敗した場合も完了扱い）を返すフックです。読み込み中にユーザーが入力を始めた場合はその入力を優先します。`use-draft-auto-save.ts` の `isRestored` に渡して使います。編集画面は、元の本文の読み込みと合わせて復元内容を判定する必要があるため、このフックを使わず自前で復元しています。
 
 ## 命名規則
 

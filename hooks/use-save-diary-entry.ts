@@ -3,12 +3,8 @@ import type { RefObject } from 'react';
 
 import { BODY_MAX_LENGTH, splitIntoGraphemes } from '@/utils/diary-text';
 
-// 日記の保存処理に共通する「連打防止 → trim → 文字数上限検証 → 保存中フラグON →
-// 永続化 → catchでエラーメッセージ設定 → finallyで保存中フラグOFF」という骨格を切り出したフック
-// 実際の永続化処理(persist)と、成功/失敗時の画面固有の副作用
-// (楽観的更新・ロールバック・トースト表示・画面遷移等)は呼び出し側からコールバックとして渡す。
-// `app/edit-entry/[id].tsx`のhandleSaveEdit、`app/(tabs)/index.tsx`のhandleSave /
-// handleSaveNewEntryの3箇所で個別に手書きされていた同一パターンを共通化する。
+// 日記保存の共通手順(連打防止・trim・文字数上限検証・保存中フラグ・エラー設定)を担うフック。
+// 永続化(persist)と成功/失敗時の画面固有の副作用は呼び出し側からコールバックとして渡す。
 export type SaveDiaryEntryOptions = {
   // 保存対象の本文(trim前)。空文字列・文字数上限超過の場合は何もせず(エラー設定もせず)returnする
   text: string;

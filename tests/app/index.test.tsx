@@ -2498,7 +2498,7 @@ describe('HomeScreen', () => {
       });
     });
 
-    it('does not change the maxHeight of the new-entry modal content, which stays a percentage of its parent', async () => {
+    it('sets the new-entry modal content maxHeight to 70% of the window height in px, like the month picker modal', async () => {
       const now = new Date();
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
@@ -2512,7 +2512,9 @@ describe('HomeScreen', () => {
       );
 
       const [modalContent] = screen.UNSAFE_getAllByType(Modal)[0].findAllByType(ThemedView);
-      expect(StyleSheet.flatten(modalContent.props.style).maxHeight).toBe('70%');
+      expect(StyleSheet.flatten(modalContent.props.style).maxHeight).toBe(
+        Dimensions.get('window').height * 0.7,
+      );
     });
 
     it('keeps the modal header and the year stepper outside the month ScrollView, so they stay fixed while only the month grid scrolls (正常系: 固定部分の分離)', async () => {
@@ -5636,6 +5638,163 @@ describe('HomeScreen', () => {
             `${formatDateHeading(otherDay.dateKey)}の日記: 別の日の日記`,
         ),
       ).toBe(true);
+    });
+
+    describe('日記の無い日の新規作成ボタン', () => {
+      // 2026-06-15(月)。同じ週の前日(6/14)が過去日、6/16以降が未来日になる
+      const FIXED_NOW = new Date(2026, 5, 15, 9, 34, 17);
+      const PAST_DATE_KEY = '2026-06-14';
+      const TODAY_DATE_KEY = '2026-06-15';
+
+      beforeEach(() => {
+        jest.useFakeTimers();
+        jest.setSystemTime(FIXED_NOW);
+      });
+
+      afterEach(() => {
+        jest.useRealTimers();
+      });
+
+      // 日記の読み込み完了(ローディング表示の消滅)まで待ってから検証に入る
+      async function renderInWeekLayoutAfterLoad() {
+        await renderInWeekLayout();
+        await waitFor(() =>
+          expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0),
+        );
+      }
+
+      function queryWeekCreateButtons() {
+        return screen
+          .queryAllByRole('button')
+          .filter((button) =>
+            (button.props.accessibilityLabel as string | undefined)?.endsWith('の日記を新規作成'),
+          );
+      }
+
+      function getWeekCreateButton(dateKey: string) {
+        return screen.getByLabelText(`${formatDateHeading(dateKey)}の日記を新規作成`);
+      }
+
+      function getNewEntryInput() {
+        const input = screen
+          .getAllByLabelText('日記本文')
+          .find(
+            (candidate) =>
+              candidate.props.placeholder === 'その日の出来事や気持ちを書いてみましょう',
+          );
+        expect(input).toBeTruthy();
+        return input!;
+      }
+
+      it('shows a create button only for days without entries that are today or in the past, and none for future days (正常系・境界値: 今日と未来日の境界)', async () => {
+        await renderInWeekLayoutAfterLoad();
+
+        const createButtons = queryWeekCreateButtons();
+        expect(createButtons.map((button) => button.props.accessibilityLabel)).toEqual([
+          `${formatDateHeading(PAST_DATE_KEY)}の日記を新規作成`,
+          `${formatDateHeading(TODAY_DATE_KEY)}の日記を新規作成`,
+        ]);
+      });
+
+      it('does not show any create button while the entries are still loading, and shows them once loading has finished (境界値: 読み込み中は日記の有無が未確定)', async () => {
+        let resolveGetAllKeys: (value: string[]) => void = () => {};
+        jest.spyOn(AsyncStorage, 'getAllKeys').mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveGetAllKeys = resolve as (value: string[]) => void;
+            }),
+        );
+
+        await AsyncStorage.setItem(CALENDAR_LAYOUT_PREFERENCE_STORAGE_KEY, 'week');
+        renderHomeScreenWithLayoutProvider();
+        await waitFor(() => expect(screen.UNSAFE_queryAllByType(Calendar)).toHaveLength(0));
+
+        expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(1);
+        expect(queryWeekCreateButtons()).toHaveLength(0);
+
+        await act(async () => {
+          resolveGetAllKeys([]);
+        });
+
+        expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
+        expect(queryWeekCreateButtons()).toHaveLength(2);
+      });
+
+      it('does not show a create button for a day that already has an entry (正常系)', async () => {
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify([
+            { id: '1', text: '今日の日記', createdAt: buildCreatedAtForDateKey(TODAY_DATE_KEY) },
+          ]),
+        );
+        jest.clearAllMocks();
+
+        await renderInWeekLayoutAfterLoad();
+
+        expect(queryWeekCreateButtons()).toHaveLength(1);
+        expect(
+          screen.queryByLabelText(`${formatDateHeading(TODAY_DATE_KEY)}の日記を新規作成`),
+        ).toBeNull();
+        expect(getWeekCreateButton(PAST_DATE_KEY)).toBeTruthy();
+      });
+
+      it('gives the create button a button role and a touch target of at least 44pt (アクセシビリティ)', async () => {
+        await renderInWeekLayoutAfterLoad();
+
+        const button = getWeekCreateButton(PAST_DATE_KEY);
+        expect(button.props.accessibilityRole).toBe('button');
+        expect(StyleSheet.flatten(button.props.style).minHeight).toBeGreaterThanOrEqual(44);
+      });
+
+      it('shows a create button on every day of a fully past week (境界値: 全日が過去の週)', async () => {
+        await renderInWeekLayoutAfterLoad();
+
+        fireEvent.press(screen.getByLabelText('前の日へ移動'));
+        fireEvent.press(screen.getByLabelText('前の日へ移動'));
+
+        expect(queryWeekCreateButtons()).toHaveLength(7);
+      });
+
+      it('opens the new-entry modal for the tapped past day without navigating or moving the focus (正常系)', async () => {
+        await renderInWeekLayoutAfterLoad();
+
+        fireEvent.press(getWeekCreateButton(PAST_DATE_KEY));
+
+        expect(
+          await screen.findByText(`${formatDateHeading(PAST_DATE_KEY)}の日記を書く`),
+        ).toBeTruthy();
+        expect(getNewEntryInput()).toBeTruthy();
+        expect(mockPush).not.toHaveBeenCalled();
+        expect(screen.getByText(formatDateHeading(TODAY_DATE_KEY))).toBeTruthy();
+      });
+
+      it('saves an entry anchored to the tapped day and replaces its create button with the entry (正常系: 保存後の反映)', async () => {
+        await renderInWeekLayoutAfterLoad();
+
+        fireEvent.press(getWeekCreateButton(PAST_DATE_KEY));
+        fireEvent.changeText(getNewEntryInput(), '過去日の日記');
+        fireEvent.press(screen.getAllByText('保存')[1]);
+
+        await waitFor(() => expect(queryWeekEntryButtons()).toHaveLength(1));
+        expect(queryWeekEntryButtons()[0].props.accessibilityLabel).toBe(
+          `${formatDateHeading(PAST_DATE_KEY)}の日記: 過去日の日記`,
+        );
+        expect(
+          screen.queryByLabelText(`${formatDateHeading(PAST_DATE_KEY)}の日記を新規作成`),
+        ).toBeNull();
+        expect(getWeekCreateButton(TODAY_DATE_KEY)).toBeTruthy();
+      });
+
+      it('keeps moving the focus, not opening the modal, when a day header is pressed (回帰: 日付ヘッダーの既存操作)', async () => {
+        await renderInWeekLayoutAfterLoad();
+
+        fireEvent.press(
+          screen.getByLabelText(`${formatDateHeading(PAST_DATE_KEY)}にフォーカスを移動`),
+        );
+
+        expect(screen.getByText(formatDateHeading(PAST_DATE_KEY))).toBeTruthy();
+        expect(screen.queryByText(/の日記を書く$/)).toBeNull();
+      });
     });
 
     describe('「今日」判定の自動更新', () => {
