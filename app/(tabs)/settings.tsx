@@ -358,6 +358,12 @@ function DiaryReminderSection() {
           通知が許可されていないため、リマインダーを利用できません。端末の設定からこのアプリの通知を許可してください。
         </ThemedText>
       )}
+      {!enabled && permissionStatus !== 'denied' && (
+        // OFFのうちに時刻を決めてからONにできるよう操作は無効化せず、通知に反映されない旨だけ案内する
+        <ThemedText style={styles.reminderHintText}>
+          リマインダーがOFFのため通知は届きません。ここで設定した時刻は、ONにしたときの通知時刻になります。
+        </ThemedText>
+      )}
     </ThemedView>
   );
 }
@@ -837,6 +843,10 @@ const styles = StyleSheet.create({
   },
   reminderFallbackText: {
     marginTop: 12,
+  },
+  reminderHintText: {
+    marginTop: 12,
+    fontSize: 13,
   },
   exportButton: {
     alignSelf: 'flex-start',

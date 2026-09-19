@@ -1691,6 +1691,8 @@ describe('リマインダーセクション(日記を書く習慣化のための
   const MINUTE_INCREASE_LABEL = '分を増やす';
   const FALLBACK_TEXT =
     '通知が許可されていないため、リマインダーを利用できません。端末の設定からこのアプリの通知を許可してください。';
+  const OFF_HINT_TEXT =
+    'リマインダーがOFFのため通知は届きません。ここで設定した時刻は、ONにしたときの通知時刻になります。';
 
   // `useDiaryReminder()`は`Provider`配下でない場合`setEnabled`/`setTime`がno-opにフォールバックする
   // 仕様(tests/contexts/diary-reminder-context.test.tsx参照)のため、実機と同じ構成を再現するために
@@ -2372,6 +2374,91 @@ describe('リマインダーセクション(日記を書く習慣化のための
     expect(screen.getByText('22')).toBeTruthy();
     expect(Alert.alert).not.toHaveBeenCalled();
     expect(mockedDiaryReminderNotifications.scheduleDailyReminderAsync).not.toHaveBeenCalled();
+  });
+
+  describe('リマインダーOFF時の時刻変更に関する案内', () => {
+    it('shows the OFF hint while the reminder is OFF and keeps the time steppers operable (正常系: OFF時は案内を表示し、時刻はONにする前に決められる)', async () => {
+      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
+        'granted',
+      );
+      renderSettingsScreen();
+
+      await waitFor(() => expect(screen.getByText(OFF_HINT_TEXT)).toBeTruthy());
+      for (const label of [
+        HOUR_INCREASE_LABEL,
+        HOUR_DECREASE_LABEL,
+        MINUTE_INCREASE_LABEL,
+        MINUTE_DECREASE_LABEL,
+      ]) {
+        expect(screen.getByLabelText(label).props.accessibilityState.disabled).toBe(false);
+      }
+    });
+
+    it('does not show the OFF hint while the reminder is ON (境界値: ON時は案内を表示しない)', async () => {
+      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
+        'granted',
+      );
+      await AsyncStorage.setItem(
+        DIARY_REMINDER_STORAGE_KEY,
+        JSON.stringify({ enabled: true, hour: 21, minute: 0 }),
+      );
+      renderSettingsScreen();
+
+      await waitFor(() =>
+        expect(screen.getByLabelText(REMINDER_TOGGLE_LABEL).props.value).toBe(true),
+      );
+      expect(screen.queryByText(OFF_HINT_TEXT)).toBeNull();
+    });
+
+    it('shows only the permission fallback message, not the OFF hint, when permission is denied (境界値: 許可拒否時は既存の案内のみ)', async () => {
+      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue('denied');
+      renderSettingsScreen();
+
+      await waitFor(() => expect(screen.getByText(FALLBACK_TEXT)).toBeTruthy());
+      expect(screen.queryByText(OFF_HINT_TEXT)).toBeNull();
+    });
+
+    it('hides the hint when the toggle is turned ON and shows it again when turned OFF (正常系: トグル操作に追従する)', async () => {
+      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
+        'granted',
+      );
+      renderSettingsScreen();
+      await waitFor(() => expect(screen.getByText(OFF_HINT_TEXT)).toBeTruthy());
+
+      await act(async () => {
+        fireEvent(screen.getByLabelText(REMINDER_TOGGLE_LABEL), 'valueChange', true);
+      });
+      await waitFor(() => expect(screen.queryByText(OFF_HINT_TEXT)).toBeNull());
+
+      await act(async () => {
+        fireEvent(screen.getByLabelText(REMINDER_TOGGLE_LABEL), 'valueChange', false);
+      });
+      await waitFor(() => expect(screen.getByText(OFF_HINT_TEXT)).toBeTruthy());
+    });
+
+    it('schedules the reminder with the time chosen while OFF once the toggle is turned ON (正常系: OFFのうちに決めた時刻でONにできる)', async () => {
+      mockedDiaryReminderNotifications.getReminderPermissionStatusAsync.mockResolvedValue(
+        'granted',
+      );
+      renderSettingsScreen();
+      await waitFor(() => expect(screen.getByText(OFF_HINT_TEXT)).toBeTruthy());
+
+      await act(async () => {
+        fireEvent.press(screen.getByLabelText(HOUR_INCREASE_LABEL));
+      });
+      expect(mockedDiaryReminderNotifications.scheduleDailyReminderAsync).not.toHaveBeenCalled();
+
+      await act(async () => {
+        fireEvent(screen.getByLabelText(REMINDER_TOGGLE_LABEL), 'valueChange', true);
+      });
+
+      await waitFor(() =>
+        expect(mockedDiaryReminderNotifications.scheduleDailyReminderAsync).toHaveBeenCalledWith(
+          22,
+          0,
+        ),
+      );
+    });
   });
 
   it('restores a previously saved ON/time setting from AsyncStorage on mount (正常系: 起動時の復元)', async () => {
