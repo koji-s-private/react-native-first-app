@@ -48,8 +48,8 @@ export default function EditEntryScreen() {
   const entryRef = useRef<DiaryEntry | null>(null);
   // 編集開始時点の本文。破棄確認の要否判定(editDraftとの比較)に使う
   const editOriginalTextRef = useRef('');
-  // アンマウント後にstate更新を行わないようにするためのフラグ(保存処理の完了を待つ間に
-  // 画面がアンマウントされ得るため、非同期処理のcatch/finallyで参照して安全性を確保する)
+  // アンマウント後にstate更新を行わないようにするためのフラグ(データ読み込み・保存処理の
+  // 完了を待つ間に画面がアンマウントされ得るため、各非同期処理から参照して安全性を確保する)
   const isMountedRef = useRef(true);
   // 下書き自動保存のデバウンスタイマーID。保存成功時・破棄確定時にAsyncStorageの下書きキーを
   // 削除する際、effectのクリーンアップ(=アンマウント)を待たずに明示的にキャンセルするために使う。
@@ -82,10 +82,9 @@ export default function EditEntryScreen() {
     // idが変わる場合(通常は画面が都度pushされるため起こらないが、念のため)に備え、
     // 新しいエントリの下書き復元が終わるまで自動保存effectを止める
     setIsDraftRestored(false);
-    let isCancelled = false;
     (async () => {
       const found = id ? await getDiaryEntryById(id) : null;
-      if (isCancelled) {
+      if (!isMountedRef.current) {
         return;
       }
       if (found) {
@@ -104,7 +103,7 @@ export default function EditEntryScreen() {
         let textToShow = truncatedText;
         try {
           const storedDraft = await loadDraftText(DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX + found.id);
-          if (!isCancelled && storedDraft !== null) {
+          if (isMountedRef.current && storedDraft !== null) {
             const truncatedDraft = truncateToBodyMaxLength(storedDraft);
             if (truncatedDraft !== truncatedText) {
               textToShow = truncatedDraft;
@@ -113,7 +112,7 @@ export default function EditEntryScreen() {
         } catch {
           // 下書きの復元に失敗しても、元の本文の表示は継続できるため無視する
         }
-        if (isCancelled) {
+        if (!isMountedRef.current) {
           return;
         }
         setEditDraft(textToShow);
@@ -130,9 +129,6 @@ export default function EditEntryScreen() {
       setIsLoaded(true);
       setIsDraftRestored(true);
     })();
-    return () => {
-      isCancelled = true;
-    };
   }, [id]);
 
   // editDraftの変更をデバウンスし、入力が止まってからAsyncStorageへ自動保存する
