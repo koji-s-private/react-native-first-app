@@ -10,6 +10,13 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
+// `useSafeAreaInsets`は`SafeAreaProvider`配下でないと投げるため、単体レンダリングでも動くよう
+// ライブラリ公式のjestモック(プロバイダ無しでもゼロインセットを返す)を全体に適用する。
+jest.mock(
+  'react-native-safe-area-context',
+  () => require('react-native-safe-area-context/jest/mock').default,
+);
+
 // `Animated`(モーダルの開閉フェード/スライド等、Issue #217)はJest環境でも実時間の経過を待って
 // 完了するため、テストの実行時間増加や実行環境のCPU負荷によるタイミング起因のflakyな失敗を招く。
 // React NativeはテストのためにAnimated.timing等を実時間を待たず即座に最終値へ遷移させる

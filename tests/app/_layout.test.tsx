@@ -12,16 +12,6 @@ import { APP_LOCK_ENABLED_STORAGE_KEY } from '@/contexts/app-lock-context';
 import { ONBOARDING_SLIDES } from '@/constants/onboarding-slides';
 import { ONBOARDING_COMPLETED_STORAGE_KEY } from '@/utils/onboarding-storage';
 
-// `useSafeAreaInsets`は`SafeAreaProvider`配下でないと投げるため、ライブラリ公式のjestモック
-// (プロバイダ無しでもゼロインセットを返す)に差し替える。
-jest.mock(
-  'react-native-safe-area-context',
-  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
-  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  () => require('react-native-safe-area-context/jest/mock').default,
-);
-
 // ネイティブの`AsyncStorage`モジュールはJest環境では利用できない(`NativeModule: AsyncStorage is
 // null`になる)ため、パッケージが公式に提供しているインメモリのモックに差し替える。
 // `tests/app/index.test.tsx`と同じ方式。

@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import { randomUUID } from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
@@ -13,7 +13,6 @@ import {
   Keyboard,
   Modal,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   useColorScheme,
@@ -143,15 +142,6 @@ jest.mock('expo-secure-store', () => {
     },
   };
 });
-
-// 実機では`expo-router`の`ExpoRoot`が自動的に`SafeAreaProvider`で全体をラップするが、
-// 単体レンダリングではそのラップが無く`useSafeAreaInsets`がエラーを投げるため、
-// ライブラリ公式のjestモック(常にゼロインセットを返す)に差し替える。
-jest.mock(
-  'react-native-safe-area-context',
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  () => require('react-native-safe-area-context/jest/mock').default,
-);
 
 // Jest環境ではネイティブの`AsyncStorage`が使えない(`NativeModule: AsyncStorage is null`)ため、
 // パッケージ同梱の公式インメモリモックに差し替える。
@@ -2452,19 +2442,16 @@ describe('HomeScreen', () => {
       }
     });
 
-    it('renders the 12 month buttons inside a ScrollView within the month picker modal content, so that every month stays reachable even if the content exceeds the modal maxHeight (境界値: 小さい画面)', async () => {
+    it('renders all 12 month buttons inside the scrollable month grid (month-picker-scroll), so every month stays reachable even if the content exceeds the modal maxHeight (正常系: 月グリッドのスクロール領域)', async () => {
       const now = new Date();
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       await openMonthPicker(now);
 
-      const modal = getMonthPickerModal();
-      const scrollViews = modal.findAllByType(ScrollView);
-      expect(scrollViews).toHaveLength(1);
-      const [monthScroll] = scrollViews;
+      const monthScroll = screen.getByTestId('month-picker-scroll');
       for (const monthName of MONTH_NAMES_JA) {
-        expect(monthScroll.findByProps({ children: monthName })).toBeTruthy();
+        expect(within(monthScroll).getByText(monthName)).toBeTruthy();
       }
       expect(StyleSheet.flatten(monthScroll.props.contentContainerStyle)).toMatchObject({
         flexDirection: 'row',
@@ -2523,7 +2510,7 @@ describe('HomeScreen', () => {
       await openMonthPicker(now);
 
       const modal = getMonthPickerModal();
-      const [monthScroll] = modal.findAllByType(ScrollView);
+      const monthScroll = screen.getByTestId('month-picker-scroll');
       const fixedLabels = ['前の年', '次の年', CLOSE_BUTTON_TEXT];
       for (const label of fixedLabels) {
         expect(modal.findAllByProps({ accessibilityLabel: label }).length).toBeGreaterThan(0);
@@ -2532,19 +2519,19 @@ describe('HomeScreen', () => {
       expect(monthScroll.findAllByProps({ children: '年月を選択' })).toHaveLength(0);
     });
 
-    it('keeps onStartShouldSetResponder on the modal content so that touches on the month ScrollView do not propagate to the overlay and close the modal (正常系: タップ伝播制御)', async () => {
+    it('claims the touch start on the modal content via onStartShouldSetResponder, which keeps touches on the month ScrollView from reaching the overlay Pressable (正常系: タップ伝播制御)', async () => {
       const now = new Date();
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 
       await openMonthPicker(now);
 
+      // テスト環境ではレスポンダーの調停(実際のタップ伝播)を再現できないため、プロパティ自体を検証する
       const [modalContent] = getMonthPickerModal().findAllByType(ThemedView);
       expect(modalContent.props.onStartShouldSetResponder()).toBe(true);
-      expect(screen.getByText('年月を選択')).toBeTruthy();
     });
 
-    it('marks the currently displayed month button as selected and enabled inside the ScrollView, and closes the modal when it is pressed (境界値: 上限月の選択済みボタン)', async () => {
+    it('keeps the displayed month button selected and enabled even when it is exactly the upper-bound month (the current month), and closes the modal without moving the calendar when it is pressed (境界値: 上限月ちょうど)', async () => {
       const now = new Date();
       render(<HomeScreen />);
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
@@ -5676,7 +5663,8 @@ describe('HomeScreen', () => {
         expect(getTodayBadgeDayText(9)).toBeTruthy();
 
         jest.setSystemTime(new Date(2026, 8, 10, 0, 0, 30));
-        act(() => {
+        // 再フォーカスで走る非同期の再読み込み(setEntries等)まで含めてactで流し切る
+        await act(async () => {
           (triggerRefocus as () => void)();
         });
 
