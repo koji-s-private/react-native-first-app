@@ -60,6 +60,8 @@ type DiaryReminderContextValue = {
   minute: number;
   /** 現在の通知許可状態。'denied'の場合はONにしてもOSレベルで通知が届かない */
   permissionStatus: ReminderPermissionStatus;
+  /** 保存済み設定の復元と通知許可状態の取得の両方が終わったか(失敗して既定値のまま確定した場合も含む) */
+  isLoaded: boolean;
   /**
    * リマインダーのON/OFFを切り替える。ONにする際、未確認(undetermined)であれば
    * 通知許可のリクエストを行い、許可された場合のみ実際に通知をスケジュールする。
@@ -82,6 +84,7 @@ export function DiaryReminderProvider({ children }: PropsWithChildren) {
   const [settings, setSettings] = useState<DiaryReminderSettings>(DEFAULT_REMINDER_SETTINGS);
   const [permissionStatus, setPermissionStatus] =
     useState<ReminderPermissionStatus>('undetermined');
+  const [isLoaded, setIsLoaded] = useState(false);
 
   const persist = useCallback((next: DiaryReminderSettings) => {
     // 保存の完了を待たずに即座に画面へ反映する(theme-preference-contextと同じ方針。
@@ -106,6 +109,16 @@ export function DiaryReminderProvider({ children }: PropsWithChildren) {
     let isMounted = true;
     let loadedSettings: DiaryReminderSettings | null = null;
     let loadedPermissionStatus: ReminderPermissionStatus | null = null;
+    let pendingLoads = 2;
+
+    // 復元と許可状態取得の両方が終わった時点でのみ読み込み完了にする(初期値のまま
+    // 描画される間、UI側が「OFF」と誤って案内しないため)
+    const markLoadSettled = () => {
+      pendingLoads -= 1;
+      if (isMounted && pendingLoads === 0) {
+        setIsLoaded(true);
+      }
+    };
 
     const correctIfPermissionDenied = (): boolean => {
       if (
@@ -139,7 +152,8 @@ export function DiaryReminderProvider({ children }: PropsWithChildren) {
       })
       .catch(() => {
         // 読み込みに失敗しても既定値(OFF)のまま動作を続ける
-      });
+      })
+      .finally(markLoadSettled);
 
     getReminderPermissionStatusAsync()
       .then((status) => {
@@ -152,7 +166,8 @@ export function DiaryReminderProvider({ children }: PropsWithChildren) {
       })
       .catch(() => {
         // 取得に失敗した場合は「未確認」のまま扱う
-      });
+      })
+      .finally(markLoadSettled);
 
     return () => {
       isMounted = false;
@@ -269,10 +284,11 @@ export function DiaryReminderProvider({ children }: PropsWithChildren) {
       hour: settings.hour,
       minute: settings.minute,
       permissionStatus,
+      isLoaded,
       setEnabled,
       setTime,
     }),
-    [settings, permissionStatus, setEnabled, setTime],
+    [settings, permissionStatus, isLoaded, setEnabled, setTime],
   );
 
   return <DiaryReminderContext.Provider value={value}>{children}</DiaryReminderContext.Provider>;
@@ -295,6 +311,7 @@ export function useDiaryReminder(): DiaryReminderContextValue {
     hour: DEFAULT_REMINDER_SETTINGS.hour,
     minute: DEFAULT_REMINDER_SETTINGS.minute,
     permissionStatus: 'undetermined',
+    isLoaded: true,
     setEnabled: async () => {},
     setTime: async () => {},
   };

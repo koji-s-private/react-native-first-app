@@ -262,7 +262,8 @@ const REMINDER_MINUTE_STEP = 5;
 // 外部のPush通知サービスは使わず、expo-notificationsによる端末内のローカル通知スケジューリングのみで
 // 完結させている。通知が許可されていない場合は、その旨をこの画面内で案内する(フォールバック表示)。
 function DiaryReminderSection() {
-  const { enabled, hour, minute, permissionStatus, setEnabled, setTime } = useDiaryReminder();
+  const { enabled, hour, minute, permissionStatus, isLoaded, setEnabled, setTime } =
+    useDiaryReminder();
   // ON/OFF切り替え(通知許可のリクエストを伴う非同期処理)が完了するまで、
   // 誤って連続でタップされないようにするための状態
   const [isTogglePending, setIsTogglePending] = useState(false);
@@ -358,7 +359,7 @@ function DiaryReminderSection() {
           通知が許可されていないため、リマインダーを利用できません。端末の設定からこのアプリの通知を許可してください。
         </ThemedText>
       )}
-      {!enabled && permissionStatus !== 'denied' && (
+      {isLoaded && !enabled && permissionStatus !== 'denied' && (
         // OFFのうちに時刻を決めてからONにできるよう操作は無効化せず、通知に反映されない旨だけ案内する
         <ThemedText style={styles.reminderHintText}>
           リマインダーがOFFのため通知は届きません。ここで設定した時刻は、ONにしたときの通知時刻になります。
