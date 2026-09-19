@@ -8,20 +8,16 @@
  * 特定し、それぞれの <パッケージパス>/package.json からライブラリ名・バージョン・
  * ライセンス種別・リポジトリURLを抽出して、静的なJSONファイル(data/licenses.json)として書き出す。
  *
- * 当初(Issue #101 / PR #115)はpackage.jsonの直接依存のみを対象にしていたが、実際にバンドルへ
- * 含まれるtransitive依存が抜け落ちておりストア審査対応として不完全だった(Issue #117)。
- * license-checker-rseidelsohn等の外部ツールでの自動収集も試みたが、このリポジトリのnode_modules
- * 構成では正しく動作しなかったため、npm自体が生成するpackage-lock.jsonの情報だけを読み取る
- * シンプルな実装で代替している。依存関係の追加やツールのバージョン変動に左右されにくい利点もある。
+ * バンドルに含まれるtransitive依存も漏れなく対象にするため、license-checker-rseidelsohn等の
+ * 外部ツールではなく、npm自体が生成するpackage-lock.jsonの情報だけを読み取るシンプルな実装にしている。
+ * 依存関係の追加やツールのバージョン変動に左右されにくい利点もある。
  *
- * 本番パッケージの特定方法(Issue #235で変更): 以前は各エントリの `dev: true` フラグ
- * (devDependencies経由でのみ到達可能な場合にnpmが付与する)で除外していたが、npmは
- * peerDependencies経由でも到達可能なパッケージには`dev`を付与しない仕様のため、
- * expo-router → @testing-library/react-native のようなpeerDependency経由の連鎖により
- * jest/typescript/react-test-renderer/@testing-library/react-native等のdevDependencies由来の
- * パッケージが誤って本番扱いになっていた。そのため、ルート(packages[""])の本番`dependencies`を
- * 起点に、各パッケージの`dependencies`(devDependencies/peerDependencies/optionalDependenciesは
- * 辿らない)のみを辿るBFSで到達可能性を自前で再計算し、その集合だけを対象にする。
+ * 本番パッケージの特定方法: 各エントリの `dev: true` フラグは、npmがpeerDependencies経由でも
+ * 到達可能なパッケージには付与しない仕様のため、devDependencies由来のパッケージ
+ * (jest/typescript/@testing-library/react-native等)が本番扱いになってしまう。そのため、
+ * ルート(packages[""])の本番`dependencies`を起点に、各パッケージの`dependencies`
+ * (devDependencies/peerDependencies/optionalDependenciesは辿らない)のみを辿るBFSで
+ * 到達可能性を自前で再計算し、その集合だけを対象にする。
  *
  * 実行方法: npm run generate-licenses
  */
