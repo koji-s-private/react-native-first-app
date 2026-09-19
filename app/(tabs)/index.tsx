@@ -49,7 +49,12 @@ import {
   loadDraftText,
   saveDraftText,
 } from '@/utils/diary-draft-storage';
-import { BODY_MAX_LENGTH, splitIntoGraphemes, truncateToBodyMaxLength } from '@/utils/diary-text';
+import {
+  BODY_MAX_LENGTH,
+  splitIntoGraphemes,
+  truncateForAccessibilityLabel,
+  truncateToBodyMaxLength,
+} from '@/utils/diary-text';
 import { getAllDiaryEntries, saveDiaryEntry, type DiaryEntry } from '@/utils/diary-storage';
 
 // 下書きの自動保存をデバウンスする間隔(ミリ秒)
@@ -393,7 +398,7 @@ function WeekCalendarView({
                       onPress={() => onEntryPress(weekDay.dateKey)}
                       style={[styles.weekEntryItem, { backgroundColor: tintColor }]}
                       accessibilityRole="button"
-                      accessibilityLabel={`${formatDateHeading(weekDay.dateKey)}の日記: ${entry.text}`}
+                      accessibilityLabel={`${formatDateHeading(weekDay.dateKey)}の日記: ${truncateForAccessibilityLabel(entry.text)}`}
                     >
                       <ThemedText
                         numberOfLines={2}

@@ -26,3 +26,20 @@ export function truncateToBodyMaxLength(text: string): string {
   }
   return graphemes.slice(0, BODY_MAX_LENGTH).join('');
 }
+
+// スクリーンリーダーのラベルに含める日記本文の最大文字数(超える分は省略記号に置き換える)
+export const ACCESSIBILITY_LABEL_TEXT_MAX_LENGTH = 50;
+
+// 日記本文をスクリーンリーダーの読み上げ用に切り詰める。長文全体が読み上げられて冗長に
+// ならないよう、書記素クラスタ単位で上限まで切り詰めて省略記号を付ける。
+export function truncateForAccessibilityLabel(text: string): string {
+  // コードユニット数が上限以下なら書記素数も上限以下のため、分割処理を省略する
+  if (text.length <= ACCESSIBILITY_LABEL_TEXT_MAX_LENGTH) {
+    return text;
+  }
+  const graphemes = splitIntoGraphemes(text);
+  if (graphemes.length <= ACCESSIBILITY_LABEL_TEXT_MAX_LENGTH) {
+    return text;
+  }
+  return `${graphemes.slice(0, ACCESSIBILITY_LABEL_TEXT_MAX_LENGTH).join('')}…`;
+}
