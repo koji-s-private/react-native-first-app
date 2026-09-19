@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-
 import * as Clipboard from 'expo-clipboard';
 import * as SecureStore from 'expo-secure-store';
 import React from 'react';
-import { Alert, StyleSheet, useColorScheme } from 'react-native';
+import { Alert, Dimensions, StyleSheet, useColorScheme } from 'react-native';
 
 import DayEntriesScreen from '@/app/day-entries/[date]';
 import { Colors } from '@/constants/theme';
@@ -858,6 +858,89 @@ describe('DayEntriesScreen', () => {
       });
       expect(await screen.findByText('あ'.repeat(BODY_MAX_LENGTH))).toBeTruthy();
     }, 15000); // waitForのtimeout(5000ms)にマージンを持たせ、CI環境の負荷によるflaky失敗を防ぐ
+
+    it('caps the input height so long drafts scroll inside the input, and keeps the counter and an enabled save button available at the length limit (境界値)', async () => {
+      render(<DayEntriesScreen />);
+      await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+      await openNewEntryComposer();
+
+      const input = screen.getByLabelText(NEW_ENTRY_INPUT_LABEL);
+      const inputStyle = StyleSheet.flatten(input.props.style);
+      expect(inputStyle.maxHeight).toBeGreaterThan(inputStyle.minHeight);
+      expect(Number.isFinite(inputStyle.maxHeight)).toBe(true);
+
+      fireEvent.changeText(input, 'あ\n'.repeat(BODY_MAX_LENGTH));
+      expect(screen.getByText(`${BODY_MAX_LENGTH}/${BODY_MAX_LENGTH}`)).toBeTruthy();
+      const saveButton = screen.getByRole('button', { name: NEW_ENTRY_SAVE_LABEL });
+      expect(saveButton.props.accessibilityState?.disabled).toBe(false);
+      expect(StyleSheet.flatten(saveButton.props.style).opacity).toBe(1);
+    });
+
+    describe('本文入力欄の高さ上限(画面サイズへの追従)', () => {
+      const originalWindow = Dimensions.get('window');
+
+      afterEach(async () => {
+        await act(async () => {
+          Dimensions.set({ window: originalWindow, screen: originalWindow });
+        });
+      });
+
+      async function setWindowHeight(height: number): Promise<void> {
+        await act(async () => {
+          const window = { ...originalWindow, height };
+          Dimensions.set({ window, screen: window });
+        });
+      }
+
+      it('sets the input maxHeight to 25% of the window height', async () => {
+        render(<DayEntriesScreen />);
+        await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+        await openNewEntryComposer();
+
+        const inputStyle = StyleSheet.flatten(
+          screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.style,
+        );
+        expect(inputStyle.maxHeight).toBe(originalWindow.height * 0.25);
+      });
+
+      it('follows the window height when it changes while the composer is open (画面回転・分割画面)', async () => {
+        render(<DayEntriesScreen />);
+        await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+        await openNewEntryComposer();
+
+        await setWindowHeight(400);
+        expect(
+          StyleSheet.flatten(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.style).maxHeight,
+        ).toBe(100);
+
+        await setWindowHeight(1000);
+        expect(
+          StyleSheet.flatten(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.style).maxHeight,
+        ).toBe(250);
+      });
+
+      it('keeps a finite, positive maxHeight and the minHeight on extremely short windows (境界値)', async () => {
+        render(<DayEntriesScreen />);
+        await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+        await openNewEntryComposer();
+
+        // 320pt未満では上限がminHeight(80)を下回る。Yogaはminを優先するため入力欄は80のまま潰れない
+        await setWindowHeight(200);
+        const inputStyle = StyleSheet.flatten(
+          screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.style,
+        );
+        expect(inputStyle.maxHeight).toBe(50);
+        expect(inputStyle.minHeight).toBe(80);
+
+        await setWindowHeight(0);
+        const zeroStyle = StyleSheet.flatten(
+          screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.style,
+        );
+        expect(zeroStyle.maxHeight).toBe(0);
+        expect(Number.isNaN(zeroStyle.maxHeight)).toBe(false);
+        expect(screen.getByRole('button', { name: NEW_ENTRY_SAVE_LABEL })).toBeTruthy();
+      });
+    });
 
     it('prevents duplicate saves when the save button is pressed repeatedly while a save is still in flight (連打防止)', async () => {
       let resolveSetItem: () => void = () => {};
