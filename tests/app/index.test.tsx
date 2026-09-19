@@ -616,7 +616,7 @@ describe('HomeScreen', () => {
       expect(getBackgroundDismissPressable().props.accessible).toBe(false);
     });
 
-    it('does not call Keyboard.dismiss when pressing the save button; the save button handles its own tap independently of the background wrapper (回帰: 既存のタップ操作がラッパーに邪魔されない)', async () => {
+    it('does not call Keyboard.dismiss when pressing the save button; the save button handles its own tap independently of the background wrapper (保存ボタンのタップが背景ラッパーに邪魔されない)', async () => {
       const dismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
 
       render(<HomeScreen />);
@@ -629,7 +629,7 @@ describe('HomeScreen', () => {
       expect(dismissSpy).not.toHaveBeenCalled();
     });
 
-    it('does not call Keyboard.dismiss when typing into the composer TextInput; the input handles its own event independently of the background wrapper (回帰)', async () => {
+    it('does not call Keyboard.dismiss when typing into the composer TextInput; the input handles its own event independently of the background wrapper (入力操作が背景ラッパーに邪魔されない)', async () => {
       const dismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
 
       render(<HomeScreen />);
@@ -3560,7 +3560,7 @@ describe('HomeScreen', () => {
       expect(badgeText.props.maxFontSizeMultiplier).toBe(EXPECTED_MAX_FONT_SCALE);
     });
 
-    it('still shows the day number and entry-count badge as before (regression check: adding maxFontSizeMultiplier does not change rendered content)', async () => {
+    it('shows the day number and the entry-count badge on a day cell with entries', async () => {
       // 実行時点の「今日」が月初(1〜9日)だと、pickNonTodayDayInRangeが選ぶ10〜20日が
       // 未来日になり、Calendarのmaxdateで無効化された当月のセルと、6週分の枠を埋めるため
       // 表示される翌月のはみ出しセル(同じく無効化扱い)の両方に同じ日番号が現れて
@@ -4383,10 +4383,9 @@ describe('HomeScreen', () => {
       expect(await readPersistedEntry('existing')).not.toBeNull();
     });
 
-    // pending中の書き込みが無い通常時は、余分な待ち合わせをせず即座に読み直すことを
-    // 確認する(loadEntries冒頭のawaitは
-    // pendingWriteCountRef.current > 0のときのみ行われる)
-    it('reloads immediately on refocus when there is no pending write in the queue (regression check for normal refetch behavior)', async () => {
+    // pending中の書き込みが無い通常時は、余分な待ち合わせをせず即座に読み直すことを確認する
+    // (loadEntries冒頭のawaitはpendingWriteCountRef.current > 0のときのみ行われる)
+    it('reloads immediately on refocus when there is no pending write in the queue (通常時の再取得)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -5465,7 +5464,7 @@ describe('HomeScreen', () => {
       }
     });
 
-    it("keeps rendering the month Calendar (existing behavior unaffected) when the layout preference is the default 'month' (回帰: 既存の月表示に影響がない)", async () => {
+    it("renders the month Calendar when the layout preference is the default 'month' (既定の月表示)", async () => {
       renderHomeScreenWithLayoutProvider();
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 

@@ -252,7 +252,7 @@ describe('utils/diary-encryption', () => {
   });
 
   describe('getOrCreateEncryptionKey on Android (Platform.OS === "android", boundary)', () => {
-    // Web以外(iOS/Android)では従来通りSecureStoreを使う実装になっている。
+    // Web以外(iOS/Android)ではSecureStoreを使う実装になっている。
     // 上の describe('getOrCreateEncryptionKey') は既定値(jest-expoの既定は'ios')でこれを検証しているが、
     // 実装は`Platform.OS === 'web'`かどうかのみで分岐するため、'android'でも同じ経路(SecureStore)を
     // 通ることを明示的に確認する境界値テスト。
