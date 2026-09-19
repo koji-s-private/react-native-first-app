@@ -158,6 +158,8 @@ const CLIPBOARD_COPY_LABEL = '日記本文をコピー';
 const EDIT_BUTTON_LABEL = 'この日記を編集';
 const DELETE_BUTTON_LABEL = 'この日記を削除';
 const EMPTY_STATE_MESSAGE = 'この日の日記はまだありません';
+const LOAD_ERROR_MESSAGE =
+  '日記データを読み込めませんでした。アプリを再起動しても解決しない場合は端末の復元設定をご確認ください。';
 
 // 新規登録モーダル(components/diary-entry-composer-modal.tsx)関連のテストで使う定数。
 // 下書きの自動保存キー接頭辞はホーム画面(diary-new-entry-draft-)と衝突しないよう
@@ -315,6 +317,58 @@ describe('DayEntriesScreen', () => {
 
     expect(await screen.findByText('編集後の日記')).toBeTruthy();
     expect(screen.queryByText('編集前の日記')).toBeNull();
+  });
+
+  describe('読み込みエラー', () => {
+    it('shows a load-error message instead of the empty state message when stored data is corrupted (invalid JSON)', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'getItem').mockResolvedValueOnce('not valid json');
+
+      render(<DayEntriesScreen />);
+
+      expect(await screen.findByText(LOAD_ERROR_MESSAGE)).toBeTruthy();
+      expect(screen.queryByText(EMPTY_STATE_MESSAGE)).toBeNull();
+    });
+
+    it('shows the plain empty state message (not the load-error message) when no entries exist and loading succeeds', async () => {
+      render(<DayEntriesScreen />);
+
+      expect(await screen.findByText(EMPTY_STATE_MESSAGE)).toBeTruthy();
+      expect(screen.queryByText(LOAD_ERROR_MESSAGE)).toBeNull();
+    });
+
+    it('clears the load-error message and shows the entries once a later reload succeeds', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'getAllKeys').mockRejectedValueOnce(new Error('storage failure'));
+      await seedDiaryEntries([
+        { id: '1', text: '復旧後に表示される日記', createdAt: localIso(DATE_KEY, 9, 0) },
+      ]);
+
+      render(<DayEntriesScreen />);
+      expect(await screen.findByText(LOAD_ERROR_MESSAGE)).toBeTruthy();
+
+      act(() => {
+        triggerRefocus();
+      });
+
+      expect(await screen.findByText('復旧後に表示される日記')).toBeTruthy();
+      expect(screen.queryByText(LOAD_ERROR_MESSAGE)).toBeNull();
+    });
+
+    it('shows the load-error message in Colors.dark.error when in dark mode', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'getAllKeys').mockRejectedValueOnce(new Error('storage failure'));
+      (useColorScheme as jest.Mock).mockReturnValue('dark');
+
+      try {
+        render(<DayEntriesScreen />);
+
+        const message = await screen.findByText(LOAD_ERROR_MESSAGE);
+        expect(StyleSheet.flatten(message.props.style).color).toBe(Colors.dark.error);
+      } finally {
+        (useColorScheme as jest.Mock).mockReturnValue('light');
+      }
+    });
   });
 
   describe('コピー', () => {
