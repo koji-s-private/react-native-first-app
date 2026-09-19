@@ -9,6 +9,7 @@ import {
   Pressable,
   StyleSheet,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
@@ -22,6 +23,10 @@ import { BODY_MAX_LENGTH, splitIntoGraphemes, truncateToBodyMaxLength } from '@/
 
 // 下書きの自動保存をデバウンスする間隔(ミリ秒)。他画面の新規作成・編集下書きと合わせる
 const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
+
+// 本文入力欄の高さ上限(画面高さに対する比率)。超過分は入力欄自体がスクロールするため、
+// 長文でもフッター(文字数カウンター・保存ボタン)がキーボード表示中でも画面内に留まる
+const INPUT_MAX_HEIGHT_RATIO = 0.25;
 
 export type DiaryEntryComposerModalProps = {
   /** 対象日付('YYYY-MM-DD')。nullの間はモーダルを閉じた状態にする */
@@ -71,6 +76,7 @@ export function DiaryEntryComposerModal({
   const { isSaving, error, setError, save } = useSaveDiaryEntry();
 
   const transition = useModalSlideTransition(dateKey !== null);
+  const { height: windowHeight } = useWindowDimensions();
 
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
@@ -235,7 +241,11 @@ export function DiaryEntryComposerModal({
                   </Pressable>
                 </View>
                 <TextInput
-                  style={[styles.input, { color: textColor, borderColor: tintColor }]}
+                  style={[
+                    styles.input,
+                    { color: textColor, borderColor: tintColor },
+                    { maxHeight: windowHeight * INPUT_MAX_HEIGHT_RATIO },
+                  ]}
                   placeholder="その日の出来事や気持ちを書いてみましょう"
                   placeholderTextColor={iconColor}
                   value={draft}

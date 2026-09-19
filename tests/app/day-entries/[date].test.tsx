@@ -682,6 +682,23 @@ describe('DayEntriesScreen', () => {
       expect(await screen.findByText('あ'.repeat(BODY_MAX_LENGTH))).toBeTruthy();
     }, 15000); // waitForのtimeout(5000ms)にマージンを持たせ、CI環境の負荷によるflaky失敗を防ぐ
 
+    it('caps the input height so long drafts scroll inside the input, and keeps the counter and an enabled save button available at the length limit (境界値)', async () => {
+      render(<DayEntriesScreen />);
+      await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
+      await openNewEntryComposer();
+
+      const input = screen.getByLabelText(NEW_ENTRY_INPUT_LABEL);
+      const inputStyle = StyleSheet.flatten(input.props.style);
+      expect(inputStyle.maxHeight).toBeGreaterThan(inputStyle.minHeight);
+      expect(Number.isFinite(inputStyle.maxHeight)).toBe(true);
+
+      fireEvent.changeText(input, 'あ\n'.repeat(BODY_MAX_LENGTH));
+      expect(screen.getByText(`${BODY_MAX_LENGTH}/${BODY_MAX_LENGTH}`)).toBeTruthy();
+      const saveButton = screen.getByRole('button', { name: NEW_ENTRY_SAVE_LABEL });
+      expect(saveButton.props.accessibilityState?.disabled).toBe(false);
+      expect(StyleSheet.flatten(saveButton.props.style).opacity).toBe(1);
+    });
+
     it('prevents duplicate saves when the save button is pressed repeatedly while a save is still in flight (連打防止)', async () => {
       let resolveSetItem: () => void = () => {};
       jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
