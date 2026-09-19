@@ -71,7 +71,7 @@ const SAVE_SUCCESS_MESSAGE = '保存しました';
 
 // タブバー(@react-navigation/bottom-tabsのデフォルト、tabBarStyle未カスタマイズ)のおおよその
 // コンテンツ高さ(セーフエリア分は含まない)。ボトムシート系モーダルの下端がタブバーと重ならないよう、
-// insets.bottomと合わせてpaddingBottomに加算する(#282)
+// insets.bottomと合わせてpaddingBottomに加算する
 const BOTTOM_TAB_BAR_CONTENT_HEIGHT = 49;
 
 // 年月ピッカーモーダルの高さ上限(画面高さに対する割合)
@@ -271,7 +271,7 @@ function getSearchExcerpt(text: string, query: string): SearchExcerpt {
 // 週表示レイアウトのカレンダー部分。フォーカス中の日を含む週(日曜始まり)の7日分を1行の
 // ヘッダーとして表示し、各日付の下にその日の日記を作成日時の昇順で並べる(初期フォーカスは今日)。
 // ヘッダーの日付タップ・専用の前後日ボタンのタップ・左右スワイプでフォーカスを前後の日へ移動でき、
-// フォーカスが週の外に出た場合は表示する週ごと自動的に切り替わる(#284)
+// フォーカスが週の外に出た場合は表示する週ごと自動的に切り替わる
 function WeekCalendarView({
   entriesByDate,
   onEntryPress,
@@ -453,9 +453,7 @@ export default function HomeScreen() {
     setError: setNewEntryError,
     save: saveNewEntry,
   } = useSaveDiaryEntry();
-  // handleSaveの保存処理中にユーザーがdraftを編集したかどうかを表すref。空文字列という値だけでは
-  // 「pending開始時のまま」なのか「入力後に全部消した」のかを区別できないため別途持つ
-  const draftEditedRef = useRef(false);
+  const draftEditRevisionRef = useRef(0);
   // カレンダー外枠(flex: 1で残りスペースを使い切るView)の実測高さ(onLayoutで取得)。
   // 日付グリッドの高さもこの値を基準に算出し、外枠との基準を一致させる
   const [wrapperHeight, setWrapperHeight] = useState(0);
@@ -558,10 +556,15 @@ export default function HomeScreen() {
   // 画面はアンマウントされず保持されるため、マウント時に一度だけ読めば済む
   useEffect(() => {
     let isCancelled = false;
+    const editRevisionAtRestoreStart = draftEditRevisionRef.current;
     (async () => {
       try {
         const storedDraft = await loadDraftText(DIARY_DRAFT_STORAGE_KEY);
-        if (!isCancelled && storedDraft && !draftEditedRef.current) {
+        if (
+          !isCancelled &&
+          storedDraft &&
+          draftEditRevisionRef.current === editRevisionAtRestoreStart
+        ) {
           setDraft(storedDraft);
         }
       } catch {
@@ -648,6 +651,7 @@ export default function HomeScreen() {
     // ロールバック用に保存前の状態をpersist内で退避し、失敗時にonErrorから参照する
     let previousEntries: DiaryEntry[] = [];
     let previousDraft = '';
+    const editRevisionAtSave = draftEditRevisionRef.current;
 
     await saveDraftEntry({
       text: draft,
@@ -663,18 +667,20 @@ export default function HomeScreen() {
         // 体感速度を落とさないよう、即座に現在のReact stateから計算した内容で楽観的にUIを更新する
         setEntries([newEntry, ...entries]);
         setDraft('');
-        draftEditedRef.current = false;
         // 本文はSecureStoreで保護した鍵でAES-256-GCM暗号化して保存する。他の保存処理と競合しないよう
         // 書き込みはキュー経由で直列化する
         await enqueueDiaryWrite(newEntry);
       },
       onSuccess: async () => {
         // 保存成功時は自動保存済みの下書きキーも削除する。残したままだと次回起動時に
-        // 既に保存済みの内容を誤って復元してしまう
-        try {
-          await AsyncStorage.removeItem(DIARY_DRAFT_STORAGE_KEY);
-        } catch {
-          // 下書きキーのクリアに失敗しても、日記本体は既に保存済みで致命的ではないため無視する
+        // 既に保存済みの内容を誤って復元してしまう。ただし保存中に編集された下書きは残す
+        // 必要があるため、保存開始時からrevisionが変わっていない場合だけ削除する
+        if (draftEditRevisionRef.current === editRevisionAtSave) {
+          try {
+            await AsyncStorage.removeItem(DIARY_DRAFT_STORAGE_KEY);
+          } catch {
+            // 下書きキーのクリアに失敗しても、日記本体は既に保存済みで致命的ではないため無視する
+          }
         }
 
         // 保存成功をユーザーに明示するため、トーストとハプティックフィードバックを発火する
@@ -684,10 +690,9 @@ export default function HomeScreen() {
         }
       },
       onError: () => {
-        // 永続化失敗時は保存前の状態に戻す。ただしdraftEditedRefで編集操作の有無を判定し、
-        // 保存処理中にユーザーが既に入力していた場合はpreviousDraftで上書きしない
+        // 保存中に入力が更新されていない場合だけ、保存前の内容を復元する
         setEntries(previousEntries);
-        if (!draftEditedRef.current) {
+        if (draftEditRevisionRef.current === editRevisionAtSave) {
           setDraft(previousDraft);
         }
       },
@@ -695,10 +700,9 @@ export default function HomeScreen() {
     });
   }, [draft, entries, enqueueDiaryWrite, saveDraftEntry]);
 
-  // draft用TextInputのonChangeText。draftEditedRefへ編集済みを記録し(handleSaveのロールバック判定に使う)、
-  // maxLength未指定のためtruncateToBodyMaxLengthでgrapheme単位に切り詰める
+  // 入力が空文字列に戻った場合も、復元や保存失敗による古い内容で上書きしないよう編集revisionを進める
   const handleChangeDraft = useCallback((text: string) => {
-    draftEditedRef.current = true;
+    draftEditRevisionRef.current += 1;
     setDraft(truncateToBodyMaxLength(text));
   }, []);
 
@@ -962,7 +966,7 @@ export default function HomeScreen() {
   const handleDayPress = useCallback(
     (date: DateData) => {
       if (entriesByDate[date.dateString]?.length) {
-        // 日付タップ時は専用の一覧画面へ遷移する(以前はモーダル表示だったが#221で置き換えた)
+        // 日付タップ時は専用の一覧画面へ遷移する
         router.push(`/day-entries/${date.dateString}`);
         return;
       }
@@ -1175,7 +1179,7 @@ export default function HomeScreen() {
                     style={[styles.searchResultItem, { borderBottomColor: iconColor }]}
                     onPress={() => handleSearchResultPress(item)}
                     accessibilityRole="button"
-                    accessibilityLabel={`${formatDateHeading(toDateKey(new Date(item.createdAt)))}の日記: ${item.text}`}
+                    accessibilityLabel={`${formatDateHeading(toDateKey(new Date(item.createdAt)))}の日記: ${truncateForAccessibilityLabel(item.text)}`}
                   >
                     <ThemedText style={[styles.searchResultDate, { color: iconColor }]}>
                       {formatDateHeading(toDateKey(new Date(item.createdAt)))}
@@ -1330,7 +1334,7 @@ export default function HomeScreen() {
               >
                 {/* オーバーレイ側へのタップ伝播で意図せず閉じないよう、modalContentをPressableで包んで止める。
                     react-native-webのPressableはクリックイベント判定のためonStartShouldSetResponderでは
-                    効果が無く(#249)、Pressableのクリックハンドラは内部でstopPropagationするためこの包み方で防げる */}
+                    効果が無く、Pressableのクリックハンドラは内部でstopPropagationするためこの包み方で防げる */}
                 <Pressable onPress={() => {}}>
                   <ThemedView
                     style={[

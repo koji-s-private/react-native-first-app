@@ -1,8 +1,18 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
+import { Animated, Dimensions } from 'react-native';
 
 import { useModalSlideTransition } from '@/hooks/use-modal-slide-transition';
 
 describe('useModalSlideTransition', () => {
+  const originalWindow = Dimensions.get('window');
+
+  afterEach(async () => {
+    await act(async () => {
+      Dimensions.set({ window: originalWindow, screen: originalWindow });
+    });
+    jest.restoreAllMocks();
+  });
+
   it('mounts immediately (isMounted=true) when isOpen is initially true (正常系: 初期表示)', () => {
     const { result } = renderHook(() => useModalSlideTransition(true));
 
@@ -63,5 +73,28 @@ describe('useModalSlideTransition', () => {
       await new Promise((resolve) => setTimeout(resolve, 300));
     });
     expect(result.current.isMounted).toBe(true);
+  });
+
+  it('uses the current window height as the exit distance after the window is resized', async () => {
+    const timingSpy = jest.spyOn(Animated, 'timing');
+    const { rerender } = renderHook(
+      ({ isOpen }: { isOpen: boolean }) => useModalSlideTransition(isOpen),
+      { initialProps: { isOpen: true } },
+    );
+
+    await act(async () => {
+      const resizedWindow = { ...originalWindow, height: 1200 };
+      Dimensions.set({ window: resizedWindow, screen: resizedWindow });
+    });
+    timingSpy.mockClear();
+
+    act(() => {
+      rerender({ isOpen: false });
+    });
+
+    expect(timingSpy).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ toValue: 1200 }),
+    );
   });
 });

@@ -20,6 +20,13 @@ export const DIARY_DRAFT_STORAGE_KEY = 'diary-draft';
 export const DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX = 'diary-new-entry-draft-';
 
 /**
+ * 日別一覧画面の新規作成モーダルの下書きを自動保存するAsyncStorageキーの接頭辞。
+ * 実際のキーはこの接頭辞+対象日付('YYYY-MM-DD')。
+ */
+export const DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX =
+  'diary-day-entries-new-entry-draft-';
+
+/**
  * 編集画面の下書きを自動保存するAsyncStorageキーの接頭辞。
  * 実際のキーはこの接頭辞+エントリID。
  */
@@ -27,6 +34,7 @@ export const DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX = 'diary-edit-draft-';
 
 const DRAFT_STORAGE_KEY_PREFIXES = [
   DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX,
+  DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX,
   DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX,
 ];
 

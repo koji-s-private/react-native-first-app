@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
 import {
+  DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX,
   DIARY_DRAFT_STORAGE_KEY,
   DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX,
   DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX,
@@ -130,6 +131,10 @@ describe('clearAllDiaryEntries', () => {
       `${DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX}entry-1`,
       'encrypted:v1:dummy-edit-draft',
     );
+    await AsyncStorage.setItem(
+      `${DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX}2026-01-05`,
+      'encrypted:v1:dummy-day-entries-draft',
+    );
 
     await clearAllDiaryEntries();
 
@@ -138,6 +143,11 @@ describe('clearAllDiaryEntries', () => {
       await AsyncStorage.getItem(`${DIARY_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX}2026-01-05`),
     ).toBeNull();
     expect(await AsyncStorage.getItem(`${DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX}entry-1`)).toBeNull();
+    expect(
+      await AsyncStorage.getItem(
+        `${DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX}2026-01-05`,
+      ),
+    ).toBeNull();
   });
 
   it('does not throw when there is no diary data to delete yet (境界値: 未保存状態での削除)', async () => {

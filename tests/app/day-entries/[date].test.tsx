@@ -8,7 +8,16 @@ import { Alert, Dimensions, StyleSheet, useColorScheme } from 'react-native';
 import DayEntriesScreen from '@/app/day-entries/[date]';
 import { Colors } from '@/constants/theme';
 import { useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
-import { encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
+import {
+  DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX,
+  loadDraftText,
+  saveDraftText,
+} from '@/utils/diary-draft-storage';
+import {
+  encryptText,
+  getOrCreateEncryptionKey,
+  isEncryptedPayload,
+} from '@/utils/diary-encryption';
 import { buildDiaryEntryKey, type DiaryEntry } from '@/utils/diary-storage';
 import { BODY_MAX_LENGTH } from '@/utils/diary-text';
 
@@ -170,7 +179,7 @@ const NEW_ENTRY_INPUT_PLACEHOLDER = 'その日の出来事や気持ちを書い�
 const NEW_ENTRY_INPUT_LABEL = '日記本文';
 const NEW_ENTRY_SAVE_LABEL = '保存';
 const NEW_ENTRY_CLOSE_LABEL = '閉じる';
-const NEW_ENTRY_DRAFT_KEY = `diary-day-entries-new-entry-draft-${DATE_KEY}`;
+const NEW_ENTRY_DRAFT_KEY = `${DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX}${DATE_KEY}`;
 const HOME_SCREEN_DRAFT_KEY = `diary-new-entry-draft-${DATE_KEY}`;
 
 // テストの事前状態として、指定したエントリ群をエントリ単位の個別キーへ暗号化して直接書き込むヘルパー
@@ -1131,6 +1140,12 @@ describe('DayEntriesScreen', () => {
       const inputStyle = StyleSheet.flatten(input.props.style);
       expect(inputStyle.maxHeight).toBeGreaterThan(inputStyle.minHeight);
       expect(Number.isFinite(inputStyle.maxHeight)).toBe(true);
+      expect(screen.queryByText('入力欄内をスクロールできます')).toBeNull();
+
+      fireEvent(input, 'contentSizeChange', {
+        nativeEvent: { contentSize: { width: 300, height: inputStyle.maxHeight + 1 } },
+      });
+      expect(screen.getByText('入力欄内をスクロールできます')).toBeTruthy();
 
       fireEvent.changeText(input, 'あ\n'.repeat(BODY_MAX_LENGTH));
       expect(screen.getByText(`${BODY_MAX_LENGTH}/${BODY_MAX_LENGTH}`)).toBeTruthy();
@@ -1155,7 +1170,7 @@ describe('DayEntriesScreen', () => {
         });
       }
 
-      it('sets the input maxHeight to 25% of the window height', async () => {
+      it('sets the input maxHeight to 35% of the window height and the modal maxHeight to 70%', async () => {
         render(<DayEntriesScreen />);
         await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
         await openNewEntryComposer();
@@ -1163,7 +1178,13 @@ describe('DayEntriesScreen', () => {
         const inputStyle = StyleSheet.flatten(
           screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.style,
         );
-        expect(inputStyle.maxHeight).toBe(originalWindow.height * 0.25);
+        expect(inputStyle.maxHeight).toBe(
+          Math.max(inputStyle.minHeight, originalWindow.height * 0.35),
+        );
+        const modalStyle = StyleSheet.flatten(
+          screen.getByTestId('diary-entry-composer-content').props.style,
+        );
+        expect(modalStyle.maxHeight).toBe(originalWindow.height * 0.7);
       });
 
       it('follows the window height when it changes while the composer is open (画面回転・分割画面)', async () => {
@@ -1174,12 +1195,12 @@ describe('DayEntriesScreen', () => {
         await setWindowHeight(400);
         expect(
           StyleSheet.flatten(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.style).maxHeight,
-        ).toBe(100);
+        ).toBe(140);
 
         await setWindowHeight(1000);
         expect(
           StyleSheet.flatten(screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.style).maxHeight,
-        ).toBe(250);
+        ).toBe(350);
       });
 
       it('keeps a finite, positive maxHeight and the minHeight on extremely short windows (境界値)', async () => {
@@ -1187,19 +1208,18 @@ describe('DayEntriesScreen', () => {
         await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
         await openNewEntryComposer();
 
-        // 320pt未満では上限がminHeight(80)を下回る。Yogaはminを優先するため入力欄は80のまま潰れない
         await setWindowHeight(200);
         const inputStyle = StyleSheet.flatten(
           screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.style,
         );
-        expect(inputStyle.maxHeight).toBe(50);
+        expect(inputStyle.maxHeight).toBe(80);
         expect(inputStyle.minHeight).toBe(80);
 
         await setWindowHeight(0);
         const zeroStyle = StyleSheet.flatten(
           screen.getByLabelText(NEW_ENTRY_INPUT_LABEL).props.style,
         );
-        expect(zeroStyle.maxHeight).toBe(0);
+        expect(zeroStyle.maxHeight).toBe(80);
         expect(Number.isNaN(zeroStyle.maxHeight)).toBe(false);
         expect(screen.getByRole('button', { name: NEW_ENTRY_SAVE_LABEL })).toBeTruthy();
       });
@@ -1424,11 +1444,12 @@ describe('DayEntriesScreen', () => {
             jest.advanceTimersByTime(1000);
           });
 
-          await waitFor(() =>
-            expect(AsyncStorage.setItem).toHaveBeenCalledWith(
-              NEW_ENTRY_DRAFT_KEY,
-              '一日一覧画面での書きかけの下書き',
-            ),
+          await waitFor(async () => {
+            const storedDraft = await AsyncStorage.getItem(NEW_ENTRY_DRAFT_KEY);
+            expect(storedDraft && isEncryptedPayload(storedDraft)).toBe(true);
+          });
+          await expect(loadDraftText(NEW_ENTRY_DRAFT_KEY)).resolves.toBe(
+            '一日一覧画面での書きかけの下書き',
           );
           // ホーム画面の新規作成モーダルと同じ日付でも、別キーのため混ざらない
           expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(
@@ -1441,7 +1462,7 @@ describe('DayEntriesScreen', () => {
       });
 
       it('restores a previously auto-saved draft into the input when the composer modal is reopened for the same date (正常系)', async () => {
-        await AsyncStorage.setItem(NEW_ENTRY_DRAFT_KEY, '前回の続きから書きかけの下書き');
+        await saveDraftText(NEW_ENTRY_DRAFT_KEY, '前回の続きから書きかけの下書き');
 
         render(<DayEntriesScreen />);
         await waitFor(() => expect(mockSetOptions).toHaveBeenCalled());
