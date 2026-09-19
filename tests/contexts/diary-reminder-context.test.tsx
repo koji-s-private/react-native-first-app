@@ -379,6 +379,52 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
       expect(mockedNotificationsUtil.scheduleDailyReminderAsync).not.toHaveBeenCalled();
     });
 
+    it('schedules with the time chosen via setTime while OFF when turned ON afterwards, without scheduling before that (正常系: OFF中に決めた時刻でONにする)', async () => {
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+      const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      await act(async () => {
+        await result.current.setTime(6, 45);
+      });
+      expect(mockedNotificationsUtil.scheduleDailyReminderAsync).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await result.current.setEnabled(true);
+      });
+
+      expect(mockedNotificationsUtil.scheduleDailyReminderAsync).toHaveBeenCalledTimes(1);
+      expect(mockedNotificationsUtil.scheduleDailyReminderAsync).toHaveBeenCalledWith(6, 45);
+      expect(result.current.enabled).toBe(true);
+      expect(AsyncStorage.setItem).toHaveBeenLastCalledWith(
+        DIARY_REMINDER_STORAGE_KEY,
+        JSON.stringify({ enabled: true, hour: 6, minute: 45 }),
+      );
+    });
+
+    it('keeps the time chosen via setTime while OFF even when turning ON is denied, so a later grant uses that time (境界値: OFF中に決めた時刻は拒否されても保持される)', async () => {
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('undetermined');
+      mockedNotificationsUtil.requestReminderPermissionAsync.mockResolvedValue('denied');
+      const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      await act(async () => {
+        await result.current.setTime(23, 55);
+      });
+      await act(async () => {
+        await result.current.setEnabled(true);
+      });
+
+      expect(result.current.enabled).toBe(false);
+      expect(result.current.hour).toBe(23);
+      expect(result.current.minute).toBe(55);
+      expect(mockedNotificationsUtil.scheduleDailyReminderAsync).not.toHaveBeenCalled();
+    });
+
     it('persists enabled=false and cancels the schedule when turned OFF, regardless of permission status (正常系: OFF)', async () => {
       mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
       const { result } = renderHook(() => useDiaryReminder(), { wrapper });
@@ -878,6 +924,94 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
     });
   });
 
+  describe('isLoaded(設定の復元と許可状態の取得の完了)', () => {
+    it('is false initially and becomes true once both the saved settings and permission status have been loaded (正常系: 両方の完了後にtrue)', async () => {
+      const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+      expect(result.current.isLoaded).toBe(false);
+
+      await waitFor(() => expect(result.current.isLoaded).toBe(true));
+    });
+
+    it('stays false until the permission status resolves even when the saved settings have already been restored (境界値: 許可状態の取得が後から完了する場合)', async () => {
+      const deferredPermission = createDeferred<'granted' | 'denied' | 'undetermined'>();
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockReturnValue(
+        deferredPermission.promise,
+      );
+      await AsyncStorage.setItem(
+        DIARY_REMINDER_STORAGE_KEY,
+        JSON.stringify({ enabled: true, hour: 8, minute: 30 }),
+      );
+      const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+
+      await waitFor(() => expect(result.current.enabled).toBe(true));
+      expect(result.current.isLoaded).toBe(false);
+
+      await act(async () => {
+        deferredPermission.resolve('granted');
+      });
+
+      await waitFor(() => expect(result.current.isLoaded).toBe(true));
+      expect(result.current.enabled).toBe(true);
+    });
+
+    it('stays false until the saved settings are restored even when the permission status has already resolved (境界値: 設定の復元が後から完了する場合)', async () => {
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('granted');
+      const deferredStorage = createDeferred<string | null>();
+      jest.spyOn(AsyncStorage, 'getItem').mockReturnValueOnce(deferredStorage.promise);
+      const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+
+      await waitFor(() => expect(result.current.permissionStatus).toBe('granted'));
+      expect(result.current.isLoaded).toBe(false);
+
+      await act(async () => {
+        deferredStorage.resolve(JSON.stringify({ enabled: true, hour: 8, minute: 30 }));
+      });
+
+      await waitFor(() => expect(result.current.isLoaded).toBe(true));
+      expect(result.current.enabled).toBe(true);
+    });
+
+    it('never renders isLoaded=true together with a stale enabled=true when a stored ON setting is corrected to OFF by a denied permission (境界値: 許可拒否による補正前の状態でtrueにならない)', async () => {
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockResolvedValue('denied');
+      await AsyncStorage.setItem(
+        DIARY_REMINDER_STORAGE_KEY,
+        JSON.stringify({ enabled: true, hour: 8, minute: 30 }),
+      );
+      const seen: { enabled: boolean; isLoaded: boolean }[] = [];
+      const { result } = renderHook(
+        () => {
+          const value = useDiaryReminder();
+          seen.push({ enabled: value.enabled, isLoaded: value.isLoaded });
+          return value;
+        },
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoaded).toBe(true));
+
+      expect(result.current.enabled).toBe(false);
+      expect(seen.some((entry) => entry.isLoaded && entry.enabled)).toBe(false);
+    });
+
+    it('becomes true even when restoring the saved settings fails (異常系: 復元失敗でも既定値のまま完了扱い)', async () => {
+      jest.spyOn(AsyncStorage, 'getItem').mockRejectedValueOnce(new Error('storage error'));
+      const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+
+      await waitFor(() => expect(result.current.isLoaded).toBe(true));
+      expect(result.current.enabled).toBe(false);
+    });
+
+    it('becomes true even when fetching the permission status fails (異常系: 許可状態の取得失敗でも未確認のまま完了扱い)', async () => {
+      mockedNotificationsUtil.getReminderPermissionStatusAsync.mockRejectedValueOnce(
+        new Error('permission error'),
+      );
+      const { result } = renderHook(() => useDiaryReminder(), { wrapper });
+
+      await waitFor(() => expect(result.current.isLoaded).toBe(true));
+      expect(result.current.permissionStatus).toBe('undetermined');
+    });
+  });
+
   describe('Provider外での利用(no-opフォールバック)', () => {
     it('returns the default disabled/21:00/undetermined state when used outside of DiaryReminderProvider (異常系/境界値: Provider外での利用)', () => {
       const { result } = renderHook(() => useDiaryReminder());
@@ -886,6 +1020,12 @@ describe('DiaryReminderProvider / useDiaryReminder', () => {
       expect(result.current.hour).toBe(21);
       expect(result.current.minute).toBe(0);
       expect(result.current.permissionStatus).toBe('undetermined');
+    });
+
+    it('reports isLoaded as true outside of the Provider since nothing is ever loaded (境界値: Provider外は読み込み待ちにならない)', () => {
+      const { result } = renderHook(() => useDiaryReminder());
+
+      expect(result.current.isLoaded).toBe(true);
     });
 
     it('does not throw and does not touch AsyncStorage/notifications when setEnabled is called outside of the Provider (境界値: Provider外でのsetEnabledはno-op)', async () => {
