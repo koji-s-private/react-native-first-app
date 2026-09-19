@@ -271,13 +271,16 @@ function getSearchExcerpt(text: string, query: string): SearchExcerpt {
 // 週表示レイアウトのカレンダー部分。フォーカス中の日を含む週(日曜始まり)の7日分を1行の
 // ヘッダーとして表示し、各日付の下にその日の日記を作成日時の昇順で並べる(初期フォーカスは今日)。
 // ヘッダーの日付タップ・専用の前後日ボタンのタップ・左右スワイプでフォーカスを前後の日へ移動でき、
-// フォーカスが週の外に出た場合は表示する週ごと自動的に切り替わる
+// フォーカスが週の外に出た場合は表示する週ごと自動的に切り替わる。
+// 日記の無い今日以前の日には、月表示の空日タップと同じく新規作成モーダルを開く「+」ボタンを出す
 function WeekCalendarView({
   entriesByDate,
   onEntryPress,
+  onCreateEntry,
 }: {
   entriesByDate: Record<string, DiaryEntry[]>;
   onEntryPress: (dateKey: string) => void;
+  onCreateEntry: (dateKey: string) => void;
 }) {
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
@@ -408,6 +411,18 @@ function WeekCalendarView({
                       </ThemedText>
                     </Pressable>
                   ))}
+                  {dayEntries.length === 0 && weekDay.dateKey <= todayDateKey ? (
+                    <Pressable
+                      onPress={() => onCreateEntry(weekDay.dateKey)}
+                      style={[styles.weekCreateButton, { borderColor: tintColor }]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${formatDateHeading(weekDay.dateKey)}の日記を新規作成`}
+                    >
+                      <ThemedText style={[styles.weekCreateButtonText, { color: tintColor }]}>
+                        +
+                      </ThemedText>
+                    </Pressable>
+                  ) : null}
                 </View>
               </View>
             );
@@ -836,6 +851,15 @@ export default function HomeScreen() {
     );
   }, [displayedYear, displayedMonth, handleOpenMonthPicker, textColor]);
 
+  // 未来日は新規作成の対象外。月表示ではmaxDateで既に押せなくなっている(renderDay参照)が、
+  // 週表示と共通の入口として念のため二重にチェックする
+  const openNewEntryModal = useCallback((dateKey: string) => {
+    if (dateKey > toDateKey(new Date())) {
+      return;
+    }
+    setNewEntryDate(dateKey);
+  }, []);
+
   const handleDayPress = useCallback(
     (date: DateData) => {
       if (entriesByDate[date.dateString]?.length) {
@@ -843,14 +867,9 @@ export default function HomeScreen() {
         router.push(`/day-entries/${date.dateString}`);
         return;
       }
-      // 日記の無い日は、未来日でなければ新規作成モーダルを開く。未来日はmaxDateで既に
-      // 押せなくなっている(renderDay参照)が、念のため二重にチェックする
-      if (date.dateString > toDateKey(new Date())) {
-        return;
-      }
-      setNewEntryDate(date.dateString);
+      openNewEntryModal(date.dateString);
     },
-    [entriesByDate, router],
+    [entriesByDate, router, openNewEntryModal],
   );
 
   const renderDay = useCallback(
@@ -1106,6 +1125,7 @@ export default function HomeScreen() {
                 <WeekCalendarView
                   entriesByDate={entriesByDate}
                   onEntryPress={handleWeekEntryPress}
+                  onCreateEntry={openNewEntryModal}
                 />
               ) : (
                 <View
@@ -1458,6 +1478,20 @@ const styles = StyleSheet.create({
   weekColumnEntries: {
     width: '100%',
     gap: 4,
+  },
+  // タップ領域の目安(44pt)を確保した、日記の無い日の新規作成ボタン
+  weekCreateButton: {
+    width: '100%',
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  weekCreateButtonText: {
+    fontSize: 20,
+    lineHeight: 24,
   },
   weekEntryItem: {
     width: '100%',
