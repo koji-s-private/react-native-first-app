@@ -1,5 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
@@ -15,15 +14,13 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { useDraftAutoSave } from '@/hooks/use-draft-auto-save';
+import { useDraftRestore } from '@/hooks/use-draft-restore';
 import { useModalSlideTransition } from '@/hooks/use-modal-slide-transition';
 import { useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { formatDateHeading } from '@/utils/diary-date';
-import { loadDraftText, saveDraftText } from '@/utils/diary-draft-storage';
 import { BODY_MAX_LENGTH, splitIntoGraphemes, truncateToBodyMaxLength } from '@/utils/diary-text';
-
-// 下書きの自動保存をデバウンスする間隔(ミリ秒)。他画面の新規作成・編集下書きと合わせる
-const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
 
 const MODAL_MAX_HEIGHT_RATIO = 0.7;
 const INPUT_MIN_HEIGHT = 80;
@@ -48,8 +45,7 @@ export type DiaryEntryComposerModalProps = {
 };
 
 // 対象日付の日記を新規登録するモーダル(アニメーション・下書き自動保存・文字数上限つき)。
-// `app/(tabs)/index.tsx`の「日記の無い日をタップして開く新規作成モーダル」と同じ入力体験を
-// 複数画面(ホーム画面・日別一覧画面)から再利用するための共通コンポーネント
+// ホーム画面・日別一覧画面で同じ入力体験を共有するための共通コンポーネント
 export function DiaryEntryComposerModal({
   dateKey,
   draftStorageKeyPrefix,
@@ -61,13 +57,7 @@ export function DiaryEntryComposerModal({
 }: DiaryEntryComposerModalProps) {
   const [draft, setDraft] = useState('');
   const [inputContentHeight, setInputContentHeight] = useState(0);
-  // 下書き復元が完了したか。完了前に自動保存effectを動かすと、初期値(空文字列)で
-  // 保存済みの下書きを誤って上書き・削除してしまうため、完了までは自動保存の対象外にする
-  const [isDraftRestored, setIsDraftRestored] = useState(false);
-  // 保留中の下書き自動保存タイマーID。保存成功時・破棄確定時にAsyncStorageの下書きキーを
-  // 削除する際、クリーンアップ(モーダルを閉じるタイミング)を待たずに明示的にキャンセルするために使う
-  const draftAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const draftEditedRef = useRef(false);
+  const draftEditRevisionRef = useRef(0);
   // アンマウント後にstate更新を行わないようにするためのフラグ。保存処理の完了を待つ間に
   // 呼び出し画面側の遷移でアンマウントされ得るため、useSaveDiaryEntryへ渡して安全性を確保する
   const isMountedRef = useRef(true);
@@ -92,74 +82,35 @@ export function DiaryEntryComposerModal({
   const inputMaxHeight = Math.max(INPUT_MIN_HEIGHT, windowHeight * INPUT_MAX_HEIGHT_RATIO);
   const isInputScrollable = inputContentHeight > inputMaxHeight;
 
-  // モーダルを開いた際(dateKeyがセットされた際)、自動保存されていた下書きが残っていれば復元する。
-  // 日付ごとにキーが分かれるため、対象日付が変わるたびにやり直す
+  // 対象日付が変わるたびに入力内容とエラー表示を初期化する
   useEffect(() => {
-    draftEditedRef.current = false;
-    setIsDraftRestored(false);
     setDraft('');
     setInputContentHeight(0);
     setError(null);
-    if (!draftKey) {
-      return;
-    }
-    let isCancelled = false;
-    (async () => {
-      try {
-        const storedDraft = await loadDraftText(draftKey);
-        if (!isCancelled && !draftEditedRef.current && storedDraft) {
-          setDraft(truncateToBodyMaxLength(storedDraft));
-        }
-      } catch {
-        // 復元を諦めるだけにとどめる。finallyでisDraftRestoredをtrueにするため、
-        // 以降の自動保存が無効化されたままにはならない
-      } finally {
-        if (!isCancelled) {
-          setIsDraftRestored(true);
-        }
-      }
-    })();
-    return () => {
-      isCancelled = true;
-    };
   }, [draftKey, setError]);
 
-  // draftの変更をデバウンスし、入力が止まってからAsyncStorageへ自動保存する
-  useEffect(() => {
-    if (!isDraftRestored || !draftKey) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      draftAutoSaveTimerRef.current = null;
-      const persistDraft = draft
-        ? saveDraftText(draftKey, draft)
-        : AsyncStorage.removeItem(draftKey);
-      // 下書きの自動保存は補助的な処理のため、失敗しても静かに無視する(本保存の失敗はhandleSave側で伝える)
-      persistDraft.catch(() => {});
-    }, DRAFT_AUTO_SAVE_DEBOUNCE_MS);
-    draftAutoSaveTimerRef.current = timer;
-    return () => clearTimeout(timer);
-  }, [draft, isDraftRestored, draftKey]);
-
-  // 保留中の自動保存タイマーをキャンセルし、対象日付の下書きキーを削除する
-  // (保存成功時・破棄確定時の両方で使う共通処理)
-  const clearDraft = () => {
-    if (draftAutoSaveTimerRef.current !== null) {
-      clearTimeout(draftAutoSaveTimerRef.current);
-      draftAutoSaveTimerRef.current = null;
-    }
-    if (draftKey) {
-      AsyncStorage.removeItem(draftKey).catch(() => {});
-    }
-  };
+  // 自動保存されていた下書きが残っていれば、モーダルを開いた際(dateKeyがセットされた際)に復元する
+  const handleRestoreDraft = useCallback((storedDraft: string) => {
+    setDraft(truncateToBodyMaxLength(storedDraft));
+  }, []);
+  const isDraftRestored = useDraftRestore({
+    draftKey,
+    onRestore: handleRestoreDraft,
+    editRevisionRef: draftEditRevisionRef,
+  });
+  const { clearDraft } = useDraftAutoSave({ draftKey, draft, isRestored: isDraftRestored });
 
   const handleChangeDraft = (text: string) => {
-    draftEditedRef.current = true;
+    draftEditRevisionRef.current += 1;
     setDraft(truncateToBodyMaxLength(text));
   };
 
   const handleCancel = () => {
     if (!draft.trim()) {
+      // 復元前に消すと、まだ読み込んでいない保存済みの下書きまで失われる
+      if (isDraftRestored) {
+        void clearDraft();
+      }
       onClose();
       return;
     }
@@ -170,7 +121,7 @@ export function DiaryEntryComposerModal({
         text: '破棄',
         style: 'destructive',
         onPress: () => {
-          clearDraft();
+          void clearDraft();
           onClose();
         },
       },
@@ -184,7 +135,7 @@ export function DiaryEntryComposerModal({
       onSuccess: async () => {
         // 保存成功時は自動保存済みの下書きキーも削除する。残したままだと次回同じ日付で
         // モーダルを開いた際に、既に保存済みの内容を誤って復元してしまう
-        clearDraft();
+        void clearDraft();
         onSaved();
       },
       onError: () => {

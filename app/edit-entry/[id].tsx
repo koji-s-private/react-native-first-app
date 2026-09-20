@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { NavigationAction } from '@react-navigation/native';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -16,18 +15,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SaveToast } from '@/components/save-toast';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { useDraftAutoSave } from '@/hooks/use-draft-auto-save';
 import { useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import {
-  DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX,
-  loadDraftText,
-  saveDraftText,
-} from '@/utils/diary-draft-storage';
+import { DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX, loadDraftText } from '@/utils/diary-draft-storage';
 import { BODY_MAX_LENGTH, splitIntoGraphemes, truncateToBodyMaxLength } from '@/utils/diary-text';
 import { getDiaryEntryById, saveDiaryEntry, type DiaryEntry } from '@/utils/diary-storage';
-
-// 下書きの自動保存をデバウンスする間隔(ミリ秒)。app/(tabs)/index.tsxの新規作成composerと合わせる
-const DRAFT_AUTO_SAVE_DEBOUNCE_MS = 1000;
 
 const SAVE_SUCCESS_MESSAGE = '保存しました';
 
@@ -58,11 +51,6 @@ export default function EditEntryScreen() {
   // アンマウント後にstate更新を行わないようにするためのフラグ(データ読み込み・保存処理の
   // 完了を待つ間に画面がアンマウントされ得るため、各非同期処理から参照して安全性を確保する)
   const isMountedRef = useRef(true);
-  // 下書き自動保存のデバウンスタイマーID。保存成功時・破棄確定時にAsyncStorageの下書きキーを
-  // 削除する際、effectのクリーンアップ(=アンマウント)を待たずに明示的にキャンセルするために使う。
-  // アンマウントは遷移アニメーション等の完了まで遅延しうるため、クリーンアップ任せだと
-  // 削除後にタイマーが発火して下書きが復活してしまうrace conditionがある
-  const draftAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 保存処理中にbeforeRemoveでブロックされた離脱アクション。router.back()自体もbeforeRemoveを
   // 発火させ、保存完了前(isSavingEdit === true)は自分自身のガードでブロックされてしまうため、
   // 保存成功後に再送して確実に画面を離れられるようにする
@@ -155,25 +143,11 @@ export default function EditEntryScreen() {
     };
   }, [id]);
 
-  // editDraftの変更をデバウンスし、入力が止まってからAsyncStorageへ自動保存する
-  // (app/(tabs)/index.tsxの新規作成composerと同じ方式。エントリIDごとにキーを分ける)
-  useEffect(() => {
-    // 復元完了前は、復元処理中の一時的な内容で保存済みの下書きを上書きしないよう何もしない
-    if (!isDraftRestored || !id) {
-      return;
-    }
-    const draftKey = DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX + id;
-    const timer = setTimeout(() => {
-      draftAutoSaveTimerRef.current = null;
-      const persist = editDraft
-        ? saveDraftText(draftKey, editDraft)
-        : AsyncStorage.removeItem(draftKey);
-      // 下書きの自動保存は補助的な処理のため、失敗しても静かに無視する(本保存の失敗はhandleSaveEdit側で伝える)
-      persist.catch(() => {});
-    }, DRAFT_AUTO_SAVE_DEBOUNCE_MS);
-    draftAutoSaveTimerRef.current = timer;
-    return () => clearTimeout(timer);
-  }, [editDraft, isDraftRestored, id]);
+  const { clearDraft } = useDraftAutoSave({
+    draftKey: id ? DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX + id : null,
+    draft: editDraft,
+    isRestored: isDraftRestored,
+  });
 
   // 編集用TextInputのonChangeText。truncateToBodyMaxLengthでgrapheme単位の切り詰めを行う
   const handleChangeEditDraft = useCallback((text: string) => {
@@ -196,17 +170,8 @@ export default function EditEntryScreen() {
         editOriginalTextRef.current = trimmed;
 
         // 保存成功時は自動保存済みの下書きキーも削除する。残したままだと次回この画面を
-        // 開いた際に、既に保存済みの内容を誤って復元してしまう。削除前に保留中のデバウンス
-        // タイマーを明示的にキャンセルし、削除後にタイマーが発火して下書きが復活しないようにする
-        try {
-          if (draftAutoSaveTimerRef.current !== null) {
-            clearTimeout(draftAutoSaveTimerRef.current);
-            draftAutoSaveTimerRef.current = null;
-          }
-          await AsyncStorage.removeItem(DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX + targetEntry.id);
-        } catch {
-          // 下書きキーのクリアに失敗しても、日記本体は既に保存済みで致命的ではないため無視する
-        }
+        // 開いた際に、既に保存済みの内容を誤って復元してしまう
+        await clearDraft();
 
         lastSaveSucceededRef.current = true;
 
@@ -241,7 +206,7 @@ export default function EditEntryScreen() {
       // (Reactの警告の原因)を避けるため渡す
       isMountedRef,
     });
-  }, [editDraft, router, saveEdit]);
+  }, [editDraft, router, saveEdit, clearDraft]);
 
   // 画面を離れようとした際(ヘッダーの戻る操作・Android物理戻るボタン・スワイプ戻る
   // ジェスチャーのいずれも対象になる)、未保存の変更がある場合のみ破棄確認ダイアログを挟む
@@ -267,24 +232,14 @@ export default function EditEntryScreen() {
           style: 'destructive',
           onPress: () => {
             navigation.dispatch(event.data.action);
-            // 破棄が確定したら、残っている自動保存下書きも削除する。実際のアンマウント(effectの
-            // クリーンアップによるclearTimeout)は遷移アニメーション等の完了まで遅延しうるため、
-            // それを待たずここで明示的にタイマーをキャンセルしてから削除する。そうしないと、
-            // 削除後に保留中のデバウンスタイマーが発火し、破棄したはずの内容が再度書き込まれてしまう
-            if (draftAutoSaveTimerRef.current !== null) {
-              clearTimeout(draftAutoSaveTimerRef.current);
-              draftAutoSaveTimerRef.current = null;
-            }
-            // 失敗しても既に画面を離れる操作自体は成立しているため、致命的ではなく無視する
-            if (id) {
-              AsyncStorage.removeItem(DIARY_EDIT_DRAFT_STORAGE_KEY_PREFIX + id).catch(() => {});
-            }
+            // 破棄が確定したら、残っている自動保存下書きも削除する
+            void clearDraft();
           },
         },
       ]);
     });
     return unsubscribe;
-  }, [navigation, editDraft, isSavingEdit, id]);
+  }, [navigation, editDraft, isSavingEdit, clearDraft]);
 
   // 保存完了(isSavingEdit: true→false)を検知したら、保存中にブロックされていた離脱アクションを
   // 再送する。router.back()呼び出し自体は既に完了しているため、ここではnavigation.dispatchで
