@@ -22,9 +22,8 @@ export const unstable_settings = {
 // テストからは`testID`で存在を検証する(components/tab-screen-container.tsxと同じ方針)。
 export const APP_LOCK_LOADING_OVERLAY_TEST_ID = 'app-lock-loading-overlay';
 
-// 'inactive'遷移(アプリスイッチャー表示等)の瞬間に日記本文などの機微な内容を覆い隠すための
-// オーバーレイ。iOSはこの遷移直後にアプリスイッチャー表示用のスナップショットを撮影するため、
-// 'background'遷移でのみ再ロックする既存のAppLockScreenとは別に、より早いタイミングで表示する
+// 'inactive'遷移(アプリスイッチャー表示等)の瞬間に日記本文などの機微な内容を覆い隠すオーバーレイ。
+// iOSはこの遷移直後にスナップショットを撮影するため、'background'遷移で再ロックするAppLockScreenより早く表示する
 export const APP_LOCK_PRIVACY_OVERLAY_TEST_ID = 'app-lock-privacy-overlay';
 
 function RootLayoutContent() {
@@ -42,9 +41,7 @@ function RootLayoutContent() {
     setEnabled: setAppLockEnabled,
     authenticate,
   } = useAppLock();
-  // アプリ初回起動時のみオンボーディングを表示するためのフラグ。
-  // AsyncStorageの確認が終わるまではfalseのままにしておき、
-  // 2回目以降の起動で一瞬だけ誤って表示されてしまうのを防ぐ
+  // AsyncStorageの確認が終わるまでfalseのままにし、2回目以降の起動で一瞬誤表示されるのを防ぐ
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
@@ -84,15 +81,13 @@ function RootLayoutContent() {
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="oss-licenses" options={{ title: 'OSSライセンス' }} />
-        {/* タイトルはpush先の日付に応じて画面側(day-entries/[date].tsx)がnavigation.setOptionsで
-            動的に設定するため、ここでは指定しない。戻るボタンのラベルは、遷移元の(tabs)が
-            タイトル未設定でExpo Routerがルート名をそのまま使ってしまうため、明示的に指定する */}
+        {/* タイトルは画面側(day-entries/[date].tsx)がnavigation.setOptionsで動的に設定する。
+            戻るボタンのラベルは、遷移元の(tabs)がタイトル未設定でルート名がそのまま出てしまうため明示的に指定する */}
         <Stack.Screen name="day-entries/[date]" options={{ headerBackTitle: 'カレンダー' }} />
         <Stack.Screen name="edit-entry/[id]" options={{ title: '日記を編集' }} />
       </Stack>
-      {/* `style="auto"`はOSのカラースキーム(Appearance)を見て自動判定するため、
-          OSと逆のテーマをアプリ内で選択した場合に背景色と文字色が食い違ってしまう。
-          解決済みの`colorScheme`から明示的に決定する */}
+      {/* `style="auto"`はOSのカラースキームだけで判定するため、アプリ内で逆テーマを選んだ場合に
+          背景色と食い違ってしまう。解決済みの`colorScheme`から明示的に決定する */}
       <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
       <Onboarding visible={showOnboarding} onFinish={handleFinishOnboarding} />
       <AppLockScreen
@@ -101,10 +96,8 @@ function RootLayoutContent() {
         onAuthenticate={authenticate}
         onDisableAppLock={handleDisableAppLock}
       />
-      {/* ロック設定(AsyncStorage)の読み込みが完了するまでの間だけ表示する遮蔽用オーバーレイ。
-          読み込み完了前はenabled/isUnlockedがまだ暫定値であり、これを未ロック扱いにしたまま
-          下のタブ画面(カレンダー)を先に描画してしまうと、ONで再起動したユーザーの日記データが
-          一瞬でも見えてしまう。認証は発生させず、単に読み込み完了を待つだけの表示にする */}
+      {/* ロック設定(AsyncStorage)読み込み中はenabled/isUnlockedが暫定値のため、未ロック扱いのまま
+          下のタブ画面を先に描画すると日記データが一瞬見えてしまう。認証はせず読み込み完了を待つだけの表示 */}
       <Modal
         visible={!isAppLockReady}
         animationType="none"
@@ -113,9 +106,8 @@ function RootLayoutContent() {
       >
         <ThemedView testID={APP_LOCK_LOADING_OVERLAY_TEST_ID} style={styles.loadingContainer} />
       </Modal>
-      {/* 'inactive'遷移(アプリスイッチャーを開いた瞬間)にOSがシステムスナップショットを撮影する前に
-          コンテンツを覆い隠す。isUnlockedがfalse(既にAppLockScreenで覆われている)の場合は
-          二重に表示する必要がないため対象外とする */}
+      {/* 'inactive'遷移(アプリスイッチャーを開いた瞬間)のシステムスナップショット撮影前にコンテンツを覆い隠す。
+          isUnlockedがfalse(既にAppLockScreenで覆われている)場合は二重表示になるため対象外とする */}
       <Modal
         visible={isAppLockEnabled && isUnlocked && isInactiveOverlayVisible}
         animationType="none"
@@ -129,8 +121,6 @@ function RootLayoutContent() {
 }
 
 export default function RootLayout() {
-  // アプリ内で選択されたテーマ設定、日記リマインダー通知の設定、
-  // アプリロックの設定、カレンダー表示レイアウトの設定を全体に配線するため、最上位でラップする
   return (
     <ThemePreferenceProvider>
       <CalendarLayoutPreferenceProvider>

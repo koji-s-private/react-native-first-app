@@ -36,9 +36,8 @@ import {
   type DiaryEntry,
 } from '@/utils/diary-storage';
 
-// タブバー(@react-navigation/bottom-tabsのデフォルト、tabBarStyle未カスタマイズ)のおおよその
-// コンテンツ高さ(セーフエリア分は含まない)。ScrollViewの最下部コンテンツがタブバーと重ならないよう、
-// insets.bottomと合わせてcontentContainerStyleのpaddingBottomに加算する(app/(tabs)/index.tsxと同じ値)
+// タブバー(デフォルト、セーフエリア分は含まない)のおおよそのコンテンツ高さ。ScrollView最下部が
+// タブバーと重ならないよう、insets.bottomと合わせてpaddingBottomに加算する
 const BOTTOM_TAB_BAR_CONTENT_HEIGHT = 49;
 
 // 「外観」セクションで選べる配色設定の選択肢。表示順もこの配列の並び順に従う
@@ -100,8 +99,7 @@ const CALENDAR_LAYOUT_OPTIONS: { value: CalendarLayoutPreference; label: string 
 ];
 
 // ホーム画面のカレンダー部分を1ヶ月分まとめて表示するか、1週間分のみ表示するかを選ぶ操作導線。
-// モバイル用アプリとしては月表示の情報量が細かすぎるというフィードバックに対応するもので、
-// 無料ユーザーも利用可能(Pro限定にはしない)。
+// 無料ユーザーも利用可能(Pro限定にはしない)
 function CalendarLayoutSection() {
   const { layout, setLayout } = useCalendarLayoutPreference();
   const tintColor = useThemeColor({}, 'tint');
@@ -150,10 +148,9 @@ const STEPPER_REPEAT_START_DELAY_MS = 500;
 // オートリピート中に値を増減する間隔(ms)
 const STEPPER_REPEAT_INTERVAL_MS = 120;
 
-// TimeStepperの−/+ボタンを長押しした際、離すかアンマウントされるまで一定間隔で値を
-// 増減し続けるオートリピートを実装するフック。PressableのonLongPressは単発でしか発火しないため
-// setIntervalで明示的に反復させる。onChange/disabledは呼び出し元の再レンダリングで変わりうるため、
-// 実行中のタイマーが常に最新の値を参照できるようrefで保持する
+// TimeStepperの−/+ボタン長押し中に一定間隔で値を増減し続けるオートリピートを実装するフック。
+// PressableのonLongPressは単発でしか発火しないためsetIntervalで明示的に反復させる。
+// onChange/disabledは再レンダリングで変わりうるため、実行中のタイマーが最新の値を参照できるようrefで保持する
 function useStepperAutoRepeat(onChange: () => void, disabled: boolean) {
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -209,8 +206,7 @@ function useStepperAutoRepeat(onChange: () => void, disabled: boolean) {
 }
 
 // 時刻の「時」「分」を1つずつ調整するためのステッパー(−/+ボタン)。
-// 端末に標準搭載のネイティブなタイムピッカーは使わず、外部ライブラリを追加せずに実装するため、
-// シンプルな増減ボタンで時刻を選べるようにしている。長押しすると一定間隔で連続増減する。
+// 外部ライブラリを追加せずに実装するため、ネイティブのタイムピッカーではなく増減ボタン方式にしている
 function TimeStepper({
   label,
   value,
@@ -293,18 +289,14 @@ function TimeStepper({
 const REMINDER_MINUTE_STEP = 5;
 
 // 日記を書き忘れないよう、毎日決まった時刻に端末通知でリマインドする機能の設定導線。
-// 外部のPush通知サービスは使わず、expo-notificationsによる端末内のローカル通知スケジューリングのみで
-// 完結させている。通知が許可されていない場合は、その旨をこの画面内で案内する(フォールバック表示)。
+// 外部のPush通知サービスは使わず、expo-notificationsによる端末内のローカル通知スケジューリングのみで完結させる
 function DiaryReminderSection() {
   const { enabled, hour, minute, permissionStatus, isLoaded, setEnabled, setTime } =
     useDiaryReminder();
-  // ON/OFF切り替え(通知許可のリクエストを伴う非同期処理)が完了するまで、
-  // 誤って連続でタップされないようにするための状態
+  // ON/OFF切り替え(通知許可のリクエストを伴う非同期処理)完了まで連続タップを防ぐ
   const [isTogglePending, setIsTogglePending] = useState(false);
-  // 時刻変更(通知の再スケジュール登録を伴う非同期処理)が完了するまで、
-  // TimeStepperボタンを連続でタップされないようにするための状態
+  // 時刻変更(通知の再スケジュール登録を伴う非同期処理)完了までTimeStepperの連続タップを防ぐ
   const [isTimePending, setIsTimePending] = useState(false);
-  // 破壊的な操作・警告であることを示す強調色(テーマに応じてconstants/theme.tsから取得)
   const errorColor = useThemeColor({}, 'error');
 
   const handleToggle = useCallback(
@@ -312,9 +304,8 @@ function DiaryReminderSection() {
       setIsTogglePending(true);
       setEnabled(value)
         .catch(() => {
-          // setEnabledがONへの通知スケジュール登録失敗時に例外を投げ直す(enabled自体は
-          // OFFへ戻される)ため、ここで必ず捕捉してユーザーへ失敗を案内する。
-          // 捕捉しないと未処理のPromise rejectionになってしまう
+          // setEnabledは通知スケジュール登録失敗時に例外を投げ直す(enabled自体はOFFへ戻る)ため、
+          // 捕捉してユーザーに案内しないと未処理のPromise rejectionになる
           Alert.alert(
             'リマインダーの設定に失敗しました',
             '通知を設定できませんでした。もう一度お試しください。',
@@ -403,15 +394,12 @@ function DiaryReminderSection() {
   );
 }
 
-// アプリ起動時・バックグラウンドから復帰した際に生体認証(またはOS標準パスコード)でロックする
-// 端末を家族・同僚と共有・一時的に貸す際、端末のロック解除だけで
-// 日記本文を覗き見されてしまうことを防ぐ。既存ユーザーの体験を変えないよう既定値はOFF(オプトイン)。
+// アプリ起動時・バックグラウンドから復帰した際に生体認証(またはOS標準パスコード)でロックする機能。
+// 端末を家族・同僚と共有・一時的に貸す際の覗き見を防ぐ。既存ユーザーの体験を変えないよう既定値はOFF(オプトイン)
 function AppLockSection() {
   const { enabled, isSupported, setEnabled } = useAppLock();
-  // ON/OFF切り替え(AsyncStorageへの永続化を伴う非同期処理)が完了するまで、
-  // 誤って連続でタップされないようにするための状態
+  // ON/OFF切り替え(AsyncStorageへの永続化を伴う非同期処理)完了までの連続タップを防ぐ
   const [isTogglePending, setIsTogglePending] = useState(false);
-  // 破壊的操作ではないが、対応不可であることを示す強調色(テーマに応じてconstants/theme.tsから取得)
   const errorColor = useThemeColor({}, 'error');
 
   const handleToggle = useCallback(
@@ -419,9 +407,8 @@ function AppLockSection() {
       setIsTogglePending(true);
       setEnabled(value)
         .catch(() => {
-          // setEnabledが永続化失敗時に例外を投げ直す(enabled自体は変更前の状態へ戻される)
-          // ため、ここで必ず捕捉してユーザーへ失敗を案内する。
-          // 捕捉しないと未処理のPromise rejectionになってしまう
+          // setEnabledは永続化失敗時に例外を投げ直す(enabled自体は変更前に戻る)ため、
+          // 捕捉してユーザーに案内しないと未処理のPromise rejectionになる
           Alert.alert(
             'アプリロックの設定に失敗しました',
             '設定を保存できませんでした。もう一度お試しください。',
@@ -485,11 +472,9 @@ function SettingsMenuLink({ item }: { item: SettingsMenuItem }) {
 }
 
 // 保存済みの日記データ(AsyncStorage上の全件)を削除する操作導線。
-// Google Play/Apple双方のストア審査で求められる「ユーザーによるデータ削除手段」に対応するため、
-// 設定画面から誤操作しにくい形(確認ダイアログ経由)で削除できるようにする。
+// Google Play/Apple双方のストア審査で求められる「ユーザーによるデータ削除手段」に対応する
 function DeleteAllDiaryDataButton() {
   const [isDeleting, setIsDeleting] = useState(false);
-  // 破壊的な操作(データ削除)であることを示す強調色(テーマに応じてconstants/theme.tsから取得)
   const errorColor = useThemeColor({}, 'error');
 
   const handleDelete = useCallback(async () => {
@@ -531,10 +516,8 @@ function DeleteAllDiaryDataButton() {
   );
 }
 
-// Web(ブラウザ)ではexpo-file-system/expo-sharingの双方が端末ネイティブのファイルシステム・
-// 共有シートを持たないため利用できない(FileSystem.cacheDirectoryはnull、Sharing.isAvailableAsync()も
-// navigator.shareが無い一般的なデスクトップブラウザではfalseを返す)。その代わりに、ブラウザ標準の
-// Blob + <a download>によるファイルダウンロードでエクスポートを実現する。
+// Web(ブラウザ)はexpo-file-system/expo-sharingの端末ネイティブなファイルシステム・共有シートを
+// 利用できないため、ブラウザ標準のBlob + <a download>によるダウンロードでエクスポートする
 function downloadOnWeb(fileName: string, content: string): void {
   const blob = new Blob([content], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -549,17 +532,15 @@ function downloadOnWeb(fileName: string, content: string): void {
 }
 
 // 保存済みの日記データ(復号済み)をJSON形式のファイルに書き出し、OS標準の共有シート経由で
-// 保存・共有できるようにする操作導線。端末紛失・機種変更・アプリ再インストール・ストレージ
-// クリア時にAsyncStorageのデータが失われる問題への対策。
+// 保存・共有できるようにする操作導線。端末紛失・機種変更等でのデータ消失に備えたバックアップ手段
 function ExportDiaryDataButton() {
   const [isExporting, setIsExporting] = useState(false);
 
   const handleExport = useCallback(async () => {
     setIsExporting(true);
     try {
-      // 全件読み込みに失敗した場合、entries.length === 0だけでは「本当に0件」と
-      // 見分けが付かず「バックアップすべきデータが無い」と誤解されかねないため、
-      // onErrorで検知して専用のメッセージを出し分ける
+      // entries.length === 0だけでは「本当に0件」か「読み込み失敗」かを区別できないため、
+      // onErrorで検知してメッセージを出し分ける
       let hasLoadError = false;
       const entries = await getAllDiaryEntries({
         onError: () => {
@@ -590,10 +571,8 @@ function ExportDiaryDataButton() {
         return;
       }
 
-      // ネイティブ(iOS/Android)は一旦キャッシュディレクトリにJSONファイルを書き出してから、
-      // OS標準の共有シートでそのファイルを共有する。
-      // キャッシュディレクトリが取得できない場合はPaths.cache/Fileのコンストラクタが例外を
-      // 送出するため、この関数を囲むtry-catchでまとめて捕捉される
+      // ネイティブ(iOS/Android)は一旦キャッシュディレクトリにJSONファイルを書き出してから
+      // OS標準の共有シートで共有する。ディレクトリ取得失敗時の例外は外側のtry-catchで捕捉される
       const file = new File(Paths.cache, fileName);
       file.write(content);
       const fileUri = file.uri;
@@ -632,10 +611,8 @@ function ExportDiaryDataButton() {
   );
 }
 
-// ネイティブ(iOS/Android)は選択されたファイルのURIをexpo-file-systemの`File`で読み込むが、
-// Webはexpo-file-systemのファイルシステムAPIに対応していないため、
-// DocumentPickerAssetがブラウザ標準の`File`オブジェクトとして返す`asset.file`から直接読み込む
-// (`downloadOnWeb`と同様、Web版だけ別経路になる)。
+// Webはexpo-file-systemのファイルシステムAPIに対応していないため、DocumentPickerAssetが
+// ブラウザ標準の`File`として返す`asset.file`から直接読み込む(`downloadOnWeb`と同様の別経路)
 async function readPickedFileContent(asset: DocumentPicker.DocumentPickerAsset): Promise<string> {
   if (Platform.OS === 'web') {
     if (!asset.file) {
@@ -647,12 +624,8 @@ async function readPickedFileContent(asset: DocumentPicker.DocumentPickerAsset):
 }
 
 // ExportDiaryDataButtonで書き出したJSONファイルを選択し、日記データとして取り込む操作導線。
-// 端末紛失・機種変更時のバックアップ復元や、他の端末でエクスポートしたデータの持ち込みに対応する。
-//
-// マージ方針: 既存データは削除せず、インポートしたエントリを追加する。idが重複する場合は
-// インポートするファイル側の内容で上書きする(バックアップ復元時、最新のエクスポート内容を
-// 反映したいというユースケースを優先し、全置換は行わない)。`saveDiaryEntry`がエントリのidを
-// キーに個別保存するため、この上書き挙動は特別な実装をせずとも自然に実現できる。
+// 既存データは削除せず追加し、idが重複する場合はインポート側の内容で上書きする(全置換は行わない)。
+// `saveDiaryEntry`がidをキーに個別保存するため、この上書き挙動は特別な実装なしに実現できる
 function ImportDiaryDataButton() {
   const [isImporting, setIsImporting] = useState(false);
 
@@ -758,11 +731,8 @@ export default function SettingsScreen() {
   const contentBottomPadding = 16 + insets.bottom + BOTTOM_TAB_BAR_CONTENT_HEIGHT;
 
   return (
-    // ステータスバー/ノッチ領域とコンテンツが重ならないよう、TabScreenContainerで
-    // セーフエリア上端インセットぶんの余白を自動的に加算する
+    // ステータスバー/ノッチ領域とコンテンツが重ならないよう、TabScreenContainerでセーフエリア上端の余白を加算する
     <TabScreenContainer style={styles.container}>
-      {/* 設定項目が増えて画面高さを超えても下部の操作(データ管理セクション等)に到達できるよう、
-          全セクションをScrollViewでラップする */}
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
       >
