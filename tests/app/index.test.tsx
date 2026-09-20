@@ -616,7 +616,7 @@ describe('HomeScreen', () => {
       expect(getBackgroundDismissPressable().props.accessible).toBe(false);
     });
 
-    it('does not call Keyboard.dismiss when pressing the save button; the save button handles its own tap independently of the background wrapper (回帰: 既存のタップ操作がラッパーに邪魔されない)', async () => {
+    it('does not call Keyboard.dismiss when pressing the save button; the save button handles its own tap independently of the background wrapper (保存ボタンのタップが背景ラッパーに邪魔されない)', async () => {
       const dismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
 
       render(<HomeScreen />);
@@ -629,7 +629,7 @@ describe('HomeScreen', () => {
       expect(dismissSpy).not.toHaveBeenCalled();
     });
 
-    it('does not call Keyboard.dismiss when typing into the composer TextInput; the input handles its own event independently of the background wrapper (回帰)', async () => {
+    it('does not call Keyboard.dismiss when typing into the composer TextInput; the input handles its own event independently of the background wrapper (入力操作が背景ラッパーに邪魔されない)', async () => {
       const dismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
 
       render(<HomeScreen />);
@@ -1816,7 +1816,7 @@ describe('HomeScreen', () => {
       }
     });
 
-    it('still hides the toast after ~2.5s even if the user keeps editing the input while it is shown (regression: onHide must be a stable callback, not recreated on every render)', async () => {
+    it('still hides the toast after ~2.5s even if the user keeps editing the input while it is shown (onHide must be a stable callback, not recreated on every render)', async () => {
       jest.useFakeTimers();
       try {
         render(<HomeScreen />);
@@ -3005,7 +3005,7 @@ describe('HomeScreen', () => {
         ).toBeTruthy();
 
         // 2024年3月1日(金曜)の直前、はみ出しセルとして描画される2024年2月29日はminDateにより
-        // 過去日として無効化される(以前はタップ可能だった)
+        // 過去日として無効化される
         const beforeMinDateCell = screen.getByLabelText(`${minYear}年2月29日、日記なし`);
         expect(beforeMinDateCell.props.accessibilityState?.disabled).toBe(true);
 
@@ -3179,7 +3179,7 @@ describe('HomeScreen', () => {
 
     // バッジ内の件数テキスト(styles.entryCountText)を取得するヘルパー。日付セルの数字
     // (例: 二桁未満の日付は同じ文字列になりうる)と衝突しうるため、素朴なgetByText(String(count))
-    // ではなく、バッジテキストに固有のスタイル(lineHeight: 11。詳細は下の回帰テストを参照)を
+    // ではなく、バッジテキストに固有のスタイル(lineHeight: 11。詳細は下のテストを参照)を
     // 目印に絞り込む。
     function findEntryCountBadgeTexts() {
       return screen.UNSAFE_getAllByType(Text).filter((node) => {
@@ -3367,7 +3367,7 @@ describe('HomeScreen', () => {
       expect(findEntryCountBadgeViews()).toHaveLength(1);
     });
 
-    it('keeps the count badge visible after tapping the day cell to navigate to the day-entries screen (regression: badge does not disappear due to the navigation)', async () => {
+    it('keeps the count badge visible after tapping the day cell to navigate to the day-entries screen (the badge does not disappear due to the navigation)', async () => {
       // dayWithEntryが未来日になると、react-native-calendars側のmaxDate判定で
       // onDayPress自体が発火しなくなる。2026年8月は1日が土曜日で自然に6週間ぴったり
       // (showSixWeeksによる前後月のはみ出しが最小)になり、かつ25日を基準日にすることで
@@ -3560,7 +3560,7 @@ describe('HomeScreen', () => {
       expect(badgeText.props.maxFontSizeMultiplier).toBe(EXPECTED_MAX_FONT_SCALE);
     });
 
-    it('still shows the day number and entry-count badge as before (regression check: adding maxFontSizeMultiplier does not change rendered content)', async () => {
+    it('shows the day number and the entry-count badge on a day cell with entries', async () => {
       // 実行時点の「今日」が月初(1〜9日)だと、pickNonTodayDayInRangeが選ぶ10〜20日が
       // 未来日になり、Calendarのmaxdateで無効化された当月のセルと、6週分の枠を埋めるため
       // 表示される翌月のはみ出しセル(同じく無効化扱い)の両方に同じ日番号が現れて
@@ -3901,7 +3901,7 @@ describe('HomeScreen', () => {
         expect(getNewEntryInput().props.value).toBe('キャンセルで残るはずの下書き');
       });
 
-      it('does not show the discard confirmation dialog or close the modal when a tap lands inside the modal content area (e.g. around the TextInput), unlike tapping the background overlay (回帰: モーダル内タップで意図せず閉じてしまう不具合の再発防止)', async () => {
+      it('does not show the discard confirmation dialog or close the modal when a tap lands inside the modal content area (e.g. around the TextInput), unlike tapping the background overlay', async () => {
         const now = new Date();
         const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
         jest.spyOn(Alert, 'alert').mockImplementation(() => {});
@@ -4353,8 +4353,8 @@ describe('HomeScreen', () => {
         (triggerRefocus as () => void)();
       });
 
-      // 修正前は、pending中の書き込みを待たずに即座にAsyncStorageを読み直し、まだ反映されていない
-      // 古い内容で一覧を上書きしてしまっていた。修正後はキューの完了を待つため追加のgetItem呼び出しは発生しない
+      // pending中の書き込みを待たずに読み直すと、まだ反映されていない古い内容で一覧を上書きしてしまうため、
+      // キューの完了を待ち、この時点では追加のgetItem呼び出しが発生しない
       expect(getItemMock.mock.calls.length).toBe(getItemCallsWhilePending);
       // 読み直しがブロックされている間も、楽観的更新済みの新しい日記のセルが古い状態へ
       // 巻き戻ってちらつくことはない
@@ -4383,10 +4383,9 @@ describe('HomeScreen', () => {
       expect(await readPersistedEntry('existing')).not.toBeNull();
     });
 
-    // pending中の書き込みが無い通常時は、余分な待ち合わせをせず即座に読み直す従来通りの
-    // 挙動を維持していることを確認する回帰テスト(loadEntries冒頭のawaitは
-    // pendingWriteCountRef.current > 0のときのみ行われる)
-    it('reloads immediately on refocus when there is no pending write in the queue (regression check for normal refetch behavior)', async () => {
+    // pending中の書き込みが無い通常時は、余分な待ち合わせをせず即座に読み直すことを確認する
+    // (loadEntries冒頭のawaitはpendingWriteCountRef.current > 0のときのみ行われる)
+    it('reloads immediately on refocus when there is no pending write in the queue (通常時の再取得)', async () => {
       const now = new Date();
       const { dayWithEntry } = pickTestDays(now);
       await AsyncStorage.setItem(
@@ -4465,7 +4464,7 @@ describe('HomeScreen', () => {
     // 編集失敗時のエラーメッセージ・削除リンクのダークモード配色は、それぞれ専用画面へ移動したため
     // tests/app/edit-entry/[id].test.tsx・tests/app/day-entries/[date].test.tsxで検証する
 
-    // 回帰テスト。react-native-calendarsの`Calendar`はtheme由来のスタイル
+    // react-native-calendarsの`Calendar`はtheme由来のスタイル
     // (曜日ヘッダー行の色など、dayComponentで差し替えていない部分)をマウント時に一度だけ
     // `useRef`で計算してキャッシュし、マウント後にtheme propが変わっても再計算しない実装のため、
     // マウント後に配色設定(ダークモード)が変わってもカレンダー本体だけ元の配色のまま
@@ -5465,7 +5464,7 @@ describe('HomeScreen', () => {
       }
     });
 
-    it("keeps rendering the month Calendar (existing behavior unaffected) when the layout preference is the default 'month' (回帰: 既存の月表示に影響がない)", async () => {
+    it("renders the month Calendar when the layout preference is the default 'month' (既定の月表示)", async () => {
       renderHomeScreenWithLayoutProvider();
       await waitFor(() => expect(AsyncStorage.getItem).toHaveBeenCalled());
 

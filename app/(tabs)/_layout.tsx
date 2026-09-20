@@ -7,7 +7,7 @@ import { Colors } from '@/constants/theme';
 import { useThemePreference } from '@/contexts/theme-preference-context';
 
 export default function TabLayout() {
-  // OSの設定だけでなく、アプリ内(設定画面)で選択されたテーマ設定(#91)も反映した
+  // OSの設定だけでなく、アプリ内(設定画面)で選択されたテーマ設定も反映した
   // 解決済みのカラースキームを使う
   const { colorScheme } = useThemePreference();
 

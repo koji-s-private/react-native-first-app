@@ -39,7 +39,7 @@ type AppLockContextValue = {
    * 'inactive'遷移(アプリスイッチャー表示等)の瞬間に機微なコンテンツを覆い隠すべきか。
    * OSはこの遷移の直後に画面のスナップショットを撮影するため、'background'遷移でのみ
    * 再ロックする`isUnlocked`(生体認証プロンプト表示中の一時的な'inactive'を除外するための設計)
-   * とは独立して管理する(#225)
+   * とは独立して管理する
    */
   isInactiveOverlayVisible: boolean;
   /**
@@ -65,10 +65,10 @@ export function AppLockProvider({ children }: PropsWithChildren) {
   const [isUnlocked, setIsUnlocked] = useState(true);
   // ロック設定の読み込みが完了するまではisUnlocked=trueが暫定値(実際にONかどうか未確定)であり、
   // これをそのまま「未ロック」として扱うと、ONを復元する前提のケースでその間だけ日記データが
-  // 描画されてしまう(#155)。読み込み完了を明示的なstateとして持ち、完了するまでは
+  // 描画されてしまう。読み込み完了を明示的なstateとして持ち、完了するまでは
   // app/_layout.tsx側でコンテンツ全体を覆い隠す
   const [isReady, setIsReady] = useState(false);
-  // 'inactive'遷移(アプリスイッチャー表示等)の瞬間だけコンテンツを覆い隠すためのフラグ(#225)。
+  // 'inactive'遷移(アプリスイッチャー表示等)の瞬間だけコンテンツを覆い隠すためのフラグ。
   // isUnlockedとは異なり、'active'に戻れば(enabledに関わらず)常にfalseへ戻す
   const [isInactiveOverlayVisible, setIsInactiveOverlayVisible] = useState(false);
 
@@ -182,8 +182,7 @@ export function AppLockProvider({ children }: PropsWithChildren) {
   }, []);
 
   // 起動時に読み込んだ設定が既にON(ロック済み)状態だった場合、AppLockScreenの手動ボタンを
-  // 待たずに自動で認証プロンプトを起動する(#226。従来AppLockScreen側のマウント時visible=true
-  // 効果で担保していたUXを、読み込み完了のタイミングへ付け替えたもの)。isReadyがfalse→trueに
+  // 待たずに自動で認証プロンプトを起動する。isReadyがfalse→trueに
   // 変化した瞬間だけ判定したいため、依存配列はisReadyのみとし、enabled/isUnlockedは
   // refから読む(値そのものを依存配列に含めるとbackground遷移等の後続の変化でも再実行されてしまう)
   useEffect(() => {
@@ -201,7 +200,7 @@ export function AppLockProvider({ children }: PropsWithChildren) {
         setIsUnlocked(false);
       }
       // 'inactive'はアプリスイッチャーを開いた瞬間にも発生し、OSがこの直後に画面の
-      // スナップショットを撮影するため、'background'を待たずここでコンテンツを覆い隠す(#225)
+      // スナップショットを撮影するため、'background'を待たずここでコンテンツを覆い隠す
       if (nextAppState === 'inactive' && enabledRef.current) {
         setIsInactiveOverlayVisible(true);
       }
@@ -211,9 +210,9 @@ export function AppLockProvider({ children }: PropsWithChildren) {
         // active復帰のたびにisSupportedを再取得する。認証手段が失われていた場合、
         // 更新されたisSupportedを見たAppLockScreen側が脱出導線(アプリロックのOFF)を表示する
         refreshIsSupported();
-        // フォアグラウンド復帰時のみ自動で認証プロンプトを起動する(#226)。'background'遷移の
-        // 瞬間(画面が暗転していく過程)に起動すると、OS標準パスコード入力へフォールバックして
-        // しまう不具合があったため、必ず'active'に戻った時点で判定する
+        // フォアグラウンド復帰時のみ自動で認証プロンプトを起動する。'background'遷移の
+        // 瞬間(画面が暗転していく過程)に起動するとOS標準パスコード入力へフォールバック
+        // してしまうため、必ず'active'に戻った時点で判定する
         if (enabledRef.current && !isUnlockedRef.current) {
           authenticate();
         }

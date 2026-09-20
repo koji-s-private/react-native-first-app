@@ -93,9 +93,9 @@ describe('useThemeColor', () => {
   });
 });
 
-// Issue #91: OSの設定だけでなく、アプリ内(設定画面)で選択されたテーマ設定
+// OSの設定だけでなく、アプリ内(設定画面)で選択されたテーマ設定
 // (`ThemePreferenceProvider`/`useThemePreference`)経由でも正しく色が解決されることを確認する
-describe('useThemeColor with ThemePreferenceProvider (Issue #91: アプリ内テーマ選択との統合)', () => {
+describe('useThemeColor with ThemePreferenceProvider (アプリ内テーマ選択との統合)', () => {
   const mockedUseColorScheme = useColorScheme as jest.Mock;
 
   beforeEach(async () => {
