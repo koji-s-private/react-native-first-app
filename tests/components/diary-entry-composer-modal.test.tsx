@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { Alert, Pressable } from 'react-native';
 import { StrictMode, useState } from 'react';
+import { Alert, Modal, Pressable } from 'react-native';
 
 import { DiaryEntryComposerModal } from '@/components/diary-entry-composer-modal';
 import { type SaveDiaryEntryOptions, useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
@@ -81,6 +81,16 @@ describe('DiaryEntryComposerModal', () => {
       setError: setErrorMock,
       save: saveEntryMock,
     });
+  });
+
+  it('renders a transparent Modal that extends under the status bar and navigation bar, so the overlay covers the whole screen', async () => {
+    render(<DiaryEntryComposerModal {...defaultProps} />);
+    await waitFor(() => expect(loadDraftTextMock).toHaveBeenCalled());
+
+    const modal = screen.UNSAFE_getByType(Modal);
+    expect(modal.props.transparent).toBe(true);
+    expect(modal.props.statusBarTranslucent).toBe(true);
+    expect(modal.props.navigationBarTranslucent).toBe(true);
   });
 
   it('restores the saved draft when the user has not edited the input while loading', async () => {

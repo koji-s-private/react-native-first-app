@@ -47,6 +47,15 @@ describe('utils/diary-reminder-notifications', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // `mockRejectedValue`等の永続的な上書きが後続テストへ漏れないよう、モックの既定の実装へ戻す
+    mockedNotifications.getPermissionsAsync.mockReset();
+    mockedNotifications.requestPermissionsAsync.mockReset();
+    mockedNotifications.scheduleNotificationAsync.mockReset();
+    mockedNotifications.scheduleNotificationAsync.mockResolvedValue('scheduled-id');
+    mockedNotifications.cancelScheduledNotificationAsync.mockReset();
+    mockedNotifications.cancelScheduledNotificationAsync.mockResolvedValue(undefined);
+    mockedNotifications.setNotificationChannelAsync.mockReset();
+    mockedNotifications.setNotificationChannelAsync.mockResolvedValue(null);
     Platform.OS = originalPlatformOS;
   });
 

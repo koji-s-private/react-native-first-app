@@ -142,6 +142,9 @@ const ENTRY_ID = 'entry-1';
 // 実装(`app/edit-entry/[id].tsx`)の保存成功トースト表示から画面遷移までの待機時間(1200ms)と対応させる
 const NAVIGATE_BACK_DELAY_AFTER_SAVE_MS = 1200;
 
+// `components/save-toast.tsx`の自動非表示までの時間(2500ms)と対応させる
+const SAVE_TOAST_AUTO_HIDE_DELAY_MS = 2500;
+
 // 保存成功トーストの表示を確認したうえで、画面遷移までの待機時間をfake timersで進める
 // (実時間で待たずに済ませる。呼び出し側で事前にjest.useFakeTimers()を有効にしておくこと)
 async function advancePastNavigateBackDelay(): Promise<void> {
@@ -601,9 +604,11 @@ describe('EditEntryScreen', () => {
         });
         expect(mockBack).toHaveBeenCalledTimes(1);
 
-        // トースト自体の自動非表示(2500ms)は待機時間より後に来る
+        // トースト自体の自動非表示は待機時間より後に来る
         await act(async () => {
-          jest.advanceTimersByTime(2500 - NAVIGATE_BACK_DELAY_AFTER_SAVE_MS);
+          jest.advanceTimersByTime(
+            SAVE_TOAST_AUTO_HIDE_DELAY_MS - NAVIGATE_BACK_DELAY_AFTER_SAVE_MS,
+          );
         });
         expect(screen.queryByTestId('save-toast')).toBeNull();
       } finally {
@@ -662,9 +667,15 @@ describe('EditEntryScreen', () => {
 
         screen.unmount();
         const timerCountAfterUnmount = jest.getTimerCount();
+        // `act`自体がfake timersに残す内部タイマー数を測り、待機タイマーが増えていないことを厳密に比較する
+        await act(async () => {});
+        const timersLeftPerAct = jest.getTimerCount() - timerCountAfterUnmount;
+        const timerCountBeforeResolve = jest.getTimerCount();
         await act(async () => {
           resolveRemoveItem();
         });
+        // 待機開始前にアンマウント済みなので、下書き削除の完了直後も待機タイマーは作られない
+        expect(jest.getTimerCount()).toBe(timerCountBeforeResolve + timersLeftPerAct);
         await act(async () => {
           jest.advanceTimersByTime(NAVIGATE_BACK_DELAY_AFTER_SAVE_MS);
         });

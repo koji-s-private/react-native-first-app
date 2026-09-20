@@ -31,15 +31,6 @@ import {
   getAllDiaryEntries,
 } from '@/utils/diary-storage';
 
-// 実機では`expo-router`の`ExpoRoot`が自動的に`SafeAreaProvider`で全体をラップするが、単体
-// レンダリングではそのラップが無く`useSafeAreaInsets`がエラーを投げるため(`tests/app/index.test.tsx`
-// と同様)、ライブラリ公式のjestモック(常にゼロインセットを返す)に差し替える。
-jest.mock(
-  'react-native-safe-area-context',
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  () => require('react-native-safe-area-context/jest/mock').default,
-);
-
 // `settings.tsx`は削除ボタンから`clearAllDiaryEntries`(内部で`AsyncStorage.removeItem`)を利用する
 // ため、ネイティブの`AsyncStorage`が存在しないJest環境では公式のインメモリモックに差し替える。
 jest.mock('@react-native-async-storage/async-storage', () =>
@@ -1830,7 +1821,7 @@ describe('リマインダーセクション(日記を書く習慣化のための
     Platform.OS = originalPlatformOS;
   });
 
-  it('renders the "リマインダー" section with the toggle switch and time stepper, defaulting to OFF/21:00 (操作導線の存在確認・初期値)', () => {
+  it('renders the "リマインダー" section with the toggle switch and time stepper, defaulting to OFF/21:00 (操作導線の存在確認・初期値)', async () => {
     renderSettingsScreen();
 
     expect(screen.getByText(REMINDER_SECTION_TITLE)).toBeTruthy();
@@ -1838,6 +1829,9 @@ describe('リマインダーセクション(日記を書く習慣化のための
     expect(toggle.props.value).toBe(false);
     expect(screen.getByText('21')).toBeTruthy();
     expect(screen.getByText('00')).toBeTruthy();
+
+    // 初期化の非同期更新が完了した合図(OFF時の案内文の表示)まで待ってから終える
+    await screen.findByText(/リマインダーがOFFのため通知は届きません/);
   });
 
   it('requests OS permission, turns ON, and schedules the reminder when the toggle is pressed while permission is undetermined and the user grants it (正常系: 未確認から許可)', async () => {
