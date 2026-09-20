@@ -28,10 +28,8 @@ const SAVE_SUCCESS_MESSAGE = '保存しました';
 // 遷移が早すぎると保存できたかを確認できないため、トーストを読める長さだけ画面に留める
 const NAVIGATE_BACK_DELAY_AFTER_SAVE_MS = 1200;
 
-// 日記1件を編集する専用画面。未保存の変更を持ったまま画面を離れようとした
-// 場合の破棄確認は、ヘッダーの戻る操作・Android物理戻るボタン・スワイプ戻るジェスチャーの
-// いずれでも一律に検知できる`navigation.addListener('beforeRemove', ...)`で実現する
-// (Reactナビゲーションの標準的な「離脱確認」の実装パターン)。
+// 日記1件を編集する専用画面。未保存の変更を持ったまま離れようとした場合の破棄確認は、
+// ヘッダーの戻る操作・物理戻るボタン・スワイプのいずれでも検知できる`beforeRemove`イベントで実現する
 export default function EditEntryScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -52,16 +50,12 @@ export default function EditEntryScreen() {
   // 完了を待つ間に画面がアンマウントされ得るため、各非同期処理から参照して安全性を確保する)
   const isMountedRef = useRef(true);
   // 保存処理中にbeforeRemoveでブロックされた離脱アクション。router.back()自体もbeforeRemoveを
-  // 発火させ、保存完了前(isSavingEdit === true)は自分自身のガードでブロックされてしまうため、
-  // 保存成功後に再送して確実に画面を離れられるようにする
+  // 発火させ、保存完了前は自分自身のガードでブロックされてしまうため、保存成功後に再送する
   const pendingRemoveActionRef = useRef<NavigationAction | null>(null);
-  // 直近の保存結果(成功/失敗)。onSuccess/onErrorの実行タイミングはPromiseの解決に基づくため、
-  // isSavingEditのstate更新(ひいてはbeforeRemoveリスナーの再登録)がまだ反映されていない
-  // 一瞬の間に離脱操作が発生しても、この値は既に正しい結果を保持している。保存失敗時に
-  // ブロック済みの離脱アクションを誤って再送しないための判定に使う
+  // 直近の保存結果(成功/失敗)。isSavingEditのstate更新が反映される前の一瞬に離脱操作が
+  // 発生しても正しい結果を判定できるよう、保存失敗時にブロック済みアクションを再送しない判定に使う
   const lastSaveSucceededRef = useRef(false);
-  // 保存成功のトーストを表示中の待機をアンマウント時に打ち切るための関数。待機中のタイマーを
-  // 残さず、保存処理の完了待ち(saveEditのawait)も確実に解消させる
+  // 保存成功トースト表示中の待機をアンマウント時に打ち切るための関数
   const cancelNavigateBackDelayRef = useRef<(() => void) | null>(null);
   const [saveToastMessage, setSaveToastMessage] = useState<string | null>(null);
 
@@ -84,12 +78,10 @@ export default function EditEntryScreen() {
   const errorColor = useThemeColor({}, 'error');
 
   useEffect(() => {
-    // idが変わって同effectが再実行される際、直前のidに対する非同期処理が後から解決しても
-    // 新しいidの表示内容を上書きしないよう、このeffect呼び出し専用の無効化フラグを持つ
-    // (isMountedRefはアンマウント自体の検知用で、id変化時の再実行では立たないため代用できない)
+    // idが変わって同effectが再実行される際、直前のidの非同期処理が後から解決しても
+    // 新しいidの表示内容を上書きしないための、このeffect呼び出し専用の無効化フラグ
     let isCancelled = false;
-    // idが変わる場合(通常は画面が都度pushされるため起こらないが、念のため)に備え、
-    // 新しいエントリの下書き復元が終わるまで自動保存effectを止める
+    // idが変わる場合に備え、新しいエントリの下書き復元が終わるまで自動保存effectを止める
     setIsDraftRestored(false);
     (async () => {
       const found = id ? await getDiaryEntryById(id) : null;
@@ -102,9 +94,8 @@ export default function EditEntryScreen() {
         // 切り詰めてからドラフトへセットする(切り詰めないと保存時のガードに無言で弾かれ続ける)
         const originalGraphemeCount = splitIntoGraphemes(found.text).length;
         const truncatedText = truncateToBodyMaxLength(found.text);
-        // editOriginalTextRefには常に「保存済みの元の本文」を保持する(下書きの内容ではない)。
-        // これにより、下書きを復元した内容から変更していなくても元の本文と異なれば
-        // 破棄確認が正しく発火する
+        // editOriginalTextRefは常に「保存済みの元の本文」を保持する(下書きの内容ではない)。
+        // 下書きから変更していなくても元の本文と異なれば破棄確認が正しく発火する
         editOriginalTextRef.current = truncatedText;
 
         // 自動保存されていた編集下書きが残っていれば、元の本文より優先して復元する。
@@ -149,7 +140,6 @@ export default function EditEntryScreen() {
     isRestored: isDraftRestored,
   });
 
-  // 編集用TextInputのonChangeText。truncateToBodyMaxLengthでgrapheme単位の切り詰めを行う
   const handleChangeEditDraft = useCallback((text: string) => {
     setEditDraft(truncateToBodyMaxLength(text));
   }, []);
@@ -165,12 +155,10 @@ export default function EditEntryScreen() {
       persist: (trimmed) => saveDiaryEntry({ ...targetEntry, text: trimmed }),
       onSuccess: async (trimmed) => {
         entryRef.current = { ...targetEntry, text: trimmed };
-        // 保存成功後は「未保存の変更」ではなくなるため、破棄確認の基準を保存後の内容に更新してから戻る
-        // (この後のnavigation.addListener('beforeRemove', ...)がeditDraftと比較する対象)
+        // 保存成功後は「未保存の変更」ではなくなるため、破棄確認の基準(beforeRemoveの比較対象)を更新する
         editOriginalTextRef.current = trimmed;
 
-        // 保存成功時は自動保存済みの下書きキーも削除する。残したままだと次回この画面を
-        // 開いた際に、既に保存済みの内容を誤って復元してしまう
+        // 残したままだと次回この画面を開いた際に保存済みの内容を誤って復元してしまうため削除する
         await clearDraft();
 
         lastSaveSucceededRef.current = true;
@@ -196,26 +184,21 @@ export default function EditEntryScreen() {
         router.back();
       },
       onError: () => {
-        // 保存失敗時は、直後の再送処理(isSavingEdit変化を検知するeffect)で保存中に
-        // ブロックしていた離脱アクションを送らせないようにする。再送してしまうと、
-        // エラーメッセージや未保存の編集内容をユーザーが確認する間もなく画面を離れてしまう
+        // 失敗時は再送処理(isSavingEdit変化検知effect)でブロック済みの離脱アクションを送らせない。
+        // 再送するとエラーメッセージや未保存の編集内容を確認する間もなく画面を離れてしまう
         lastSaveSucceededRef.current = false;
       },
       errorMessage: '更新に失敗しました。もう一度お試しください。',
-      // 保存完了前にアンマウントされていた場合、アンマウント済みコンポーネントへのstate更新
-      // (Reactの警告の原因)を避けるため渡す
+      // 保存完了前にアンマウントされた場合の、アンマウント済みコンポーネントへのstate更新を避ける
       isMountedRef,
     });
   }, [editDraft, router, saveEdit, clearDraft]);
 
-  // 画面を離れようとした際(ヘッダーの戻る操作・Android物理戻るボタン・スワイプ戻る
-  // ジェスチャーのいずれも対象になる)、未保存の変更がある場合のみ破棄確認ダイアログを挟む
+  // 画面を離れようとした際、未保存の変更がある場合のみ破棄確認ダイアログを挟む
   useEffect(() => {
     const unsubscribe = navigation.addListener('beforeRemove', (event) => {
-      // 保存処理の進行中は、破棄確認ダイアログとhandleSaveEdit完了後のrouter.back()が
-      // 競合してしまうため、離脱操作自体を一律ブロックする。router.back()によるプログラム的な
-      // 遷移もここで一旦ブロックされるため、そのアクションを保持しておき、保存完了後に
-      // 再送することで画面を確実に離れられるようにする
+      // 保存処理中は、破棄確認ダイアログとhandleSaveEdit完了後のrouter.back()が競合するため
+      // 離脱操作を一律ブロックする。ブロックしたアクションは保持しておき、保存完了後に再送する
       if (isSavingEdit) {
         event.preventDefault();
         pendingRemoveActionRef.current = event.data.action;
@@ -241,9 +224,8 @@ export default function EditEntryScreen() {
     return unsubscribe;
   }, [navigation, editDraft, isSavingEdit, clearDraft]);
 
-  // 保存完了(isSavingEdit: true→false)を検知したら、保存中にブロックされていた離脱アクションを
-  // 再送する。router.back()呼び出し自体は既に完了しているため、ここではnavigation.dispatchで
-  // アクションを直接反映させる。保存失敗時は再送せず画面に留まる(lastSaveSucceededRefで判定)
+  // 保存完了(isSavingEdit: true→false)を検知したら、保存中にブロックしていた離脱アクションを再送する。
+  // 保存失敗時は再送せず画面に留まる(lastSaveSucceededRefで判定)
   useEffect(() => {
     if (isSavingEdit || pendingRemoveActionRef.current === null) {
       return;
