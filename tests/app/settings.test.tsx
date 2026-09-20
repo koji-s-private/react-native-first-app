@@ -551,8 +551,7 @@ describe('日記データを全件削除ボタン(データ管理セクション
     ).toEqual(expect.objectContaining({ disabled: false }));
   });
 
-  // 削除ボタンの文字色が固定のライトモード用エラー色のままダークモードでも
-  // 使われてしまっていた不具合の回帰テスト。
+  // 削除ボタンの文字色が、固定のライトモード用エラー色ではなくテーマに応じた色になることを確認する。
   describe('ダークモード対応(削除ボタンの文字色)', () => {
     // 単体レンダリングでは実機の`RootLayout`によるラップが無いため、配色切り替えを検証するには
     // 外観セクションのテストと同様に明示的に`ThemePreferenceProvider`でラップする必要がある。
@@ -1283,9 +1282,9 @@ describe('日記データをインポートボタン(データ管理セクショ
 
   // 暗号鍵が未生成の状態(=まさにバックアップ復元時に起きる状況)で
   // 複数件を並列(Promise.all)保存すると、各保存処理が同時に鍵の生成・書き込みを行い、
-  // 最後に勝った鍵以外で暗号化されたエントリが復号不能になり消失していた。逐次保存への
-  // 修正(for...of)によりこれが起きないことを回帰テストとして固定する。
-  it('saves every imported entry so that all of them are decryptable afterwards, even from a fresh (not-yet-generated) encryption key state (回帰: 暗号鍵レースコンディションによるデータ消失防止)', async () => {
+  // 最後に勝った鍵以外で暗号化されたエントリが復号不能になり消失してしまうため、
+  // 逐次保存(for...of)により全件が復号可能なまま残ることを確認する。
+  it('saves every imported entry so that all of them are decryptable afterwards, even from a fresh (not-yet-generated) encryption key state (暗号鍵レースコンディションによるデータ消失防止)', async () => {
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     // secureStoreMock.__reset()により暗号鍵が未生成の状態から始まる(beforeEachで実施済み)
     const importedEntries = Array.from({ length: 10 }, (_, i) => ({
@@ -2862,7 +2861,7 @@ describe('リマインダーセクション(日記を書く習慣化のための
 
   // 通知未許可時のフォールバック文言の文字色も、削除ボタンと同様に
   // 固定のライトモード用エラー色ではなく、useThemeColor経由でライト/ダークそれぞれの
-  // テーマに応じた色が適用されることを確認する回帰テスト。
+  // テーマに応じた色が適用されることを確認する。
   describe('ダークモード対応(フォールバック文言の文字色)', () => {
     // このブロックだけは配色切り替えの検証も必要なため、`DiaryReminderProvider`に加えて
     // `ThemePreferenceProvider`でもラップする(実機では`app/_layout.tsx`の`RootLayout`が
@@ -3028,8 +3027,8 @@ describe('アプリロックセクション(生体認証によるアプリロッ
     );
   });
 
-  // 永続化失敗時にスイッチの表示がONのまま(実際には保存されていない)になり、
-  // かつ未処理のPromise rejectionが発生していた不具合の回帰テスト。
+  // 永続化失敗時にスイッチの表示がONのまま(実際には保存されていない)にならず、
+  // かつ未処理のPromise rejectionが発生しないことを確認する。
   // リマインダーセクションの同種テスト(異常系: 通知登録失敗時のフィードバック)と
   // 同じパターン・粒度で検証する。
   it('shows a failure alert and reverts the toggle to OFF when AsyncStorage.setItem fails (異常系: 永続化失敗時のロールバック・フィードバック)', async () => {

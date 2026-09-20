@@ -30,7 +30,7 @@ function contrastRatio(hexA: string, hexB: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-describe('Colors.error (Issue #58: エラーメッセージ色のテーマ定数化)', () => {
+describe('Colors.error (エラーメッセージ色)', () => {
   it('defines a valid hex color for light mode', () => {
     expect(Colors.light.error).toMatch(HEX_COLOR_PATTERN);
   });
@@ -43,13 +43,13 @@ describe('Colors.error (Issue #58: エラーメッセージ色のテーマ定数
     expect(Colors.dark.error).not.toBe(Colors.light.error);
   });
 
-  it('matches the specific values chosen for Issue #58', () => {
+  it('matches the specific error color values', () => {
     expect(Colors.light.error).toBe('#d32f2f');
     expect(Colors.dark.error).toBe('#ff6b6b');
   });
 });
 
-describe('Colors.link (Issue #153: ダークモードでリンク色のコントラストが不足する問題の修正)', () => {
+describe('Colors.link (ダークモードでのリンク色のコントラスト)', () => {
   it('defines a valid hex color for light mode', () => {
     expect(Colors.light.link).toMatch(HEX_COLOR_PATTERN);
   });
@@ -62,7 +62,7 @@ describe('Colors.link (Issue #153: ダークモードでリンク色のコント
     expect(Colors.dark.link).not.toBe(Colors.light.link);
   });
 
-  it('matches the specific values chosen for Issue #153', () => {
+  it('matches the specific link color values', () => {
     expect(Colors.light.link).toBe('#0a7ea4');
     expect(Colors.dark.link).toBe('#5AC8FA');
   });
@@ -71,7 +71,7 @@ describe('Colors.link (Issue #153: ダークモードでリンク色のコント
     expect(contrastRatio(Colors.light.link, Colors.light.background)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('meets the WCAG AA contrast ratio (4.5:1) against the dark mode background (Issue #153の主眼)', () => {
+  it('meets the WCAG AA contrast ratio (4.5:1) against the dark mode background', () => {
     expect(contrastRatio(Colors.dark.link, Colors.dark.background)).toBeGreaterThanOrEqual(4.5);
   });
 });

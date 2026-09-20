@@ -8,7 +8,7 @@ import {
   TabScreenContainer,
 } from '@/components/tab-screen-container';
 
-describe('TabScreenContainer (Issue #125: タブ画面共通のセーフエリア対応コンテナ)', () => {
+describe('TabScreenContainer (タブ画面共通のセーフエリア対応コンテナ)', () => {
   it('renders its children', () => {
     render(
       <TabScreenContainer>

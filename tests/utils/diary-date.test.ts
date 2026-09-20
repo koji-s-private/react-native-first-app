@@ -31,7 +31,7 @@ describe('buildCreatedAtForDateKey', () => {
     expect(date.getSeconds()).toBe(0);
   });
 
-  it('round-trips back to the same date key via toDateKey (regression: local noon avoids day-boundary drift)', () => {
+  it('round-trips back to the same date key via toDateKey (local noon avoids day-boundary drift)', () => {
     const dateKey = '2026-12-31';
     expect(toDateKey(new Date(buildCreatedAtForDateKey(dateKey)))).toBe(dateKey);
   });

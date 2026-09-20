@@ -173,7 +173,7 @@
 
 ### 日記エントリ（`DiaryEntry`）
 
-`app/(tabs)/index.tsx` 内で定義・利用されています。
+`utils/diary-storage.ts` で定義され、ホーム・日別一覧・編集の各画面や、エクスポート・インポートで利用されています。
 
 ```ts
 type DiaryEntry = {
@@ -184,12 +184,12 @@ type DiaryEntry = {
 ```
 
 - **保存先**: `@react-native-async-storage/async-storage`（端末内ストレージ）
-- **保存キー**: エントリ1件ごとに個別のキー `diary-entry:<id>`（Issue #83。1件の保存/削除の書き込みコストがエントリ総数に依存しない）。移行元となる旧方式の単一キー `'diary-entries'`（全件を1つの配列としてまとめて保存する方式）も、後方互換のため`utils/diary-storage.ts`に定数として残っている
+- **保存キー**: エントリ1件ごとに個別のキー `diary-entry:<id>`（1件の保存/削除の書き込みコストがエントリ総数に依存しない）。移行元となる旧方式の単一キー `'diary-entries'`（全件を1つの配列としてまとめて保存する方式）も、後方互換のため`utils/diary-storage.ts`に定数として残っている
 - **保存形式**: `DiaryEntry` 1件分を `JSON.stringify` した文字列を、`utils/diary-encryption.ts` の `encryptText()` でAES-256-GCM暗号化した文字列（`'encrypted:v1:'` から始まる）にして、対応する個別キーへ保存する
 - **暗号鍵の管理**: 端末ごとに一度だけ `expo-crypto` の `getRandomBytes()` で生成した256bit鍵を `expo-secure-store`（iOSはKeychain、AndroidはKeystoreに保存される）に保持する。鍵自体がAsyncStorageや平文で保存されることはない
-- **読み込み**: 画面表示時（`useFocusEffect`）に `utils/diary-storage.ts` の `getAllDiaryEntries()` を呼び出す。まず旧方式の単一キー（`'diary-entries'`）にデータが残っていないか確認し、残っていれば個別キー方式へ自動移行してから、`AsyncStorage.getAllKeys()`/`multiGet()` で個別キーを全件読み込む（保存値が暗号化形式でなければ暗号化対応前の平文JSONとしてそのまま `JSON.parse` する、後方互換のマイグレーション）。`createdAt` の降順（新しい順）にソートして返す。ストレージが壊れている・スキーマ不整合・復号失敗の場合は該当エントリのみスキップし、全体が読み込めない場合は空配列にフォールバックする
+- **読み込み**: 画面表示時（`useFocusEffect`）に `utils/diary-storage.ts` の `getAllDiaryEntries()` を呼び出す。まず旧方式の単一キー（`'diary-entries'`）にデータが残っていないか確認し、残っていれば個別キー方式へ自動移行してから、`AsyncStorage.getAllKeys()`/`multiGet()` で個別キーを全件読み込む（保存値が暗号化形式でなければ暗号化対応前の平文JSONとしてそのまま `JSON.parse` する、後方互換のマイグレーション）。`createdAt` の降順（新しい順）にソートして返す。ストレージが壊れている・スキーマ不整合・復号失敗の場合は該当エントリのみスキップし、暗号鍵の取得失敗など全体が読み込めない場合は空配列にフォールバックする（呼び出し元は`onError`で「0件」と読み込み失敗を区別できる）
 - **保存失敗時の挙動**: 保存前の state に巻き戻し、画面にエラーメッセージ（`保存に失敗しました。もう一度お試しください。`）を表示する
-- **全件削除**: ストアのデータ削除要件（Google Play/Apple双方でユーザーによるデータ削除手段の提供が求められる）に対応するため、設定タブ（`app/(tabs)/settings.tsx`）から確認ダイアログ（キャンセル可能）付きで日記データを全件削除できる。実体は `utils/diary-storage.ts` の `clearAllDiaryEntries()`（個別キーを`multiRemove`し、念のため旧方式の単一キーも`removeItem`する）で、暗号鍵など他のキーには影響しない
+- **全件削除**: ストアのデータ削除要件（Google Play/Apple双方でユーザーによるデータ削除手段の提供が求められる）に対応するため、設定タブ（`app/(tabs)/settings.tsx`）から確認ダイアログ（キャンセル可能）付きで日記データを全件削除できる。実体は `utils/diary-storage.ts` の `clearAllDiaryEntries()`（個別キーと未保存の下書きキーを`multiRemove`し、念のため旧方式の単一キーも`removeItem`する）で、暗号鍵など他のキーには影響しない
 
 ### ER図
 
@@ -215,12 +215,12 @@ erDiagram
 
 ```
 app/                 画面（expo-router によるファイルベースルーティング）
-  (tabs)/            タブ画面（index.tsx: 日記画面）
+  (tabs)/            タブ画面（index.tsx: 日記画面、settings.tsx: 設定画面）
   _layout.tsx         アプリ全体のレイアウト・初期化処理
 assets/              画像などの静的アセット（アイコン・スプラッシュ画像など）
 components/          再利用可能なUIコンポーネント
 constants/           テーマなどの定数
-contexts/            アプリ全体で共有するReact Context（theme-preference-context.tsx: テーマ設定）
+contexts/            アプリ全体で共有するReact Context（app-lock-context.tsx: アプリロック、calendar-layout-preference-context.tsx: カレンダー表示レイアウト、diary-reminder-context.tsx: 日記リマインダー、theme-preference-context.tsx: テーマ設定）
 hooks/               カスタムフック
 utils/               画面から独立した純粋なユーティリティ関数（diary-encryption.ts: 日記データの暗号化・復号）
 tests/               Jest + Testing Library によるテストコード
@@ -236,7 +236,7 @@ scripts/             開発補助スクリプト（reset-project など）
 
 分割した場合は、このREADME.mdからリンクを張り、全体の入り口としての役割を維持してください。
 
-なお、ディレクトリごとの詳細な説明については、`app/`・`components/`・`assets/`・`constants/`・`hooks/`・`scripts/`・`tests/` の各ディレクトリに個別のREADME.mdを追加済みです。ルートのREADME.mdは全体像の把握と各ディレクトリREADME.mdへの導線としての役割を担います。
+なお、ディレクトリごとの詳細な説明については、`app/`・`components/`・`assets/`・`constants/`・`contexts/`・`hooks/`・`utils/`・`scripts/`・`tests/` の各ディレクトリに個別のREADME.mdを追加済みです。ルートのREADME.mdは全体像の把握と各ディレクトリREADME.mdへの導線としての役割を担います。
 
 ## AGENTS.md との関係
 
