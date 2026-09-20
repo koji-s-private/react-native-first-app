@@ -39,7 +39,7 @@ export type SettingsSection = {
   items: SettingsMenuItem[];
 };
 
-// TODO: Issue #100でプライバシーポリシー・利用規約の公開URLが確定次第、
+// TODO: プライバシーポリシー・利用規約の公開URLが確定次第、
 // 以下のプレースホルダーURLを実際のHTTPS URLに差し替える
 // (GitHub Free + privateリポジトリのためGitHub Pagesが使えず、公開URL未確定)
 const PRIVACY_POLICY_URL = 'https://example.com/legal/privacy-policy';
@@ -86,5 +86,5 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
       },
     ],
   },
-  // 将来的に通知設定(#92)のセクションをここに追加する想定
+  // 将来的に通知設定のセクションをここに追加する想定
 ];

@@ -20,7 +20,7 @@ jest.mock(
   () => require('react-native-safe-area-context/jest/mock').default,
 );
 
-describe('TabScreenContainer (Issue #125: タブ画面共通のセーフエリア対応コンテナ)', () => {
+describe('TabScreenContainer (タブ画面共通のセーフエリア対応コンテナ)', () => {
   it('renders its children', () => {
     render(
       <TabScreenContainer>

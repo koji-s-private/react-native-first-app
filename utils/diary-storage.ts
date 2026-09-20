@@ -109,7 +109,8 @@ export async function clearAllDiaryEntries(): Promise<void> {
 
 export type GetAllDiaryEntriesOptions = {
   /**
-   * 暗号鍵の取得失敗やストレージ破損など全件に影響する例外が発生した際に呼ばれる。
+   * 暗号鍵の取得失敗やストレージ全体の読み込み失敗など、全件に影響する例外が発生した際に呼ばれる。
+   * 個別エントリの破損(復号・パース・スキーマ不整合)は要素単位でスキップするだけで呼ばれない。
    * 戻り値は後方互換のため引き続き空配列にするので、「0件」と「読み込みエラー」を
    * 呼び出し元(UI)で区別したい場合にこれを使う。
    */
@@ -120,8 +121,9 @@ export type GetAllDiaryEntriesOptions = {
  * 保存済みの日記データを全件取得し、必要であれば復号して返す。一覧表示とエクスポート機能の
  * 両方が利用する共通ロジック。AsyncStorage.getAllKeys()の順序は保証されないため、
  * `createdAt`の降順(新しい順、UI側は先頭が最新という前提)に並べ替える。
- * ストレージが空・壊れている・復号失敗のいずれの場合も例外を投げず空配列を返すが、
- * 発生した例外は必ずログに残し、`options.onError`が渡されていればそちらにも通知する。
+ * 個別エントリの復号・パース失敗はそのエントリだけをスキップする。全件に影響する例外
+ * (暗号鍵の取得失敗・ストレージ読み込み失敗など)は投げずに空配列を返すが、発生した例外は
+ * 必ずログに残し、`options.onError`が渡されていればそちらにも通知する。
  */
 export async function getAllDiaryEntries(
   options?: GetAllDiaryEntriesOptions,
@@ -149,12 +151,16 @@ export async function getAllDiaryEntries(
       }
       totalCount += 1;
 
+      const isEncrypted = isEncryptedPayload(storedValue);
+      // 鍵の取得失敗は全件に影響するため、要素単位のtry/catchの外で外側のcatchへ伝播させ、
+      // 「全エントリが破損している」のではなく読み込み失敗としてonErrorに通知する
+      if (isEncrypted && !key) {
+        key = await getOrCreateEncryptionKey();
+      }
+
       try {
         let parsed: unknown;
-        if (isEncryptedPayload(storedValue)) {
-          if (!key) {
-            key = await getOrCreateEncryptionKey();
-          }
+        if (isEncrypted && key) {
           parsed = JSON.parse(decryptText(storedValue, key));
         } else {
           // 暗号化対応前に保存された平文JSON(後方互換)。そのまま読み込む

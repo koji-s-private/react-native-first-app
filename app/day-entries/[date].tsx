@@ -41,9 +41,8 @@ function sortEntriesByCreatedAt(entries: DiaryEntry[]): DiaryEntry[] {
 }
 
 // 指定した日付('YYYY-MM-DD')の日記一覧を表示する専用画面。
-// 従来はカレンダー画面(`app/(tabs)/index.tsx`)にモーダル(ドロワー)として重ねて
-// 表示していたが、削除時のフェードアウトが途中で止まる不具合の温床になっていたことに加え、
-// 編集も専用画面へ遷移させる方針に合わせ、この一覧自体も独立した画面として切り出している。
+// カレンダー画面(`app/(tabs)/index.tsx`)のモーダルではなく独立した画面にすることで、
+// 削除時のフェードアウトや編集画面への遷移を画面単位で扱えるようにしている。
 export default function DayEntriesScreen() {
   const { date } = useLocalSearchParams<{ date: string }>();
   const router = useRouter();

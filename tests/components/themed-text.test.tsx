@@ -69,7 +69,7 @@ describe('ThemedText', () => {
     expect(flattened).toMatchObject(expectedStyle);
   });
 
-  it('applies Colors.dark.link (not the light tint) as the link color in dark mode (Issue #153)', () => {
+  it('applies Colors.dark.link (not the light tint) as the link color in dark mode', () => {
     mockedUseColorScheme.mockReturnValue('dark');
 
     render(<ThemedText type="link">リンク</ThemedText>);
