@@ -6,16 +6,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Onboarding } from '@/components/onboarding';
 import { ONBOARDING_SLIDES } from '@/constants/onboarding-slides';
 
-// `useSafeAreaInsets`は`SafeAreaProvider`配下でないと投げるため、ライブラリ公式のjestモック
-// (プロバイダ無しでもゼロインセットを返す)に差し替える。
-jest.mock(
-  'react-native-safe-area-context',
-  // `jest.mock`のファクトリはモジュールのimport文より先に巻き上げられるため、
-  // 外側でimportした変数を参照できず、ファクトリ内では`require()`を使う必要がある
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  () => require('react-native-safe-area-context/jest/mock').default,
-);
-
 const INSETS = { top: 44, left: 0, right: 0, bottom: 34 };
 
 function renderWithInsets(ui: React.ReactElement) {

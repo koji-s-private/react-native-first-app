@@ -49,16 +49,6 @@ jest.mock('@/hooks/use-save-diary-entry', () => {
   };
 });
 
-// 実機では`expo-router`の`ExpoRoot`が自動的に`SafeAreaProvider`で全体をラップするが、
-// 単体レンダリングではそのラップが無く`useSafeAreaInsets`がエラーを投げるため、
-// 公式のjestモック(SafeAreaProvider無しでも既定値を返す)に差し替える(tests/app/index.test.tsxと同じ方式)。
-jest.mock(
-  'react-native-safe-area-context',
-  () =>
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require('react-native-safe-area-context/jest/mock').default,
-);
-
 // jest-expoのオートモックは`getRandomBytes`を提供しないため、Node標準の`crypto`モジュールで代替する
 // (tests/utils/diary-storage.test.tsと同じ方式。getAllDiaryEntries/deleteDiaryEntryが内部で
 // 暗号鍵の生成・取得を経由するために必要)。
@@ -247,6 +237,7 @@ describe('DayEntriesScreen', () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 60));
     });
+    jest.restoreAllMocks();
   });
 
   it('renders the entries for the given date in chronological order, excluding entries from other dates', async () => {
