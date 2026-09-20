@@ -470,6 +470,104 @@ describe('getAllDiaryEntries', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  describe('暗号鍵の取得失敗', () => {
+    const getItemAsyncMock = SecureStore.getItemAsync as jest.Mock;
+    let originalGetItemAsync: ReturnType<typeof getItemAsyncMock.getMockImplementation>;
+
+    beforeEach(() => {
+      originalGetItemAsync = getItemAsyncMock.getMockImplementation();
+    });
+
+    afterEach(() => {
+      getItemAsyncMock.mockImplementation(originalGetItemAsync);
+    });
+
+    it('notifies onError and returns an empty array when the encryption key cannot be retrieved, instead of silently skipping every entry (異常系: 鍵取得失敗は全件の読み込み失敗)', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      for (const entry of sampleEntries) {
+        await seedDiaryEntry(entry);
+      }
+      const thrown = new Error('secure store unavailable');
+      getItemAsyncMock.mockRejectedValue(thrown);
+      const onError = jest.fn();
+
+      const result = await getAllDiaryEntries({ onError });
+
+      expect(result).toEqual([]);
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(thrown);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      // 個別エントリの破損として扱わない(要素単位のスキップ警告を出さない)
+      expect(warnSpy).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    });
+
+    it('still reads plain (unencrypted) entries without touching the encryption key (境界値: 平文のみの場合は鍵を必要としない)', async () => {
+      await AsyncStorage.setItem(buildDiaryEntryKey('1'), JSON.stringify(sampleEntries[1]));
+      getItemAsyncMock.mockRejectedValue(new Error('secure store unavailable'));
+      const onError = jest.fn();
+
+      const result = await getAllDiaryEntries({ onError });
+
+      expect(result).toEqual([sampleEntries[1]]);
+      expect(onError).not.toHaveBeenCalled();
+      expect(getItemAsyncMock).not.toHaveBeenCalled();
+    });
+
+    it('treats a key retrieval failure as a whole-load failure even when plain and encrypted entries are mixed, rather than returning a partial list (境界値: 暗号化と平文の混在)', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      await AsyncStorage.setItem(buildDiaryEntryKey('1'), JSON.stringify(sampleEntries[1]));
+      await seedDiaryEntry(sampleEntries[0]);
+      getItemAsyncMock.mockRejectedValue(new Error('secure store unavailable'));
+      const onError = jest.fn();
+
+      const result = await getAllDiaryEntries({ onError });
+
+      expect(result).toEqual([]);
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('recovers on the next call when the key retrieval failure was only transient (境界値: 鍵取得失敗が1回だけ)', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      for (const entry of sampleEntries) {
+        await seedDiaryEntry(entry);
+      }
+      getItemAsyncMock.mockRejectedValueOnce(new Error('secure store unavailable'));
+      const onError = jest.fn();
+
+      const first = await getAllDiaryEntries({ onError });
+      const second = await getAllDiaryEntries({ onError });
+
+      expect(first).toEqual([]);
+      expect(second).toEqual(sampleEntries);
+      expect(onError).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns an empty array without throwing when the key cannot be retrieved and onError is omitted (異常系: onError省略)', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      await seedDiaryEntry(sampleEntries[0]);
+      getItemAsyncMock.mockRejectedValue(new Error('secure store unavailable'));
+
+      await expect(getAllDiaryEntries()).resolves.toEqual([]);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not access or generate the encryption key when nothing has been saved yet (境界値: 新規端末の初回読み込み)', async () => {
+      const onError = jest.fn();
+
+      const result = await getAllDiaryEntries({ onError });
+
+      expect(result).toEqual([]);
+      expect(onError).not.toHaveBeenCalled();
+      expect(getItemAsyncMock).not.toHaveBeenCalled();
+      expect(SecureStore.setItemAsync).not.toHaveBeenCalled();
+    });
+  });
+
   describe('レガシーキーからの移行(マイグレーション)', () => {
     it('migrates entries from the legacy single-key (encrypted) storage into per-entry keys (正常系)', async () => {
       const key = await getOrCreateEncryptionKey();

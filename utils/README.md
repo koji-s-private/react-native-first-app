@@ -13,7 +13,7 @@ utils/
   diary-export.ts                 日記データをJSONとしてエクスポートするためのファイル名生成・シリアライズ
   diary-import.ts                 JSONファイルから日記データをインポートするためのパース・検証
   diary-reminder-notifications.ts 日記リマインダー(毎日決まった時刻のローカル通知)の許可状態取得・スケジュール
-  diary-storage.ts                日記データのAsyncStorageキー定義、および全件削除
+  diary-storage.ts                日記データ(DiaryEntry型)のAsyncStorageキー定義、暗号化した保存・取得・削除
   diary-text.ts                   日記本文の文字数上限と、書記素クラスタ単位での切り詰め
   onboarding-storage.ts           オンボーディング表示済みフラグのAsyncStorageキー定義、および読み書き
 ```
@@ -50,7 +50,7 @@ utils/
 - `isDraftStorageKey(key)`: キーが下書き系(完全一致または接頭辞一致)かを判定します。`clearAllDiaryEntries()`が全件削除の対象キーを漏れなく拾うために使います。
 - `saveDraftText(key, text)` / `loadDraftText(key)`: 下書き本文を暗号化して保存・復号して復元します。暗号化対応前に保存された平文の下書きも読み込めます(後方互換)。保存が無い場合、`loadDraftText`は`null`を返します。
 
-[`app/(tabs)/index.tsx`](<../app/(tabs)/index.tsx>)、[`app/day-entries/[date].tsx`](<../app/day-entries/[date].tsx>)、[`app/edit-entry/[id].tsx`](<../app/edit-entry/[id].tsx>)から利用されます。
+`saveDraftText` / `loadDraftText`は[`app/(tabs)/index.tsx`](<../app/(tabs)/index.tsx>)、[`app/edit-entry/[id].tsx`](<../app/edit-entry/[id].tsx>)、[`components/diary-entry-composer-modal.tsx`](../components/diary-entry-composer-modal.tsx)から利用されます。[`app/day-entries/[date].tsx`](<../app/day-entries/[date].tsx>)は下書きキー接頭辞の定数(`DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX`)を参照して新規作成モーダルへ渡すのみで、保存・復元はモーダル側が行います。`isDraftStorageKey`は[`utils/diary-storage.ts`](diary-storage.ts)の`clearAllDiaryEntries()`が利用します。
 
 ## `diary-encryption.ts` の構成
 
@@ -60,7 +60,7 @@ utils/
 - `encryptText(plainText, key)` / `decryptText(encoded, key)`: 実際の暗号化・復号を行う純粋関数です。外部I/Oを持たないため、鍵を直接渡してユニットテストできます。対称鍵暗号化そのものは依存が無く監査実績のある純粋JS実装のAES-GCMライブラリ[`@noble/ciphers`](https://github.com/paulmillr/noble-ciphers)で行います(`expo-crypto`はハッシュ・乱数生成用のAPIのみでAES実装は提供していないため)。
 - `isEncryptedPayload(value)`: 保存されている文字列が既に暗号化済みの形式(`'encrypted:v1:'`始まり)かどうかを判定します。暗号化対応前に保存された平文JSONとの後方互換マイグレーションに使います。
 
-利用箇所は [`app/(tabs)/index.tsx`](../app/(tabs)/index.tsx) です。日記データの保存フォーマットの詳細はルートの [README.md](../README.md#日記エントリdiaryentry) を参照してください。
+利用箇所は [`utils/diary-storage.ts`](diary-storage.ts)(日記エントリの保存・復号)と [`utils/diary-draft-storage.ts`](diary-draft-storage.ts)(下書きの保存・復号)です。画面・コンポーネントはこれらのストレージ用ユーティリティを介して利用し、このファイルを直接は参照しません。日記データの保存フォーマットの詳細はルートの [README.md](../README.md#日記エントリdiaryentry) を参照してください。
 
 ## `diary-export.ts` の構成
 
@@ -89,13 +89,18 @@ JSONファイルから日記データをインポート(再取り込み)する�
 
 ## `diary-storage.ts` の構成
 
-日記データのAsyncStorageキーを`app/(tabs)/index.tsx`(保存・読み込み)と設定画面(全件削除・エクスポート)で共有するためのユーティリティです。エントリ1件ごとに個別のAsyncStorageキー(`diary-entry:<id>`)へ保存する方式を採用しており、1件の保存/削除の書き込みコストがエントリ総数に依存しない(O(1))ようにしています。
+日記データ(`DiaryEntry`)のAsyncStorageへの保存・取得・削除と、そのキー定義をまとめたユーティリティです。ホーム画面・日別一覧画面・編集画面・設定画面(全件削除・エクスポート・インポート)で共有します。エントリ1件ごとに個別のAsyncStorageキー(`diary-entry:<id>`)へ暗号化して保存する方式を採用しており、1件の保存/削除の書き込みコストがエントリ総数に依存しない(O(1))ようにしています。
 
+- `DiaryEntry`: 日記1件分のデータ構造の型(`id` / `text` / `createdAt`)です。一覧表示・エクスポート・インポートで共有します。
+- `isDiaryEntry(value)`: 値が`DiaryEntry`として妥当な形かを判定する型ガードです。AsyncStorageから読み込んだJSONは実行時に型が保証されないため、`as`で決め打ちせずここで検証します。[`diary-import.ts`](diary-import.ts)のインポート時の検証でも再利用します。
 - `DIARY_ENTRIES_STORAGE_KEY`: 旧方式(全件を1つの配列としてまとめて保存する単一キー)のAsyncStorageキーの定数。現在は移行(マイグレーション)元としてのみ参照されます。
 - `DIARY_ENTRY_KEY_PREFIX` / `buildDiaryEntryKey(id)`: エントリ単位の個別キー(`diary-entry:<id>`)のプレフィックスと、idからキー文字列を組み立てる関数です。
-- `getAllDiaryEntries()`: 保存済みの日記データを全件取得します。呼び出しの冒頭で`DIARY_ENTRIES_STORAGE_KEY`にレガシーデータが残っていないか確認し、残っていれば個別キー方式へ自動移行してから読み込みます(移行は複数回呼ばれても安全)。`createdAt`の降順(新しい順)にソートして返します。
+- `getAllDiaryEntries(options?)`: 保存済みの日記データを全件取得します。呼び出しの冒頭で`DIARY_ENTRIES_STORAGE_KEY`にレガシーデータが残っていないか確認し、残っていれば個別キー方式へ自動移行してから読み込みます(移行は複数回呼ばれても安全)。`createdAt`の降順(新しい順)にソートして返します。復号・パースに失敗した要素はその1件だけをスキップします。暗号鍵の取得失敗・レガシーデータの移行失敗・ストレージ全体の読み込み失敗など全件に影響する例外の場合は、例外を投げず空配列を返します。「0件」と「読み込みエラー」を呼び出し側で区別したい場合は、`options.onError`(`GetAllDiaryEntriesOptions`)に渡したコールバックが、後者の例外発生時に呼ばれます。
+- `getDiaryEntryById(id)`: idを指定して日記エントリ1件だけを取得します。全件取得の`getAllDiaryEntries`を使わずO(1)で取得できるため、編集画面が利用します。見つからない場合・復号に失敗した場合は`null`を返します。
 - `saveDiaryEntry(entry)` / `deleteDiaryEntry(id)`: エントリ1件を、対応する個別キーに対してのみ保存・削除します。
-- `clearAllDiaryEntries()`: 日記データ(個別キー方式のエントリ、および念のためレガシーキー)のみをAsyncStorageから削除します。暗号鍵(`expo-secure-store`側)など日記データ以外のキーには影響しません。ストアのデータ削除要件(Google Play/Apple双方でユーザーによるデータ削除手段の提供が求められる)に対応するため、[`app/(tabs)/settings.tsx`](<../app/(tabs)/settings.tsx>)の確認ダイアログ付きボタンから呼び出されます。
+- `clearAllDiaryEntries()`: 日記データ(個別キー方式のエントリ、未保存の下書き(`diary-draft-storage.ts`の`isDraftStorageKey`に該当するキー)、および念のためレガシーキー)のみをAsyncStorageから削除します。暗号鍵(`expo-secure-store`側)など日記データ以外のキーには影響しません。ストアのデータ削除要件(Google Play/Apple双方でユーザーによるデータ削除手段の提供が求められる)に対応するため、[`app/(tabs)/settings.tsx`](<../app/(tabs)/settings.tsx>)の確認ダイアログ付きボタンから呼び出されます。
+
+利用箇所は[`app/(tabs)/index.tsx`](<../app/(tabs)/index.tsx>)(保存・全件取得)、[`app/day-entries/[date].tsx`](<../app/day-entries/[date].tsx>)(全件取得・保存・削除)、[`app/edit-entry/[id].tsx`](<../app/edit-entry/[id].tsx>)(1件取得・保存)、[`app/(tabs)/settings.tsx`](<../app/(tabs)/settings.tsx>)(全件取得・保存・全件削除)です。`DiaryEntry`型・`isDiaryEntry`は[`diary-export.ts`](diary-export.ts)・[`diary-import.ts`](diary-import.ts)からも参照されます。
 
 ## `diary-text.ts` の構成
 
@@ -105,7 +110,7 @@ JSONファイルから日記データをインポート(再取り込み)する�
 - `splitIntoGraphemes(text)`: 文字列を「見た目上の1文字」(書記素クラスタ)単位の配列に分割します。ZWJ結合絵文字やサロゲートペアを途中で分断しないよう、`Intl.Segmenter`が使える環境ではそれを使い、未実装の環境では`Array.from()`にフォールバックします。
 - `truncateToBodyMaxLength(text)`: `BODY_MAX_LENGTH`を超えないよう、書記素クラスタ単位で切り詰めます。`TextInput`の`maxLength`はUTF-16コードユニット単位でしか制限できないため、`onChangeText`側でこの関数を使います。
 
-[`app/(tabs)/index.tsx`](<../app/(tabs)/index.tsx>)、[`app/edit-entry/[id].tsx`](<../app/edit-entry/[id].tsx>)、[`components/diary-entry-composer-modal.tsx`](../components/diary-entry-composer-modal.tsx)、[`hooks/use-save-diary-entry.ts`](../hooks/use-save-diary-entry.ts)から利用されます。
+[`app/(tabs)/index.tsx`](<../app/(tabs)/index.tsx>)、[`app/edit-entry/[id].tsx`](<../app/edit-entry/[id].tsx>)、[`components/diary-entry-composer-modal.tsx`](../components/diary-entry-composer-modal.tsx)、[`hooks/use-save-diary-entry.ts`](../hooks/use-save-diary-entry.ts)、[`utils/diary-import.ts`](diary-import.ts)(インポート時の本文長の検証)から利用されます。
 
 ## `onboarding-storage.ts` の構成
 

@@ -6,11 +6,11 @@
 
 ```
 hooks/
-  use-color-scheme.ts        端末のカラースキーム（ライト/ダーク）を取得するフック
-  use-color-scheme.web.ts     ↑のWeb向け実装（静的レンダリング対応）
-  use-theme-color.ts          カラースキームに応じたテーマカラーを取得するフック
+  use-color-scheme.ts            端末のカラースキーム（ライト/ダーク）を取得するフック
+  use-color-scheme.web.ts        ↑のWeb向け実装（静的レンダリング対応）
+  use-theme-color.ts             カラースキームに応じたテーマカラーを取得するフック
   use-modal-slide-transition.ts  背景オーバーレイのフェード・コンテンツのスライドインを制御するモーダル用アニメーションフック
-  use-save-diary-entry.ts     日記保存処理（バリデーション・保存中フラグ・エラーハンドリング）を共通化するフック
+  use-save-diary-entry.ts        日記保存処理（バリデーション・保存中フラグ・エラーハンドリング）を共通化するフック
 ```
 
 ## 各フックの役割
