@@ -5784,7 +5784,7 @@ describe('HomeScreen', () => {
         expect(getWeekCreateButton(TODAY_DATE_KEY)).toBeTruthy();
       });
 
-      it('keeps moving the focus, not opening the modal, when a day header is pressed (回帰: 日付ヘッダーの既存操作)', async () => {
+      it('keeps moving the focus, not opening the modal, when a day header is pressed (日付ヘッダーの操作は新規作成ボタンと独立している)', async () => {
         await renderInWeekLayoutAfterLoad();
 
         fireEvent.press(
