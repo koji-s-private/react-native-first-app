@@ -7,36 +7,30 @@ import { ThemedView } from '@/components/themed-view';
 import type { AppLockAuthenticationResult } from '@/contexts/app-lock-context';
 import { useThemeColor } from '@/hooks/use-theme-color';
 
-// 認証失敗が続いた場合にフォールバック案内を表示するまでの連続失敗回数。
-// 生体認証の一時的な読み取りミス程度ではノイズにならないよう、複数回失敗した場合にのみ表示する
+// 生体認証の一時的な読み取りミスではノイズにならないよう、フォールバック案内は
+// 複数回連続で失敗した場合にのみ表示する
 const CONSECUTIVE_FAILURE_GUIDANCE_THRESHOLD = 3;
 
 const CONTENT_PADDING = 24;
 
 type AppLockScreenProps = {
-  // ロック画面を表示するかどうか(アプリロックがONで、かつ未認証の間はtrue)
   visible: boolean;
-  // この端末で生体認証・パスコードのいずれかが利用可能か。falseの場合は
-  // authenticateAsyncを呼んでも常に失敗するため、認証ボタンの代わりにアプリロックをOFFにする
-  // 脱出導線を表示する(ONにした後で端末側の認証手段が全て削除されるケースの対策)
+  // 端末で生体認証・パスコードのいずれも利用できない場合、認証ボタンの代わりに
+  // アプリロックをOFFにする脱出導線を表示する
   isSupported: boolean;
-  // 生体認証(またはOS標準パスコード)を実行する。呼び出し側(contexts/app-lock-context.tsx)が
-  // 成功時にvisible=falseへ戻す。連続失敗回数の判定に使うため、結果をPromiseで返す。
-  // 'skipped'は多重呼び出しガードにより実際には認証を試みなかったことを表し、
-  // 実際の認証失敗('failure')と区別する
+  // 連続失敗回数の判定に使うため結果をPromiseで返す。'skipped'は多重呼び出しガードにより
+  // 実際には認証を試みなかったことを表し、実際の失敗('failure')と区別する
   onAuthenticate: () => Promise<AppLockAuthenticationResult>;
-  // 認証手段を失った状態から抜け出すための脱出導線。contexts/app-lock-context.tsxの
-  // setEnabled(false)を呼び出し、アプリロックをOFFにすることを想定している
+  // 認証手段を失った状態から抜け出すための脱出導線(呼び出し側でアプリロックをOFFにする)
   onDisableAppLock: () => void;
 };
 
 /**
  * アプリ起動時・バックグラウンドから復帰した際に表示するロック画面。
- * `components/onboarding.tsx`と同様、常にマウントしたまま`visible`propで表示/非表示を
- * 切り替えるModalとして実装し、認証成功までカレンダー・日記本文などのコンテンツを完全に覆い隠す。
- * 自動での認証プロンプト起動は呼び出し側(contexts/app-lock-context.tsx)が「起動時に既に
- * ロック済みだった場合」「バックグラウンドから復帰(active)した場合」にのみ行う。
- * このコンポーネント自体は表示と手動での再試行ボタンの提供に専念する。
+ * 常にマウントしたまま`visible`propで表示/非表示を切り替えるModalとして実装し、
+ * 認証成功までコンテンツを完全に覆い隠す。自動での認証プロンプト起動は
+ * 呼び出し側(contexts/app-lock-context.tsx)が行い、このコンポーネントは
+ * 表示と手動での再試行ボタンの提供に専念する。
  */
 export function AppLockScreen({
   visible,
@@ -50,8 +44,7 @@ export function AppLockScreen({
   // translucentなModalはシステムバーの背後まで描画されるため、Modalの外側で取得したインセットを加算する
   const insets = useSafeAreaInsets();
   const [consecutiveFailureCount, setConsecutiveFailureCount] = useState(0);
-  // 生体認証プロンプトの表示にはわずかな遅延があるため、完了を待たずにボタンを連打できてしまう。
-  // 実行中はボタンをdisabledにして連打自体を防ぐ
+  // 認証プロンプトの表示には遅延があり連打できてしまうため、実行中はボタンをdisabledにする
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   // 表示される(=バックグラウンドから復帰する)たびに、前回の失敗回数を持ち越さない
@@ -65,8 +58,6 @@ export function AppLockScreen({
     setIsAuthenticating(true);
     try {
       const result = await onAuthenticate();
-      // 'skipped'は多重呼び出しガードにより実際には認証を試みていないため、
-      // 実際の失敗('failure')のみを連続失敗回数に加算する
       if (result === 'failure') {
         setConsecutiveFailureCount((count) => count + 1);
       }
@@ -110,7 +101,6 @@ export function AppLockScreen({
             style={[
               styles.button,
               { backgroundColor: tintColor },
-              // 押せない状態であることが見た目でも分かるよう、無効時は半透明にする
               { opacity: isAuthenticating ? 0.5 : 1 },
             ]}
             onPress={handleAuthenticate}
