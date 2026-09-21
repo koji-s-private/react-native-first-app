@@ -25,11 +25,10 @@ import {
   type DiaryEntry,
 } from '@/utils/diary-storage';
 
-// コピー成功時に一時的に表示するトーストのメッセージ
 const COPY_SUCCESS_MESSAGE = 'コピーしました';
 const EMPTY_STATE_MESSAGE = 'この日の日記はまだありません';
 const DELETE_UNDO_DELAY_MS = 5000;
-// 全件読み込みに失敗した場合に、「その日は日記が無い」と区別して表示するメッセージ
+// 「日記が無い」(EMPTY_STATE_MESSAGE)と読み込み失敗を区別して表示するためのメッセージ
 const LOAD_ERROR_MESSAGE =
   '日記データを読み込めませんでした。アプリを再起動しても解決しない場合は端末の復元設定をご確認ください。';
 
@@ -41,8 +40,8 @@ function sortEntriesByCreatedAt(entries: DiaryEntry[]): DiaryEntry[] {
 }
 
 // 指定した日付('YYYY-MM-DD')の日記一覧を表示する専用画面。
-// カレンダー画面(`app/(tabs)/index.tsx`)のモーダルではなく独立した画面にすることで、
-// 削除時のフェードアウトや編集画面への遷移を画面単位で扱えるようにしている。
+// カレンダー画面のモーダルではなく独立した画面にすることで、削除時のフェードアウトや
+// 編集画面への遷移を画面単位で扱えるようにしている。
 export default function DayEntriesScreen() {
   const { date } = useLocalSearchParams<{ date: string }>();
   const router = useRouter();
@@ -50,7 +49,6 @@ export default function DayEntriesScreen() {
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
   const [hasLoadedEntries, setHasLoadedEntries] = useState(false);
   const [hasLoadError, setHasLoadError] = useState(false);
-  // コピー成功時に一時的に表示するトーストのメッセージ。nullの間は非表示
   const [copyToastMessage, setCopyToastMessage] = useState<string | null>(null);
   const [pendingDeletedEntries, setPendingDeletedEntries] = useState<DiaryEntry[]>([]);
   const [isRestoringDeletedEntries, setIsRestoringDeletedEntries] = useState(false);
@@ -62,14 +60,12 @@ export default function DayEntriesScreen() {
   const activeDateRef = useRef(date);
   const previousDateRef = useRef(date);
   activeDateRef.current = date;
-  // この日の新規作成モーダルを開いているか
   const [isComposerOpen, setIsComposerOpen] = useState(false);
 
   const tintColor = useThemeColor({}, 'tint');
   const iconColor = useThemeColor({}, 'icon');
   const errorColor = useThemeColor({}, 'error');
-  // このスタック画面はタブバーを持たないため、セーフエリア下端(ホームインジケータ等)ぶんのみ
-  // モーダルコンテンツの下端に加算すればよい(タブバー分の加算はapp/(tabs)/index.tsx側のみ必要)
+  // この画面はタブバーを持たないため、セーフエリア下端ぶんのみモーダルコンテンツの下端に加算する
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
@@ -92,9 +88,8 @@ export default function DayEntriesScreen() {
     setIsComposerOpen(true);
   }, []);
 
-  // ヘッダーのタイトルを対象日付の見出し('YYYY年M月D日')にし、右側に新規作成ボタンを配置する。
-  // カレンダー画面側の`_layout.tsx`にはルートごとの静的なタイトルしか設定できないため、
-  // paramsに応じた動的なタイトル・アクションはここでnavigation.setOptionsを使って設定する
+  // ルートごとの静的なタイトルしか設定できない`_layout.tsx`側の代わりに、
+  // paramsに応じた動的なタイトル・ヘッダーボタンをここで設定する
   useEffect(() => {
     navigation.setOptions({
       title: date ? formatDateHeading(date) : '',
@@ -156,8 +151,7 @@ export default function DayEntriesScreen() {
         text: trimmed,
         createdAt: buildCreatedAtForDateKeyAtTime(date),
       };
-      // 体感速度を落とさないよう、即座に現在のstateから計算した内容で楽観的にUIを更新する
-      // (この画面の一覧は時刻の昇順のため、末尾に追加する)
+      // 体感速度を落とさないよう楽観的にUIを更新する(一覧は時刻昇順のため末尾に追加)
       setEntries((current) => [...current, newEntry]);
       try {
         await saveDiaryEntry(newEntry);
@@ -345,7 +339,6 @@ export default function DayEntriesScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={renderEmptyEntries}
-        // 一覧をスクロールした際にもキーボードを閉じられるようにする(他画面のFlatListと同じ方針)
         keyboardDismissMode="on-drag"
         renderItem={({ item }) => (
           <ThemedView style={[styles.entry, { borderBottomColor: iconColor }]}>
