@@ -25,11 +25,6 @@ const MAPPING = {
   plus: 'add',
 } as IconMapping;
 
-/**
- * iOSではネイティブのSF Symbolsを、AndroidとWebではMaterial Iconsを使うアイコンコンポーネント。
- * これによりプラットフォーム間で見た目の一貫性を保ちつつ、最適なリソース使用を実現する。
- * アイコンの`name`はSF Symbolsに基づいており、Material Iconsへの手動マッピングが必要。
- */
 export function IconSymbol({
   name,
   size = 24,

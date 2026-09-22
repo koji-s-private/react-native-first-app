@@ -3,8 +3,7 @@ import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 
-// トースト(スナックバー)を表示したままにする時間(ミリ秒)。
-// この時間が経過すると`onHide`を呼び出して自動的に非表示にする。
+// 自動非表示までの表示時間(ミリ秒)
 const AUTO_HIDE_DELAY_MS = 2500;
 
 export type SaveToastProps = {
@@ -16,11 +15,8 @@ export type SaveToastProps = {
   autoHideDelayMs?: number | null;
 };
 
-// 保存成功時などに一時的なフィードバックを表示する軽量なトースト(スナックバー)。
-// 表示から一定時間で自動的に非表示にし、`accessibilityLiveRegion="polite"`によって
-// スクリーンリーダー利用者にも状態変化(保存が完了したこと)が伝わるようにする。
-// `testID`は既定値"save-toast"だが、同一画面内でこのコンポーネントを複数箇所(保存用・
-// コピー用など)で使う場合に理論上同時マウントされ得るため、呼び出し側で個別に指定できる。
+// 保存成功時などのフィードバックを表示する自動非表示トースト。
+// 同一画面内で複数マウントされる場合に備え、testIDを呼び出し側で指定できるようにしている。
 export function SaveToast({
   message,
   onHide,
@@ -35,15 +31,11 @@ export function SaveToast({
     }
     const timer = setTimeout(onHide, autoHideDelayMs);
     return () => clearTimeout(timer);
-    // messageが変わる(=新しいトーストが表示される)たびにタイマーを張り直す
   }, [message, onHide, autoHideDelayMs]);
 
   useEffect(() => {
-    // `accessibilityLiveRegion="polite"`はAndroid専用のpropであり、iOS(VoiceOver)には
-    // 効果がない。iOSでも保存成功などの状態変化を確実に読み上げさせるため、
-    // 表示のたびに`AccessibilityInfo.announceForAccessibility`を明示的に呼び出す。
-    // (このAPIはAndroidでも動作するが、Android側は既存の`accessibilityLiveRegion`に任せ、
-    // 既存のHapticsの実装パターン(`process.env.EXPO_OS === 'ios'`)に合わせてiOS限定で呼ぶ)
+    // accessibilityLiveRegionはAndroid専用でiOS(VoiceOver)には効果がないため、
+    // iOSでは代わりにannounceForAccessibilityを明示的に呼んで読み上げさせる
     if (process.env.EXPO_OS === 'ios') {
       AccessibilityInfo.announceForAccessibility(message);
     }
