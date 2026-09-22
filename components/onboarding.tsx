@@ -11,23 +11,18 @@ const CONTENT_PADDING = 24;
 const HEADER_TOP_OFFSET = 16;
 
 type OnboardingProps = {
-  // オンボーディングを表示するかどうか(初回起動判定が完了するまではfalseにしておく想定)
   visible: boolean;
-  // 「スキップ」を押した、または最後のスライドで「はじめる」を押したときに呼ばれる。
-  // 呼び出し側でAsyncStorageへの完了フラグの保存とvisible=falseへの更新を行う。
+  // スキップ、または最後のスライドで「はじめる」を押したときに呼ばれる。完了フラグの保存は呼び出し側が行う
   onFinish: () => void;
 };
 
 /**
- * アプリ初回起動時にのみ表示する、使い方説明のオンボーディング画面。
- * 日記の記録・カレンダー・検索・設定(リマインダー/アプリロック/データ管理)の主要機能を1画面ずつ紹介する。
- * 2回目以降の起動でスキップされるかどうかの判定・フラグ保存は呼び出し側(app/_layout.tsx)が行い、
- * このコンポーネント自体はvisible/onFinishのpropsだけを見る単純な表示コンポーネントにしている。
+ * アプリ初回起動時にのみ表示するオンボーディング画面。
+ * 完了判定・フラグ保存は呼び出し側(app/_layout.tsx)が行い、本コンポーネントはvisible/onFinishのみを扱う。
  */
 export function Onboarding({ visible, onFinish }: OnboardingProps) {
   const [stepIndex, setStepIndex] = useState(0);
-  // Modalの外側(このコンポーネント直下)で取得することで、Modal内のネイティブ計測に依存せず
-  // 画面全体のインセットを使える。translucentなModalはシステムバーの背後まで描画されるため加算が必要
+  // translucentなModalはシステムバーの背後まで描画されるため、Modal外でinsetsを取得して加算する
   const insets = useSafeAreaInsets();
   const tintColor = useThemeColor({}, 'tint');
   const iconColor = useThemeColor({}, 'icon');
@@ -52,8 +47,7 @@ export function Onboarding({ visible, onFinish }: OnboardingProps) {
     setStepIndex(index);
   }, []);
 
-  // モーダルが閉じてから次に表示される時(基本的には起こらないが念のため)に、
-  // 前回の続きのスライドから始まらないようリセットする
+  // 再表示時に前回の続きのスライドから始まらないようリセットする
   const handleDismiss = useCallback(() => {
     setStepIndex(0);
   }, []);
