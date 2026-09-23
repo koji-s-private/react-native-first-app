@@ -964,9 +964,18 @@ export default function HomeScreen() {
                 accessibilityLabel="保存"
                 accessibilityState={{ disabled: !draft.trim() || isSaving }}
               >
-                <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
-                  保存
-                </ThemedText>
+                {isSaving ? (
+                  <View style={styles.saveButtonContent}>
+                    <ActivityIndicator size="small" color={backgroundColor} />
+                    <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
+                      保存中...
+                    </ThemedText>
+                  </View>
+                ) : (
+                  <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
+                    保存
+                  </ThemedText>
+                )}
               </Pressable>
             </View>
             {saveError ? (
@@ -1377,6 +1386,11 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     fontWeight: '600',
+  },
+  saveButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   errorText: {
     fontSize: 14,

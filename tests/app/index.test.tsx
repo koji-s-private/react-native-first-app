@@ -959,6 +959,37 @@ describe('HomeScreen', () => {
       await waitFor(() => expect(StyleSheet.flatten(saveButton?.props.style).opacity).toBe(1));
     });
 
+    it('shows a spinner and "保存中..." label on the inline composer save button while a save is in flight, and reverts to "保存" if it fails', async () => {
+      let rejectSetItem: (error: Error) => void = () => {};
+      jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectSetItem = reject;
+          }),
+      );
+
+      render(<HomeScreen />);
+      await waitForInitialLoad();
+
+      fireEvent.changeText(
+        screen.getByPlaceholderText(INPUT_PLACEHOLDER),
+        '保存中表示を確認する日記',
+      );
+      fireEvent.press(screen.getByRole('button', { name: '保存' }));
+      await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+      expect(screen.getByText('保存中...')).toBeTruthy();
+      expect(screen.queryByText('保存')).toBeNull();
+
+      await act(async () => {
+        rejectSetItem(new Error('write failed'));
+      });
+
+      await screen.findByText('保存に失敗しました。もう一度お試しください。');
+      expect(screen.getByText('保存')).toBeTruthy();
+      expect(screen.queryByText('保存中...')).toBeNull();
+    });
+
     it('restores previously saved plaintext entries (from before encryption was introduced) from AsyncStorage, showing a count badge, and navigates to the day-entries screen for that date when tapped', async () => {
       // pickTestDaysが選ぶ10〜20日はreact-native-calendars側のmaxDate判定(実行時点の
       // 「今日」より後の日付はhasEntriesの有無に関わらずonDayPress自体が発火しない)の対象に
@@ -1328,15 +1359,16 @@ describe('HomeScreen', () => {
       await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
-      const saveButton = screen.getByText('保存');
 
       fireEvent.changeText(input, '連打される日記');
-      fireEvent.press(saveButton);
+      fireEvent.press(screen.getByText('保存'));
       await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
 
-      // 1回目の保存(AsyncStorage.setItem)がまだpendingの間に、続けて保存ボタンを連打する
-      fireEvent.press(saveButton);
-      fireEvent.press(saveButton);
+      // 1回目の保存(AsyncStorage.setItem)がまだpendingの間は「保存中...」表示になり、
+      // 保存ボタンを連打する対象自体が「保存」ラベルの要素では見つからなくなる
+      expect(screen.queryByText('保存')).toBeNull();
+      fireEvent.press(screen.getByText('保存中...'));
+      fireEvent.press(screen.getByText('保存中...'));
 
       // pending中の連打はガードされ、AsyncStorage.setItemは追加で呼ばれない
       expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
@@ -1352,7 +1384,7 @@ describe('HomeScreen', () => {
 
       // pending解消後は再度保存できる(実行中フラグが正しく戻っている)
       fireEvent.changeText(input, '次の日記');
-      fireEvent.press(saveButton);
+      fireEvent.press(await screen.findByText('保存'));
       await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(2));
     });
 
@@ -1368,18 +1400,17 @@ describe('HomeScreen', () => {
       await waitForInitialLoad();
 
       const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
-      const saveButton = screen.getByText('保存');
 
       fireEvent.changeText(input, '1件目');
-      fireEvent.press(saveButton);
+      fireEvent.press(screen.getByText('保存'));
       await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
 
       fireEvent.changeText(input, '2件目');
-      fireEvent.press(saveButton);
+      fireEvent.press(await screen.findByText('保存'));
       await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(2));
 
       fireEvent.changeText(input, '3件目');
-      fireEvent.press(saveButton);
+      fireEvent.press(await screen.findByText('保存'));
       await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(3));
 
       expect(mockRandomUUID).toHaveBeenCalledTimes(3);
