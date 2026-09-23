@@ -9,6 +9,7 @@ import {
   Pressable,
   StyleSheet,
   TextInput,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -297,9 +298,18 @@ export default function EditEntryScreen() {
             accessibilityLabel="保存"
             accessibilityState={{ disabled: !editDraft.trim() || isSavingEdit }}
           >
-            <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
-              保存
-            </ThemedText>
+            {isSavingEdit ? (
+              <View style={styles.saveButtonContent}>
+                <ActivityIndicator size="small" color={backgroundColor} />
+                <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
+                  保存中...
+                </ThemedText>
+              </View>
+            ) : (
+              <ThemedText style={[styles.saveButtonText, { color: backgroundColor }]}>
+                保存
+              </ThemedText>
+            )}
           </Pressable>
         </ThemedView>
         {editError ? (
@@ -352,6 +362,11 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     fontWeight: '600',
+  },
+  saveButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   errorText: {
     fontSize: 14,

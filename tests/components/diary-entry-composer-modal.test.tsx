@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { StrictMode, useState } from 'react';
-import { Alert, Modal, Pressable } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable } from 'react-native';
 
 import { DiaryEntryComposerModal } from '@/components/diary-entry-composer-modal';
 import { type SaveDiaryEntryOptions, useSaveDiaryEntry } from '@/hooks/use-save-diary-entry';
@@ -121,6 +121,25 @@ describe('DiaryEntryComposerModal', () => {
     });
 
     expect(screen.getByLabelText('日記本文').props.value).toBe('読み込み中に入力した本文');
+  });
+
+  it('shows a spinner and changes the save button label while saving is in progress', async () => {
+    useSaveDiaryEntryMock.mockReturnValue({
+      isSaving: true,
+      error: null,
+      setError: setErrorMock,
+      save: saveEntryMock,
+    });
+
+    render(<DiaryEntryComposerModal {...defaultProps} />);
+    await waitFor(() => expect(loadDraftTextMock).toHaveBeenCalled());
+
+    expect(screen.getByText('保存中...')).toBeTruthy();
+    expect(screen.queryByText('保存')).toBeNull();
+    expect(screen.UNSAFE_getByType(ActivityIndicator)).toBeTruthy();
+    expect(screen.getByRole('button', { name: '保存' }).props.accessibilityState).toEqual({
+      disabled: true,
+    });
   });
 
   it('passes a mounted ref to the save flow after StrictMode replays effects', async () => {

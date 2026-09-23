@@ -522,6 +522,7 @@ describe('EditEntryScreen', () => {
         await screen.findByTestId('save-toast');
         const saveButton = screen.getByRole('button', { name: '保存' });
         expect(saveButton.props.accessibilityState).toEqual({ disabled: true });
+        expect(screen.getByText('保存中...')).toBeTruthy();
 
         fireEvent.press(saveButton);
         fireEvent.press(saveButton);
@@ -783,6 +784,38 @@ describe('EditEntryScreen', () => {
     });
     await advancePastNavigateBackDelay();
     expect(mockBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a spinner and "保存中..." label while a save is in flight, and reverts to "保存" if it fails', async () => {
+    await seedDiaryEntry({
+      id: ENTRY_ID,
+      text: '編集前の日記',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    let rejectSetItem: (error: Error) => void = () => {};
+    jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectSetItem = reject;
+        }),
+    );
+
+    render(<EditEntryScreen />);
+    const input = await screen.findByDisplayValue('編集前の日記');
+    fireEvent.changeText(input, '保存中表示を確認する編集');
+    fireEvent.press(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1));
+
+    expect(screen.getByText('保存中...')).toBeTruthy();
+    expect(screen.queryByText('保存')).toBeNull();
+
+    await act(async () => {
+      rejectSetItem(new Error('write failed'));
+    });
+
+    await screen.findByText('更新に失敗しました。もう一度お試しください。');
+    expect(screen.getByText('保存')).toBeTruthy();
+    expect(screen.queryByText('保存中...')).toBeNull();
   });
 
   describe('インポート等で紛れ込んだ本文上限超過データを開いた場合の自動切り詰め', () => {
