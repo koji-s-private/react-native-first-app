@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ExternalLink } from '@/components/external-link';
+import { SegmentedOptionSelector } from '@/components/segmented-option-selector';
 import { TabScreenContainer } from '@/components/tab-screen-container';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -51,43 +52,17 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
 // OSの設定に関わらずアプリ内だけで見た目を固定したい、というニーズに対応する。
 function AppearanceSection() {
   const { preference, setPreference } = useThemePreference();
-  const tintColor = useThemeColor({}, 'tint');
-  // 選択中のボタンはtintColorを背景に敷くため、文字色は背景色(ライト/ダークで反転する色)を使い
-  // コントラストを確保する
-  const selectedTextColor = useThemeColor({}, 'background');
 
   return (
     <ThemedView style={styles.section}>
       <ThemedText type="subtitle" style={styles.sectionTitle}>
         外観
       </ThemedText>
-      <ThemedView style={styles.themeOptionsRow}>
-        {THEME_OPTIONS.map((option) => {
-          const isSelected = preference === option.value;
-          return (
-            <Pressable
-              key={option.value}
-              onPress={() => setPreference(option.value)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: isSelected }}
-              style={[
-                styles.themeOptionButton,
-                { borderColor: tintColor },
-                isSelected && { backgroundColor: tintColor },
-              ]}
-            >
-              <ThemedText
-                style={[
-                  styles.themeOptionText,
-                  isSelected ? { color: selectedTextColor } : { color: tintColor },
-                ]}
-              >
-                {option.label}
-              </ThemedText>
-            </Pressable>
-          );
-        })}
-      </ThemedView>
+      <SegmentedOptionSelector
+        options={THEME_OPTIONS}
+        selectedValue={preference}
+        onChange={setPreference}
+      />
     </ThemedView>
   );
 }
@@ -102,43 +77,17 @@ const CALENDAR_LAYOUT_OPTIONS: { value: CalendarLayoutPreference; label: string 
 // 無料ユーザーも利用可能(Pro限定にはしない)
 function CalendarLayoutSection() {
   const { layout, setLayout } = useCalendarLayoutPreference();
-  const tintColor = useThemeColor({}, 'tint');
-  // 選択中のボタンはtintColorを背景に敷くため、文字色は背景色(ライト/ダークで反転する色)を使い
-  // コントラストを確保する(AppearanceSectionと同じ配色方針)
-  const selectedTextColor = useThemeColor({}, 'background');
 
   return (
     <ThemedView style={styles.section}>
       <ThemedText type="subtitle" style={styles.sectionTitle}>
         カレンダー表示レイアウト
       </ThemedText>
-      <ThemedView style={styles.themeOptionsRow}>
-        {CALENDAR_LAYOUT_OPTIONS.map((option) => {
-          const isSelected = layout === option.value;
-          return (
-            <Pressable
-              key={option.value}
-              onPress={() => setLayout(option.value)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: isSelected }}
-              style={[
-                styles.themeOptionButton,
-                { borderColor: tintColor },
-                isSelected && { backgroundColor: tintColor },
-              ]}
-            >
-              <ThemedText
-                style={[
-                  styles.themeOptionText,
-                  isSelected ? { color: selectedTextColor } : { color: tintColor },
-                ]}
-              >
-                {option.label}
-              </ThemedText>
-            </Pressable>
-          );
-        })}
-      </ThemedView>
+      <SegmentedOptionSelector
+        options={CALENDAR_LAYOUT_OPTIONS}
+        selectedValue={layout}
+        onChange={setLayout}
+      />
     </ThemedView>
   );
 }
@@ -788,20 +737,6 @@ const styles = StyleSheet.create({
   },
   item: {
     marginBottom: 12,
-  },
-  themeOptionsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  themeOptionButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  themeOptionText: {
-    fontWeight: '600',
   },
   reminderToggleRow: {
     flexDirection: 'row',

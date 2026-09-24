@@ -12,6 +12,7 @@ components/
   haptic-tab.tsx                  タップ時に触覚フィードバックを伴うタブボタン
   onboarding.tsx                  初回起動時に表示する使い方説明のオンボーディング画面
   save-toast.tsx                  保存成功時などに一時的なフィードバックを表示するトースト(スナックバー)
+  segmented-option-selector.tsx   選択肢の中から1つだけ選ぶボタン列(設定画面の外観・カレンダー表示レイアウトなど)
   tab-screen-container.tsx        タブ画面共通のルートコンテナ(セーフエリア上端の余白を自動加算)
   themed-text.tsx                 ライト/ダークテーマに対応したTextコンポーネント
   themed-view.tsx                 ライト/ダークテーマに対応したViewコンポーネント
