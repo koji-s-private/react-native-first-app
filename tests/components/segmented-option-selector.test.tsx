@@ -59,7 +59,11 @@ describe('SegmentedOptionSelector', () => {
 
   it('marks no option as selected when selectedValue does not match any option (異常系: 選択肢に存在しない値)', () => {
     render(
-      <SegmentedOptionSelector options={OPTIONS} selectedValue="not-in-options" onChange={jest.fn()} />,
+      <SegmentedOptionSelector
+        options={OPTIONS}
+        selectedValue="not-in-options"
+        onChange={jest.fn()}
+      />,
     );
 
     for (const option of OPTIONS) {
