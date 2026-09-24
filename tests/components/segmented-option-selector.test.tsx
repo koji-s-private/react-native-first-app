@@ -50,4 +50,22 @@ describe('SegmentedOptionSelector', () => {
 
     expect(onChange).toHaveBeenCalledWith('a');
   });
+
+  it('renders no buttons when options is an empty array (境界値: 空配列)', () => {
+    render(<SegmentedOptionSelector options={[]} selectedValue="a" onChange={jest.fn()} />);
+
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('marks no option as selected when selectedValue does not match any option (異常系: 選択肢に存在しない値)', () => {
+    render(
+      <SegmentedOptionSelector options={OPTIONS} selectedValue="not-in-options" onChange={jest.fn()} />,
+    );
+
+    for (const option of OPTIONS) {
+      expect(screen.getByRole('button', { name: option.label }).props.accessibilityState).toEqual(
+        expect.objectContaining({ selected: false }),
+      );
+    }
+  });
 });
