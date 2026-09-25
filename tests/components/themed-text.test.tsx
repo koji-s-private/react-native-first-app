@@ -3,7 +3,7 @@ import React from 'react';
 import { StyleSheet, useColorScheme } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { Colors } from '@/constants/theme';
+import { Colors, Fonts } from '@/constants/theme';
 
 // jest-expo(react-native)のオートモックされた`useColorScheme`(常に'light'を返す)を
 // 直接上書きすることでライト/ダークを切り替える(tests/app/index.test.tsxと同じ手法)
@@ -57,11 +57,14 @@ describe('ThemedText', () => {
   });
 
   it.each([
-    ['default', { fontSize: 16, lineHeight: 24 }],
-    ['defaultSemiBold', { fontSize: 16, lineHeight: 24, fontWeight: '600' }],
-    ['title', { fontSize: 32, fontWeight: 'bold', lineHeight: 32 }],
-    ['subtitle', { fontSize: 20, fontWeight: 'bold' }],
-    ['link', { lineHeight: 30, fontSize: 16, color: Colors.light.link }],
+    ['default', { fontSize: 16, lineHeight: 24, fontFamily: Fonts.sans }],
+    [
+      'defaultSemiBold',
+      { fontSize: 16, lineHeight: 24, fontWeight: '600', fontFamily: Fonts.sans },
+    ],
+    ['title', { fontSize: 32, fontWeight: 'bold', lineHeight: 32, fontFamily: Fonts.sans }],
+    ['subtitle', { fontSize: 20, fontWeight: 'bold', fontFamily: Fonts.sans }],
+    ['link', { lineHeight: 30, fontSize: 16, color: Colors.light.link, fontFamily: Fonts.sans }],
   ] as const)('applies the expected style for type="%s"', (type, expectedStyle) => {
     render(<ThemedText type={type}>本文</ThemedText>);
 
