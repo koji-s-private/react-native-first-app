@@ -540,7 +540,10 @@ describe('DayEntriesScreen', () => {
       render(<DayEntriesScreen />);
 
       expect(await screen.findByText('壊れていない日記')).toBeTruthy();
-      expect(screen.getByTestId('data-integrity-toast')).toBeTruthy();
+      const dataIntegrityToast = screen.getByTestId('data-integrity-toast');
+      expect(dataIntegrityToast).toBeTruthy();
+      // 保存成功トースト(緑色)と誤認しないよう、警告色(variant="warning")で表示されることを確認する
+      expect(StyleSheet.flatten(dataIntegrityToast.props.style).backgroundColor).toBe('#e65100');
       expect(screen.getByText(buildDiaryPartialCorruptionMessage(1))).toBeTruthy();
     });
   });
