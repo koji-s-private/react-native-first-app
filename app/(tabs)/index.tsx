@@ -952,6 +952,7 @@ export default function HomeScreen() {
               message={corruptionToastMessage}
               onHide={handleHideCorruptionToast}
               testID="data-integrity-toast"
+              variant="warning"
             />
           ) : null}
 

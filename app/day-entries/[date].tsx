@@ -353,6 +353,7 @@ export default function DayEntriesScreen() {
           message={corruptionToastMessage}
           onHide={handleHideCorruptionToast}
           testID="data-integrity-toast"
+          variant="warning"
         />
       ) : null}
       {pendingDeletedEntries.length > 0 ? (
