@@ -31,7 +31,9 @@ import { useThemeColor } from '@/hooks/use-theme-color';
 import { buildDiaryExportFileName, serializeDiaryEntriesForExport } from '@/utils/diary-export';
 import { parseDiaryEntriesForImport } from '@/utils/diary-import';
 import {
+  buildDiaryPartialCorruptionMessage,
   clearAllDiaryEntries,
+  DIARY_LOAD_ERROR_MESSAGE,
   getAllDiaryEntries,
   saveDiaryEntry,
   type DiaryEntry,
@@ -484,6 +486,9 @@ function downloadOnWeb(fileName: string, content: string): void {
 // 保存・共有できるようにする操作導線。端末紛失・機種変更等でのデータ消失に備えたバックアップ手段
 function ExportDiaryDataButton() {
   const [isExporting, setIsExporting] = useState(false);
+  // Alertの「再試行」からhandleExport自身を呼べるようにするための参照。useCallbackの
+  // 依存配列に自身を含めずに済むよう、常に最新の関数をここへ同期させておく
+  const handleExportRef = useRef<() => Promise<void>>(async () => {});
 
   const handleExport = useCallback(async () => {
     setIsExporting(true);
@@ -491,16 +496,20 @@ function ExportDiaryDataButton() {
       // entries.length === 0だけでは「本当に0件」か「読み込み失敗」かを区別できないため、
       // onErrorで検知してメッセージを出し分ける
       let hasLoadError = false;
+      let partialCorruptionCount = 0;
       const entries = await getAllDiaryEntries({
         onError: () => {
           hasLoadError = true;
         },
+        onPartialCorruption: (invalidCount) => {
+          partialCorruptionCount = invalidCount;
+        },
       });
       if (hasLoadError) {
-        Alert.alert(
-          '日記データを読み込めませんでした',
-          'エクスポートを完了できませんでした。アプリを再起動しても解決しない場合は端末の復元設定をご確認ください。',
-        );
+        Alert.alert('日記データを読み込めませんでした', DIARY_LOAD_ERROR_MESSAGE, [
+          { text: 'キャンセル', style: 'cancel' },
+          { text: '再試行', onPress: () => void handleExportRef.current() },
+        ]);
         return;
       }
       if (entries.length === 0) {
@@ -512,11 +521,20 @@ function ExportDiaryDataButton() {
         return;
       }
 
+      // 破損分は成功分のみで続行しつつ、欠落があったことを後続の成功通知に含める
+      const partialCorruptionNotice =
+        partialCorruptionCount > 0
+          ? `${buildDiaryPartialCorruptionMessage(partialCorruptionCount)}。それ以外のデータは書き出せました。`
+          : null;
+
       const fileName = buildDiaryExportFileName();
       const content = serializeDiaryEntriesForExport(entries);
 
       if (Platform.OS === 'web') {
         downloadOnWeb(fileName, content);
+        if (partialCorruptionNotice) {
+          Alert.alert('エクスポートが完了しました', partialCorruptionNotice);
+        }
         return;
       }
 
@@ -540,12 +558,19 @@ function ExportDiaryDataButton() {
         dialogTitle: '日記データをエクスポート',
         UTI: 'public.json',
       });
+      if (partialCorruptionNotice) {
+        Alert.alert('エクスポートが完了しました', partialCorruptionNotice);
+      }
     } catch {
       Alert.alert('エクスポートに失敗しました', 'もう一度お試しください。');
     } finally {
       setIsExporting(false);
     }
   }, []);
+
+  useEffect(() => {
+    handleExportRef.current = handleExport;
+  }, [handleExport]);
 
   return (
     <Pressable

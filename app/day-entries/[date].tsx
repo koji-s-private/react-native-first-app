@@ -19,7 +19,9 @@ import {
 } from '@/utils/diary-date';
 import { DIARY_DAY_ENTRIES_NEW_ENTRY_DRAFT_STORAGE_KEY_PREFIX } from '@/utils/diary-draft-storage';
 import {
+  buildDiaryPartialCorruptionMessage,
   deleteDiaryEntry,
+  DIARY_LOAD_ERROR_MESSAGE,
   getAllDiaryEntries,
   saveDiaryEntry,
   type DiaryEntry,
@@ -28,9 +30,6 @@ import {
 const COPY_SUCCESS_MESSAGE = 'コピーしました';
 const EMPTY_STATE_MESSAGE = 'この日の日記はまだありません';
 const DELETE_UNDO_DELAY_MS = 5000;
-// 「日記が無い」(EMPTY_STATE_MESSAGE)と読み込み失敗を区別して表示するためのメッセージ
-const LOAD_ERROR_MESSAGE =
-  '日記データを読み込めませんでした。アプリを再起動しても解決しない場合は端末の復元設定をご確認ください。';
 
 function sortEntriesByCreatedAt(entries: DiaryEntry[]): DiaryEntry[] {
   return [...entries].sort((a, b) => {
@@ -50,6 +49,7 @@ export default function DayEntriesScreen() {
   const [hasLoadedEntries, setHasLoadedEntries] = useState(false);
   const [hasLoadError, setHasLoadError] = useState(false);
   const [copyToastMessage, setCopyToastMessage] = useState<string | null>(null);
+  const [corruptionToastMessage, setCorruptionToastMessage] = useState<string | null>(null);
   const [pendingDeletedEntries, setPendingDeletedEntries] = useState<DiaryEntry[]>([]);
   const [isRestoringDeletedEntries, setIsRestoringDeletedEntries] = useState(false);
   const [hasUndoError, setHasUndoError] = useState(false);
@@ -59,6 +59,9 @@ export default function DayEntriesScreen() {
   const isMountedRef = useRef(true);
   const activeDateRef = useRef(date);
   const previousDateRef = useRef(date);
+  // loadEntriesの呼び出し順序を追跡し、後発の呼び出しより先に完了した古い呼び出しの結果で
+  // stateを上書きしないようにする(日付切り替え・連続フォーカス時の競合対策)
+  const loadRequestIdRef = useRef(0);
   activeDateRef.current = date;
   const [isComposerOpen, setIsComposerOpen] = useState(false);
 
@@ -107,6 +110,7 @@ export default function DayEntriesScreen() {
   }, [navigation, date, tintColor, handleOpenComposer]);
 
   const loadEntries = useCallback(async () => {
+    const requestId = ++loadRequestIdRef.current;
     if (!date) {
       setEntries([]);
       setHasLoadError(false);
@@ -114,11 +118,19 @@ export default function DayEntriesScreen() {
       return;
     }
     let loadFailed = false;
+    let partialCorruptionCount = 0;
     const allEntries = await getAllDiaryEntries({
       onError: () => {
         loadFailed = true;
       },
+      onPartialCorruption: (invalidCount) => {
+        partialCorruptionCount = invalidCount;
+      },
     });
+    // 完了時点で自分より新しいリクエストが既に発火していれば、この結果は古いため反映しない
+    if (loadRequestIdRef.current !== requestId) {
+      return;
+    }
     setEntries(
       sortEntriesByCreatedAt(
         allEntries.filter((entry) => toDateKey(new Date(entry.createdAt)) === date),
@@ -126,6 +138,9 @@ export default function DayEntriesScreen() {
     );
     setHasLoadError(loadFailed);
     setHasLoadedEntries(true);
+    if (partialCorruptionCount > 0) {
+      setCorruptionToastMessage(buildDiaryPartialCorruptionMessage(partialCorruptionCount));
+    }
   }, [date]);
 
   // 編集画面から戻ってきた際にも最新の内容を反映できるよう、フォーカスが戻るたびに読み直す
@@ -170,6 +185,10 @@ export default function DayEntriesScreen() {
 
   const handleHideCopyToast = useCallback(() => {
     setCopyToastMessage(null);
+  }, []);
+
+  const handleHideCorruptionToast = useCallback(() => {
+    setCorruptionToastMessage(null);
   }, []);
 
   const handleHideDeleteUndoToast = useCallback(() => {
@@ -300,21 +319,42 @@ export default function DayEntriesScreen() {
       hasLoadedEntries ? (
         <ThemedView style={styles.emptyState}>
           {hasLoadError ? (
-            <ThemedText style={[styles.emptyStateText, { color: errorColor }]}>
-              {LOAD_ERROR_MESSAGE}
-            </ThemedText>
+            // emptyStateTextのopacityはコントラストを下げるため、エラー表示には適用しない
+            <>
+              <ThemedText style={[styles.emptyStateErrorText, { color: errorColor }]}>
+                {DIARY_LOAD_ERROR_MESSAGE}
+              </ThemedText>
+              <Pressable
+                onPress={loadEntries}
+                style={[styles.retryButton, { borderColor: tintColor }]}
+                accessibilityRole="button"
+                accessibilityLabel="再試行"
+              >
+                <ThemedText style={[styles.retryButtonText, { color: tintColor }]}>
+                  再試行
+                </ThemedText>
+              </Pressable>
+            </>
           ) : (
             <ThemedText style={styles.emptyStateText}>{EMPTY_STATE_MESSAGE}</ThemedText>
           )}
         </ThemedView>
       ) : null,
-    [hasLoadedEntries, hasLoadError, errorColor],
+    [hasLoadedEntries, hasLoadError, errorColor, tintColor, loadEntries],
   );
 
   return (
     <ThemedView style={styles.container}>
       {copyToastMessage ? (
         <SaveToast message={copyToastMessage} onHide={handleHideCopyToast} testID="copy-toast" />
+      ) : null}
+      {corruptionToastMessage ? (
+        <SaveToast
+          message={corruptionToastMessage}
+          onHide={handleHideCorruptionToast}
+          testID="data-integrity-toast"
+          variant="warning"
+        />
       ) : null}
       {pendingDeletedEntries.length > 0 ? (
         <SaveToast
@@ -408,12 +448,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 32,
+    gap: 12,
   },
   emptyStateText: {
     fontSize: 16,
     fontWeight: '600',
     opacity: 0.7,
     textAlign: 'center',
+  },
+  // エラー表示はコントラスト確保のためemptyStateTextのopacityを継承しない
+  emptyStateErrorText: {
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  retryButton: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+  },
+  retryButtonText: {
+    fontWeight: '600',
   },
   entry: {
     gap: 4,

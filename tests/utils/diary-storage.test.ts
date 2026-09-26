@@ -470,6 +470,43 @@ describe('getAllDiaryEntries', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it('notifies the caller-supplied onPartialCorruption callback with the invalid and total entry counts when some entries are corrupted (正常系: onPartialCorruptionコールバック)', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    await seedDiaryEntry(sampleEntries[0]);
+    await AsyncStorage.setItem(buildDiaryEntryKey('broken'), 'not-valid-json{{{');
+    const onPartialCorruption = jest.fn();
+
+    const result = await getAllDiaryEntries({ onPartialCorruption });
+
+    expect(result).toEqual([sampleEntries[0]]);
+    expect(onPartialCorruption).toHaveBeenCalledTimes(1);
+    expect(onPartialCorruption).toHaveBeenCalledWith(1, 2);
+  });
+
+  it('does not call onPartialCorruption when all entries are valid (正常系: onPartialCorruptionが呼ばれないこと)', async () => {
+    for (const entry of sampleEntries) {
+      await seedDiaryEntry(entry);
+    }
+    const onPartialCorruption = jest.fn();
+
+    await getAllDiaryEntries({ onPartialCorruption });
+
+    expect(onPartialCorruption).not.toHaveBeenCalled();
+  });
+
+  it('calls only onError, not onPartialCorruption, when the entire load fails (異常系: 全滅時はonPartialCorruptionを呼ばない)', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    jest.spyOn(AsyncStorage, 'getAllKeys').mockRejectedValueOnce(new Error('storage read error'));
+    const onError = jest.fn();
+    const onPartialCorruption = jest.fn();
+
+    const result = await getAllDiaryEntries({ onError, onPartialCorruption });
+
+    expect(result).toEqual([]);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onPartialCorruption).not.toHaveBeenCalled();
+  });
+
   describe('暗号鍵の取得失敗', () => {
     const getItemAsyncMock = SecureStore.getItemAsync as jest.Mock;
     let originalGetItemAsync: ReturnType<typeof getItemAsyncMock.getMockImplementation>;

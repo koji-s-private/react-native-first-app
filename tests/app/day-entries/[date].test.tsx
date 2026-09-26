@@ -18,7 +18,12 @@ import {
   getOrCreateEncryptionKey,
   isEncryptedPayload,
 } from '@/utils/diary-encryption';
-import { buildDiaryEntryKey, type DiaryEntry } from '@/utils/diary-storage';
+import {
+  buildDiaryEntryKey,
+  buildDiaryPartialCorruptionMessage,
+  DIARY_LOAD_ERROR_MESSAGE,
+  type DiaryEntry,
+} from '@/utils/diary-storage';
 import { BODY_MAX_LENGTH } from '@/utils/diary-text';
 
 // jest-expoのオートモックだと`setStringAsync`が実際のPromiseを返さず呼び出し引数の検証や
@@ -157,8 +162,7 @@ const CLIPBOARD_COPY_LABEL = '日記本文をコピー';
 const EDIT_BUTTON_LABEL = 'この日記を編集';
 const DELETE_BUTTON_LABEL = 'この日記を削除';
 const EMPTY_STATE_MESSAGE = 'この日の日記はまだありません';
-const LOAD_ERROR_MESSAGE =
-  '日記データを読み込めませんでした。アプリを再起動しても解決しない場合は端末の復元設定をご確認ください。';
+const LOAD_ERROR_MESSAGE = DIARY_LOAD_ERROR_MESSAGE;
 
 // 新規登録モーダル(components/diary-entry-composer-modal.tsx)関連のテストで使う定数。
 // 下書きの自動保存キー接頭辞はホーム画面(diary-new-entry-draft-)と衝突しないよう
@@ -492,6 +496,96 @@ describe('DayEntriesScreen', () => {
       expect(await screen.findByText('エラー中に書いた日記')).toBeTruthy();
       expect(screen.queryByText(LOAD_ERROR_MESSAGE)).toBeNull();
     }, 15000); // 暗号化を伴う保存のwaitFor(5000ms)にマージンを持たせる
+
+    // opacityを継承するemptyStateTextのままだとエラー表示のコントラストが下がってしまうため、
+    // 専用スタイル(emptyStateErrorText)を使い分けていることを確認する
+    it('renders the load-error message without the dimmed opacity applied to the plain empty-state message, to preserve contrast (視認性)', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'getAllKeys').mockRejectedValueOnce(new Error('storage failure'));
+
+      render(<DayEntriesScreen />);
+      const errorMessage = await screen.findByText(LOAD_ERROR_MESSAGE);
+      expect(StyleSheet.flatten(errorMessage.props.style).opacity).toBeUndefined();
+
+      act(() => {
+        triggerRefocus();
+      });
+      const emptyMessage = await screen.findByText(EMPTY_STATE_MESSAGE);
+      expect(StyleSheet.flatten(emptyMessage.props.style).opacity).toBe(0.7);
+    });
+
+    it('reloads entries when the "再試行" button on the load-error message is pressed directly (not just via refocus)', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'getAllKeys').mockRejectedValueOnce(new Error('storage failure'));
+      await seedDiaryEntries([
+        { id: '1', text: '再試行ボタンで表示される日記', createdAt: localIso(DATE_KEY, 9, 0) },
+      ]);
+
+      render(<DayEntriesScreen />);
+      expect(await screen.findByText(LOAD_ERROR_MESSAGE)).toBeTruthy();
+
+      fireEvent.press(screen.getByRole('button', { name: '再試行' }));
+
+      expect(await screen.findByText('再試行ボタンで表示される日記')).toBeTruthy();
+      expect(screen.queryByText(LOAD_ERROR_MESSAGE)).toBeNull();
+    });
+
+    it('shows a data-integrity toast with the corrupted entry count when only some stored entries for the date are corrupted (境界値: 一部破損)', async () => {
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+      await seedDiaryEntries([
+        { id: '1', text: '壊れていない日記', createdAt: localIso(DATE_KEY, 9, 0) },
+      ]);
+      await AsyncStorage.setItem(buildDiaryEntryKey('broken'), 'not valid json');
+
+      render(<DayEntriesScreen />);
+
+      expect(await screen.findByText('壊れていない日記')).toBeTruthy();
+      const dataIntegrityToast = screen.getByTestId('data-integrity-toast');
+      expect(dataIntegrityToast).toBeTruthy();
+      // 保存成功トースト(緑色)と誤認しないよう、警告色(variant="warning")で表示されることを確認する
+      expect(StyleSheet.flatten(dataIntegrityToast.props.style).backgroundColor).toBe('#e65100');
+      expect(screen.getByText(buildDiaryPartialCorruptionMessage(1))).toBeTruthy();
+    });
+  });
+
+  describe('非同期読み込みの競合防止(loadRequestIdRef)', () => {
+    // 日付変更・連続フォーカス等でloadEntriesが多重に走った場合、後から開始したリクエストより
+    // 先に発火した(=古い)リクエストが後から完了しても、その結果でstateを上書きしてはならない
+    it('does not let a slower, earlier request overwrite the state already set by a faster, later request (境界値: 世代管理)', async () => {
+      await seedDiaryEntries([
+        { id: '1', text: '最初から表示されている日記', createdAt: localIso(DATE_KEY, 9, 0) },
+      ]);
+
+      let resolveSlowFirstLoad: (keys: string[]) => void = () => {};
+      jest.spyOn(AsyncStorage, 'getAllKeys').mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSlowFirstLoad = resolve;
+          }),
+      );
+
+      render(<DayEntriesScreen />);
+      await waitFor(() => expect(AsyncStorage.getAllKeys).toHaveBeenCalledTimes(1));
+
+      // 1回目の読み込みが完了する前に、2回目(より新しい)の読み込みを発火させる。
+      // 2回目は通常のgetAllKeysの実装のまま即座に完了する
+      await seedDiaryEntries([
+        { id: '2', text: '再フォーカスで追加された日記', createdAt: localIso(DATE_KEY, 20, 0) },
+      ]);
+      act(() => {
+        triggerRefocus();
+      });
+      expect(await screen.findByText('再フォーカスで追加された日記')).toBeTruthy();
+
+      // 1回目の読み込みが、2回目より後に(空の結果で)完了しても、2回目の結果を上書きしない
+      await act(async () => {
+        resolveSlowFirstLoad([]);
+      });
+
+      expect(screen.getByText('最初から表示されている日記')).toBeTruthy();
+      expect(screen.getByText('再フォーカスで追加された日記')).toBeTruthy();
+      expect(screen.queryByText(EMPTY_STATE_MESSAGE)).toBeNull();
+    });
   });
 
   describe('コピー', () => {

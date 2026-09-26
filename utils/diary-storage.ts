@@ -107,6 +107,21 @@ export async function clearAllDiaryEntries(): Promise<void> {
   await AsyncStorage.removeItem(DIARY_ENTRIES_STORAGE_KEY);
 }
 
+/**
+ * 全件読み込みに失敗した際、画面に表示する案内文言。読み込みエラーを表示する画面すべてで
+ * 文言を統一するため、ここに集約する。
+ */
+export const DIARY_LOAD_ERROR_MESSAGE =
+  '日記データを読み込めませんでした。再試行しても解決しない場合は、アプリまたは端末を再起動してください。';
+
+/**
+ * 一部のエントリだけ破損してスキップされた際、ユーザーへ伝える案内文言を組み立てる。
+ * 読み込み・エクスポートいずれの画面からも呼べるよう、件数以外の表現を共通化する。
+ */
+export function buildDiaryPartialCorruptionMessage(invalidCount: number): string {
+  return `${invalidCount}件の日記データが破損していたため読み込めませんでした`;
+}
+
 export type GetAllDiaryEntriesOptions = {
   /**
    * 暗号鍵の取得失敗やストレージ全体の読み込み失敗など、全件に影響する例外が発生した際に呼ばれる。
@@ -115,6 +130,11 @@ export type GetAllDiaryEntriesOptions = {
    * 呼び出し元(UI)で区別したい場合にこれを使う。
    */
   onError?: (error: unknown) => void;
+  /**
+   * 一部のエントリだけ復号・パース失敗などで破損しており、スキップされた場合に呼ばれる。
+   * 全件失敗時専用のonErrorとは呼び出し条件が異なり、こちらは残りのエントリの取得自体は成功している。
+   */
+  onPartialCorruption?: (invalidCount: number, totalCount: number) => void;
 };
 
 /**
@@ -178,10 +198,11 @@ export async function getAllDiaryEntries(
     }
 
     if (invalidCount > 0) {
-      // サイレントにスキップするとデータ欠落に誰も気づけないため、開発者向けにログを残す
+      // サイレントにスキップするとデータ欠落に誰も気づけないため、開発者向けログに加えユーザーにも通知する
       console.warn(
         `getAllDiaryEntries: ${invalidCount}件の不正なエントリをスキップしました(元の件数: ${totalCount}件, 有効な件数: ${validEntries.length}件)`,
       );
+      options?.onPartialCorruption?.(invalidCount, totalCount);
     }
 
     // createdAtの降順(新しい順)。同じcreatedAtが重複する場合はidの降順でtie-breakし、

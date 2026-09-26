@@ -6,6 +6,15 @@ import { ThemedText } from '@/components/themed-text';
 // 自動非表示までの表示時間(ミリ秒)
 const AUTO_HIDE_DELAY_MS = 2500;
 
+export type SaveToastVariant = 'success' | 'warning';
+
+// 成功(保存・コピー等)とは視覚的に区別する必要がある警告(データ破損通知等)を
+// 同じトーストの背景色で誤認させないよう、variantごとに色を分ける
+const VARIANT_BACKGROUND_COLORS: Record<SaveToastVariant, string> = {
+  success: '#2e7d32',
+  warning: '#e65100',
+};
+
 export type SaveToastProps = {
   message: string;
   onHide: () => void;
@@ -13,6 +22,7 @@ export type SaveToastProps = {
   actionLabel?: string;
   onAction?: () => void;
   autoHideDelayMs?: number | null;
+  variant?: SaveToastVariant;
 };
 
 // 保存成功時などのフィードバックを表示する自動非表示トースト。
@@ -24,6 +34,7 @@ export function SaveToast({
   actionLabel,
   onAction,
   autoHideDelayMs = AUTO_HIDE_DELAY_MS,
+  variant = 'success',
 }: SaveToastProps) {
   useEffect(() => {
     if (autoHideDelayMs === null) {
@@ -43,7 +54,7 @@ export function SaveToast({
 
   return (
     <View
-      style={styles.container}
+      style={[styles.container, { backgroundColor: VARIANT_BACKGROUND_COLORS[variant] }]}
       accessibilityRole="alert"
       accessibilityLiveRegion="polite"
       testID={testID}
@@ -73,7 +84,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
-    backgroundColor: '#2e7d32',
     borderRadius: 8,
     paddingVertical: 6,
     paddingHorizontal: 12,

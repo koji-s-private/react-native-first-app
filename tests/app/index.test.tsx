@@ -28,7 +28,12 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { decryptText, encryptText, getOrCreateEncryptionKey } from '@/utils/diary-encryption';
-import { buildDiaryEntryKey, type DiaryEntry } from '@/utils/diary-storage';
+import {
+  buildDiaryEntryKey,
+  buildDiaryPartialCorruptionMessage,
+  DIARY_LOAD_ERROR_MESSAGE,
+  type DiaryEntry,
+} from '@/utils/diary-storage';
 import { ACCESSIBILITY_LABEL_TEXT_MAX_LENGTH } from '@/utils/diary-text';
 import {
   CALENDAR_LAYOUT_PREFERENCE_STORAGE_KEY,
@@ -191,8 +196,7 @@ const CLOSE_BUTTON_TEXT = '閉じる';
 // 日記が0件のときにカレンダーの上に表示される案内メッセージ
 const EMPTY_STATE_TEXT = 'まだ日記がありません。最初の日記を書いてみましょう。';
 // 全件読み込みに失敗したときにカレンダーの上に表示されるエラーメッセージ(0件と区別するためのもの)
-const LOAD_ERROR_TEXT =
-  '日記データを読み込めませんでした。アプリを再起動しても解決しない場合は端末の復元設定をご確認ください。';
+const LOAD_ERROR_TEXT = DIARY_LOAD_ERROR_MESSAGE;
 const KEYBOARD_AVOIDING_VIEW_TEST_ID = 'keyboard-avoiding-view';
 
 // `queryAllByRole('button')`は常に保存ボタンを含む。
@@ -2138,6 +2142,70 @@ describe('HomeScreen', () => {
 
       await waitFor(() => expect(screen.queryByText(LOAD_ERROR_TEXT)).toBeNull());
       expect(screen.getByText(EMPTY_STATE_TEXT)).toBeTruthy();
+    });
+
+    // opacityを継承するemptyStateTextのままだとエラー表示のコントラストが下がってしまうため、
+    // 専用スタイル(emptyStateErrorText)を使い分けていることを確認する
+    it('renders the load-error message without the dimmed opacity applied to the plain empty-state message, to preserve contrast (視認性)', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'getItem').mockResolvedValueOnce('not valid json');
+
+      render(<HomeScreen />);
+      const errorMessage = await screen.findByText(LOAD_ERROR_TEXT);
+      expect(StyleSheet.flatten(errorMessage.props.style).opacity).toBeUndefined();
+
+      // 実ストレージへ再試行すると通常の空状態メッセージに切り替わり、そちらはopacity 0.7で
+      // 意図的に見た目のコントラストを落としている(エラー表示との違いの比較)
+      fireEvent.press(screen.getByRole('button', { name: '再試行' }));
+      const emptyMessage = await screen.findByText(EMPTY_STATE_TEXT);
+      expect(StyleSheet.flatten(emptyMessage.props.style).opacity).toBe(0.7);
+    });
+
+    it('reloads the diary entries when the "再試行" button on the load-error message is pressed', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(AsyncStorage, 'getItem').mockResolvedValueOnce('not valid json');
+
+      render(<HomeScreen />);
+      expect(await screen.findByText(LOAD_ERROR_TEXT)).toBeTruthy();
+      const getItemCallCountAfterError = (AsyncStorage.getItem as jest.Mock).mock.calls.length;
+
+      // 実ストレージ自体は壊れていないため、再試行ボタンを押すとloadEntriesが再実行されて成功し、
+      // エラー専用メッセージは通常の空状態メッセージへ切り替わる
+      fireEvent.press(screen.getByRole('button', { name: '再試行' }));
+
+      await waitFor(() =>
+        expect((AsyncStorage.getItem as jest.Mock).mock.calls.length).toBeGreaterThan(
+          getItemCallCountAfterError,
+        ),
+      );
+      await waitFor(() => expect(screen.queryByText(LOAD_ERROR_TEXT)).toBeNull());
+      expect(screen.getByText(EMPTY_STATE_TEXT)).toBeTruthy();
+    });
+
+    it('shows a data-integrity toast with the corrupted entry count when only some stored entries are corrupted, while still showing the valid ones (境界値: 一部破損)', async () => {
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const now = new Date();
+      const { dayWithEntry } = pickTestDays(now);
+      const key = await getOrCreateEncryptionKey();
+      await AsyncStorage.setItem(
+        buildDiaryEntryKey('1'),
+        encryptText(
+          JSON.stringify({ id: '1', text: '正常な日記', createdAt: isoAt(now, dayWithEntry) }),
+          key,
+        ),
+      );
+      await AsyncStorage.setItem(buildDiaryEntryKey('broken'), 'not valid json');
+
+      render(<HomeScreen />);
+      await waitForInitialLoad();
+
+      const dataIntegrityToast = screen.getByTestId('data-integrity-toast');
+      expect(dataIntegrityToast).toBeTruthy();
+      // 保存成功トースト(緑色)と誤認しないよう、警告色(variant="warning")で表示されることを確認する
+      expect(StyleSheet.flatten(dataIntegrityToast.props.style).backgroundColor).toBe('#e65100');
+      expect(screen.getByText(buildDiaryPartialCorruptionMessage(1))).toBeTruthy();
+      expect(queryCalendarDayButtonsWithEntry()).toHaveLength(1);
+      expect(screen.queryByText(LOAD_ERROR_TEXT)).toBeNull();
     });
   });
 

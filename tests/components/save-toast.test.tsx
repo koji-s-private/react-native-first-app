@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import React from 'react';
-import { AccessibilityInfo } from 'react-native';
+import { AccessibilityInfo, StyleSheet } from 'react-native';
 
 import { SaveToast } from '@/components/save-toast';
 
@@ -34,6 +34,22 @@ describe('SaveToast', () => {
     fireEvent.press(action);
 
     expect(onAction).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the success background color by default', () => {
+    render(<SaveToast message="保存しました" onHide={jest.fn()} />);
+
+    const toast = screen.getByTestId('save-toast');
+    expect(StyleSheet.flatten(toast.props.style).backgroundColor).toBe('#2e7d32');
+  });
+
+  it('uses a distinct warning background color when variant is "warning"', () => {
+    render(
+      <SaveToast message="一部の日記データが破損しています" onHide={jest.fn()} variant="warning" />,
+    );
+
+    const toast = screen.getByTestId('save-toast');
+    expect(StyleSheet.flatten(toast.props.style).backgroundColor).toBe('#e65100');
   });
 
   it('exposes accessibilityLiveRegion="polite" so screen readers announce the state change', () => {
