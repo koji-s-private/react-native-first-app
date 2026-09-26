@@ -54,7 +54,13 @@ import {
   truncateForAccessibilityLabel,
   truncateToBodyMaxLength,
 } from '@/utils/diary-text';
-import { getAllDiaryEntries, saveDiaryEntry, type DiaryEntry } from '@/utils/diary-storage';
+import {
+  buildDiaryPartialCorruptionMessage,
+  DIARY_LOAD_ERROR_MESSAGE,
+  getAllDiaryEntries,
+  saveDiaryEntry,
+  type DiaryEntry,
+} from '@/utils/diary-storage';
 
 // 週表示レイアウトの「今日」判定を再評価する間隔(ミリ秒)。タブ画面が保持され続けても
 // 日付をまたいだタイミングから1分以内には追従できるようにする
@@ -443,6 +449,9 @@ export default function HomeScreen() {
   const [draft, setDraft] = useState('');
   // 保存成功時に一時的に表示するトーストのメッセージ。nullの間は非表示
   const [saveToastMessage, setSaveToastMessage] = useState<string | null>(null);
+  // 一部エントリの破損を検知した際に一時的に表示するトーストのメッセージ。保存成功トーストとは
+  // 独立したstateにし、それぞれ別のSaveToastとして同時に表示できるようにする
+  const [corruptionToastMessage, setCorruptionToastMessage] = useState<string | null>(null);
   // 日記本文のキーワード検索用の入力値(composerの入力とは独立したstate)
   const [searchQuery, setSearchQuery] = useState('');
   // handleSaveの実行中かどうか・エラー内容。連打による重複保存を防ぐため、実行中は早期returnしボタンもdisabledにする
@@ -506,13 +515,20 @@ export default function HomeScreen() {
     // ここで個別にtry/catchする必要はない。読み込みエラーの有無はonErrorで受け取り、
     // 「日記0件」の空状態表示と区別する
     let loadFailed = false;
+    let partialCorruptionCount = 0;
     const loadedEntries = await getAllDiaryEntries({
       onError: () => {
         loadFailed = true;
       },
+      onPartialCorruption: (invalidCount) => {
+        partialCorruptionCount = invalidCount;
+      },
     });
     setEntries(loadedEntries);
     setHasLoadError(loadFailed);
+    if (partialCorruptionCount > 0) {
+      setCorruptionToastMessage(buildDiaryPartialCorruptionMessage(partialCorruptionCount));
+    }
     // 初回読み込み完了を示す(isLoadingは一方向にのみ遷移し、trueへ戻す処理は無い)
     setIsLoading(false);
   }, []);
@@ -650,6 +666,10 @@ export default function HomeScreen() {
   // 再レンダーのたびにタイマーが張り直され、トーストが仕様通りの時間で消えなくなる
   const handleHideSaveToast = useCallback(() => {
     setSaveToastMessage(null);
+  }, []);
+
+  const handleHideCorruptionToast = useCallback(() => {
+    setCorruptionToastMessage(null);
   }, []);
 
   // 日付ごとに日記をまとめる(カレンダーセルへの表示・タップ時の一覧表示の両方で利用する)
@@ -927,6 +947,14 @@ export default function HomeScreen() {
             日記
           </ThemedText>
 
+          {corruptionToastMessage ? (
+            <SaveToast
+              message={corruptionToastMessage}
+              onHide={handleHideCorruptionToast}
+              testID="data-integrity-toast"
+            />
+          ) : null}
+
           <ThemedView style={styles.composer}>
             <TextInput
               style={[styles.input, { color: textColor, borderColor: tintColor }]}
@@ -1074,11 +1102,22 @@ export default function HomeScreen() {
                   <ActivityIndicator color={tintColor} />
                 </ThemedView>
               ) : entries.length === 0 && hasLoadError ? (
-                // 読み込み失敗時は「日記が0件」と見た目上区別が付かなくなるため、専用のメッセージを表示する
+                // 読み込み失敗時は「日記が0件」と見た目上区別が付かなくなるため、専用のメッセージを表示する。
+                // emptyStateTextのopacityはコントラストを下げるため、エラー表示には適用しない
                 <ThemedView style={styles.emptyState}>
-                  <ThemedText style={[styles.emptyStateText, { color: errorColor }]}>
-                    日記データを読み込めませんでした。アプリを再起動しても解決しない場合は端末の復元設定をご確認ください。
+                  <ThemedText style={[styles.emptyStateErrorText, { color: errorColor }]}>
+                    {DIARY_LOAD_ERROR_MESSAGE}
                   </ThemedText>
+                  <Pressable
+                    onPress={loadEntries}
+                    style={[styles.retryButton, { borderColor: tintColor }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="再試行"
+                  >
+                    <ThemedText style={[styles.retryButtonText, { color: tintColor }]}>
+                      再試行
+                    </ThemedText>
+                  </Pressable>
                 </ThemedView>
               ) : entries.length === 0 ? (
                 // 日記が1件も無い場合、案内メッセージを表示する(カレンダー自体は書く導線として表示し続ける)
@@ -1398,9 +1437,23 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: 'center',
     paddingVertical: 4,
+    gap: 8,
   },
   emptyStateText: {
     opacity: 0.7,
+  },
+  // エラー表示はコントラスト確保のためemptyStateTextのopacityを継承しない
+  emptyStateErrorText: {
+    textAlign: 'center',
+  },
+  retryButton: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+  },
+  retryButtonText: {
+    fontWeight: '600',
   },
   calendarWrapper: {
     // 残りスペースをすべて使い切る外枠。日付グリッドの高さ計算もこの実測高さを基準にし、
