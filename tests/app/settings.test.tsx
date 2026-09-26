@@ -27,7 +27,9 @@ import {
 } from '@/contexts/theme-preference-context';
 import {
   buildDiaryEntryKey,
+  buildDiaryPartialCorruptionMessage,
   DIARY_ENTRIES_STORAGE_KEY,
+  DIARY_LOAD_ERROR_MESSAGE,
   getAllDiaryEntries,
 } from '@/utils/diary-storage';
 
@@ -659,7 +661,8 @@ describe('日記データをエクスポートボタン(データ管理セクシ
     await waitFor(() =>
       expect(Alert.alert).toHaveBeenCalledWith(
         '日記データを読み込めませんでした',
-        'エクスポートを完了できませんでした。アプリを再起動しても解決しない場合は端末の復元設定をご確認ください。',
+        DIARY_LOAD_ERROR_MESSAGE,
+        expect.any(Array),
       ),
     );
     expect(Alert.alert).not.toHaveBeenCalledWith(
@@ -669,6 +672,61 @@ describe('日記データをエクスポートボタン(データ管理セクシ
     expect(mockedFileSystem.__mockWrite).not.toHaveBeenCalled();
     expect(Sharing.isAvailableAsync).not.toHaveBeenCalled();
     expect(Sharing.shareAsync).not.toHaveBeenCalled();
+  });
+
+  it('retries the export via the "再試行" button in the load-error alert, and succeeds once the underlying data becomes readable (異常系からの再試行)', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, 'not valid json');
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(EXPORT_BUTTON_LABEL));
+    });
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        '日記データを読み込めませんでした',
+        DIARY_LOAD_ERROR_MESSAGE,
+        expect.any(Array),
+      ),
+    );
+
+    // 壊れていたレガシーデータを正常な内容に差し替え、再試行時には読み込めるようにする
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, sampleEntriesJson);
+    const [, , buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+    const retryButton = buttons.find((button: { text: string }) => button.text === '再試行');
+
+    await act(async () => {
+      await retryButton.onPress();
+    });
+
+    await waitFor(() => expect(mockedFileSystem.__mockWrite).toHaveBeenCalledTimes(1));
+    const [, writtenContent] = mockedFileSystem.__mockWrite.mock.calls[0];
+    expect(JSON.parse(writtenContent)).toEqual(JSON.parse(sampleEntriesJson));
+    await waitFor(() => expect(Sharing.shareAsync).toHaveBeenCalledTimes(1));
+  });
+
+  it('continues the export with the successfully loaded entries and reports the corrupted count in the completion alert when some entries are corrupted (境界値: 一部破損)', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    await AsyncStorage.setItem(DIARY_ENTRIES_STORAGE_KEY, sampleEntriesJson);
+    await AsyncStorage.setItem(buildDiaryEntryKey('broken'), 'not valid json');
+    render(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText(EXPORT_BUTTON_LABEL));
+    });
+
+    await waitFor(() => expect(mockedFileSystem.__mockWrite).toHaveBeenCalledTimes(1));
+    const [, writtenContent] = mockedFileSystem.__mockWrite.mock.calls[0];
+    expect(JSON.parse(writtenContent)).toEqual(JSON.parse(sampleEntriesJson));
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'エクスポートが完了しました',
+        `${buildDiaryPartialCorruptionMessage(1)}。それ以外のデータは書き出せました。`,
+      ),
+    );
   });
 
   it('writes the JSON file to the cache directory and opens the native share sheet when there is data (正常系)', async () => {
